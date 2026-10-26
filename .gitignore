@@ -1,0 +1,9 @@
+.env
+data/
+target/
+__pycache__/
+.venv/
+*.pyc
+.pytest_cache/
+/gateway/neermattam-gateway
+.DS_Store
