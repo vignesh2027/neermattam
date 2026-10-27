@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -11,6 +12,7 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"neermattam/gateway/internal/metrics"
@@ -22,6 +24,11 @@ type Perception struct {
 	client  *http.Client
 	timeout time.Duration
 	metrics *metrics.Set
+
+	// noStreamUntil holds a unix time before which /v1/measure/stream is
+	// assumed missing, so an old perception build costs one probe, not one
+	// extra upload per report.
+	noStreamUntil atomic.Int64
 }
 
 // NewPerception returns a perception client.
@@ -65,6 +72,48 @@ type Measurement struct {
 	Models           map[string]string  `json:"models"`
 	TimingsMs        map[string]float64 `json:"timings_ms"`
 	CostUSD          *float64           `json:"cost_usd"`
+	// Method is "wheel_geometry" (measured from a wheel of known size) or
+	// "model_estimate" (the scene model's visual estimate, wide sigma);
+	// null when the photo is unusable.
+	Method        *string        `json:"method"`
+	ModelEstimate *ModelEstimate `json:"model_estimate"`
+	AgentTrace    []AgentStep    `json:"agent_trace"`
+	// CapturedAt is the photo's EXIF DateTimeOriginal: RFC 3339 with a zone
+	// when the camera recorded one, otherwise local time without an offset.
+	CapturedAt *string `json:"captured_at"`
+	// CapturedAtSent is true when the response had a captured_at member,
+	// even null. Null then means the photo has no capture time.
+	CapturedAtSent bool `json:"-"`
+}
+
+// Methods perception reports.
+const (
+	MethodWheelGeometry = "wheel_geometry"
+	MethodModelEstimate = "model_estimate"
+)
+
+// MethodIs reports whether the measurement used the given method.
+func (m *Measurement) MethodIs(method string) bool {
+	return m != nil && m.Method != nil && *m.Method == method
+}
+
+// ModelEstimate is the scene model's own visual estimate of the depth.
+type ModelEstimate struct {
+	DepthCm      float64 `json:"depth_cm"`
+	DepthSigmaCm float64 `json:"depth_sigma_cm"`
+	Basis        string  `json:"basis"`
+	Model        string  `json:"model"`
+}
+
+// AgentStep is one model step in perception's verify-and-refine agent.
+type AgentStep struct {
+	Step      string `json:"step"`
+	Target    string `json:"target"`
+	Model     string `json:"model"`
+	Input     string `json:"input"`
+	Output    string `json:"output"`
+	Decision  string `json:"decision"`
+	LatencyMs int    `json:"latency_ms"`
 }
 
 // Upload is one file part.
@@ -83,8 +132,7 @@ type MeasureRequest struct {
 	HintDiameterCm *float64
 }
 
-// Measure sends a photo or video for measurement.
-func (p *Perception) Measure(ctx context.Context, req MeasureRequest) (*Measurement, error) {
+func measureBody(req MeasureRequest) (*bytes.Buffer, string, error) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	for _, u := range []*Upload{req.Image, req.Video} {
@@ -92,7 +140,7 @@ func (p *Perception) Measure(ctx context.Context, req MeasureRequest) (*Measurem
 			continue
 		}
 		if err := writeFile(w, u); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	if req.HintReference != "" {
@@ -102,18 +150,35 @@ func (p *Perception) Measure(ctx context.Context, req MeasureRequest) (*Measurem
 		_ = w.WriteField("hint_diameter_cm", strconv.FormatFloat(*req.HintDiameterCm, 'f', -1, 64))
 	}
 	if err := w.Close(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	raw, err := p.post(ctx, "/v1/measure", w.FormDataContentType(), &buf)
+	return &buf, w.FormDataContentType(), nil
+}
+
+// Measure sends a photo or video for measurement.
+func (p *Perception) Measure(ctx context.Context, req MeasureRequest) (*Measurement, error) {
+	body, ct, err := measureBody(req)
 	if err != nil {
 		return nil, err
 	}
+	raw, err := p.post(ctx, "/v1/measure", ct, body)
+	if err != nil {
+		return nil, err
+	}
+	return decodeMeasurement(raw)
+}
+
+func decodeMeasurement(raw []byte) (*Measurement, error) {
 	var m Measurement
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, fmt.Errorf("perception measure response: %w", err)
 	}
 	if m.Usable && (m.DepthCm == nil || m.DepthSigmaCm == nil) {
 		return nil, fmt.Errorf("perception said usable but sent no depth or sigma")
+	}
+	var probe map[string]json.RawMessage
+	if json.Unmarshal(raw, &probe) == nil {
+		_, m.CapturedAtSent = probe["captured_at"]
 	}
 	return &m, nil
 }
@@ -124,6 +189,12 @@ type Transcript struct {
 	Language   string `json:"language"`
 	PlaceText  string `json:"place_text"`
 	DepthWords string `json:"depth_words"`
+	// DepthCm and DepthSigmaCm are the model's reading of the spoken depth
+	// words, or null when no depth was spoken.
+	DepthCm      *float64 `json:"depth_cm"`
+	DepthSigmaCm *float64 `json:"depth_sigma_cm"`
+	Model        string   `json:"model"`
+	CostUSD      float64  `json:"cost_usd"`
 }
 
 // Transcribe sends a voice note.
@@ -168,6 +239,9 @@ func (p *Perception) Ready(ctx context.Context) error {
 }
 
 func writeFile(w *multipart.Writer, u *Upload) error {
+	if u.Field == "" {
+		return errors.New("upload has no field name")
+	}
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, u.Field, u.Filename))
 	h.Set("Content-Type", u.MIME)

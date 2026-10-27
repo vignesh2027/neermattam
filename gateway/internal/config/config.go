@@ -141,7 +141,7 @@ func fromLookup(lookup func(string) (string, bool)) (Config, error) {
 
 		EngineTimeout:     r.dur("ENGINE_TIMEOUT", 5*time.Second),
 		RouteTimeout:      r.dur("ROUTE_TIMEOUT", 20*time.Second),
-		PerceptionTimeout: r.dur("PERCEPTION_TIMEOUT", 90*time.Second),
+		PerceptionTimeout: r.dur("PERCEPTION_TIMEOUT", 180*time.Second),
 		WeatherTimeout:    r.dur("WEATHER_TIMEOUT", 4*time.Second),
 
 		MaxImageBytes:   r.int64("MAX_IMAGE_BYTES", 12<<20),

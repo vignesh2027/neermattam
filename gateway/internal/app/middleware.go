@@ -65,7 +65,7 @@ func (a *App) observe(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w}
 		if !isStream(r) {
-			_ = http.NewResponseController(sw).SetWriteDeadline(start.Add(3 * time.Minute))
+			_ = http.NewResponseController(sw).SetWriteDeadline(start.Add(4 * time.Minute))
 		}
 		next.ServeHTTP(sw, r)
 		route := r.Pattern

@@ -12,13 +12,20 @@
         <span class="step-n" aria-hidden="true">1</span>
         <div>
           <h3 id="media-label">Photo, short video or voice note</h3>
-          <p class="hint">Include a whole scooter, auto or car wheel, side on, where it meets the water. Videos up to {{.Limits.VideoSeconds}} seconds also measure how fast the water moves.</p>
+          <p class="hint">Include a whole scooter, auto or car wheel, side on, where it meets the water. Videos up to {{.Limits.VideoSeconds}} seconds also measure how fast the water moves. No photo? Say how deep it is, in Tamil or English.</p>
           <label class="drop" id="drop">
-            <input type="file" id="media" name="media" accept="image/jpeg,image/png,video/mp4,video/quicktime,audio/ogg,audio/wav,audio/mp4,audio/x-m4a,.m4a" aria-labelledby="media-label" aria-describedby="media-limits" required>
+            <input type="file" id="media" name="media" accept="image/jpeg,image/png,video/mp4,video/quicktime,audio/ogg,audio/wav,audio/mpeg,audio/mp4,audio/x-m4a,.m4a,.mp3,.ogg,.opus" aria-labelledby="media-label" aria-describedby="media-limits" required>
             <span class="icon">{{template "icon-upload"}}</span>
             <b>Choose or take a photo</b>
-            <small id="media-limits">JPEG or PNG up to {{.Limits.ImageMB}} MB, MP4 or MOV up to {{.Limits.VideoMB}} MB</small>
+            <small id="media-limits">JPEG or PNG up to {{.Limits.ImageMB}} MB, MP4 or MOV up to {{.Limits.VideoMB}} MB, voice notes up to {{.Limits.AudioMB}} MB</small>
           </label>
+          <div class="voice-row">
+            <span class="muted small">or</span>
+            <label class="btn btn-ghost btn-sm voice-btn">{{template "icon-mic"}}Record a voice note
+              <input type="file" id="voice" name="voice" accept="audio/*" capture class="visually-hidden">
+            </label>
+            <span class="muted small">for example, “Velachery main road, water is knee deep”</span>
+          </div>
           <div class="preview" id="preview" aria-live="polite"></div>
         </div>
       </div>
@@ -76,19 +83,21 @@
         <div class="explain">
           {{template "wheel-diagram"}}
           <ol>
-            <li><b>Read the scene.</b> Muse Spark 1.3 finds the water and a reference of known size, usually a wheel.</li>
-            <li><b>Measure.</b> SAM 3.1 masks the wheel and the water. Where they meet is the waterline; the hidden part of the wheel is the depth.</li>
+            <li><b>Read the scene.</b> Muse Spark finds the water and a reference of known size, usually a wheel.</li>
+            <li><b>Measure.</b> SAM masks the wheel and the water, and Muse Spark checks every mask before it is used. Where they meet is the waterline; the hidden part of the wheel is the depth. With no measurable wheel, you get Muse Spark's own estimate, clearly labelled.</li>
             <li><b>Check and fuse.</b> The report is checked for freshness, agreement with nearby cells and recent rain, then fused into the map with its uncertainty.</li>
           </ol>
         </div>
         <ol class="stages" id="stages" hidden>
           <li class="stage" data-stage="upload"><span class="dot">{{template "icon-check"}}</span><span><b>Uploading</b><small>Sending the file securely</small><span class="upload-bar"><i id="upbar"></i></span></span><span class="val" id="upval"></span></li>
-          <li class="stage" data-stage="scene"><span class="dot">{{template "icon-check"}}</span><span><b>Reading the scene and measuring</b><small>Muse Spark 1.3 and SAM 3.1</small></span><span class="val"></span></li>
+          <li class="stage" data-stage="scene"><span class="dot">{{template "icon-check"}}</span><span><b>Reading the scene and measuring</b><small id="scene-sub">Scene model, masks and the checking agent</small></span><span class="val"></span></li>
           <li class="stage" data-stage="verify"><span class="dot">{{template "icon-check"}}</span><span><b>Checking the report</b><small>Freshness, nearby cells, rainfall, confidence</small></span><span class="val"></span></li>
           <li class="stage" data-stage="fuse"><span class="dot">{{template "icon-check"}}</span><span><b>Fusing into the map</b><small>Kalman update of the hex cell and its neighbours</small></span><span class="val"></span></li>
         </ol>
       </section>
       <div class="result" id="result" aria-live="polite" tabindex="-1">{{if .Result}}{{template "result_card" .Result}}{{end}}</div>
+      <div class="trace-box" id="trace-box">{{with .Trace}}{{template "trace_panel" .}}{{end}}</div>
+      {{with .LiveTrace}}<template id="trace-shell">{{template "trace_panel" .}}</template>{{end}}
     </div>
   </div>
 </div>
@@ -142,12 +151,14 @@ document.addEventListener("DOMContentLoaded", function () {
       { enableHighAccuracy: true, timeout: 10000 });
   });
 
-  var input = document.getElementById("media"), preview = document.getElementById("preview"), drop = document.getElementById("drop");
+  var input = document.getElementById("media"), voice = document.getElementById("voice"), preview = document.getElementById("preview"), drop = document.getElementById("drop");
+  function chosen() { return input.files[0] || voice.files[0]; }
   ["dragenter", "dragover"].forEach(function (t) { drop.addEventListener(t, function () { drop.classList.add("is-over"); }); });
   ["dragleave", "drop"].forEach(function (t) { drop.addEventListener(t, function () { drop.classList.remove("is-over"); }); });
-  input.addEventListener("change", function () {
+  function show(src, other) {
+    if (src.files[0] && other.value) other.value = "";
     preview.textContent = ""; preview.classList.remove("has");
-    var f = input.files[0]; if (!f) return;
+    var f = chosen(); if (!f) return;
     var url = URL.createObjectURL(f), node;
     if (f.type.indexOf("image/") === 0) { node = NM.el("img"); node.alt = "Selected photo"; node.src = url; }
     else if (f.type.indexOf("video/") === 0) { node = NM.el("video"); node.src = url; node.muted = true; node.controls = true; node.playsInline = true; }
@@ -155,24 +166,65 @@ document.addEventListener("DOMContentLoaded", function () {
     preview.appendChild(node);
     var cap = NM.el("div", "cap"); cap.appendChild(NM.el("span", null, f.name)); cap.appendChild(NM.el("span", null, (f.size / 1048576).toFixed(1) + " MB"));
     preview.appendChild(cap); preview.classList.add("has");
-  });
+  }
+  input.addEventListener("change", function () { show(input, voice); });
+  voice.addEventListener("change", function () { show(voice, input); });
 
   var stages = document.getElementById("stages"), ORDER = ["upload", "scene", "verify", "fuse"], current = null, last = 0;
   function rows() { return stages.querySelectorAll(".stage"); }
+  var tick = null;
   function enter(name) {
+    clearInterval(tick);
     var now = performance.now(), i = ORDER.indexOf(current);
     if (i >= 0) { rows()[i].setAttribute("data-state", "done"); rows()[i].querySelector(".val").textContent = ((now - last) / 1000).toFixed(1) + " s"; }
     last = now; current = name;
     var j = ORDER.indexOf(name);
-    if (j >= 0) rows()[j].setAttribute("data-state", "active");
+    if (j >= 0) {
+      rows()[j].setAttribute("data-state", "active");
+      // A live clock on the active stage: honest about how long models take.
+      if (name !== "upload") tick = setInterval(function () {
+        rows()[j].querySelector(".val").textContent = ((performance.now() - last) / 1000).toFixed(0) + " s";
+      }, 250);
+    }
+    if (name === "scene" && !voice.files[0] && !traceBox.querySelector(".trace")) waiting();
   }
-  function handle(msg) {
+  // Until the first agent step arrives, the live panel says what it is
+  // waiting for. A perception build without the step stream sends the whole
+  // trace with the result instead.
+  function waiting() {
+    traceBox.textContent = "";
+    traceBox.appendChild(shell.content.cloneNode(true));
+    var li = NM.el("li", "twait");
+    li.appendChild(NM.el("span", "tnode"));
+    li.appendChild(NM.el("p", null, "Waiting for the scene model. Each model call appears here, with its output and how long it took."));
+    traceBox.querySelector("#trace-list").appendChild(li);
+  }
+  var traceBox = document.getElementById("trace-box"), shell = document.getElementById("trace-shell");
+  function bump(name) { var c = traceBox.querySelector('[data-count="' + name + '"]'); if (c) c.textContent = (+c.textContent || 0) + 1; }
+  function onStep(msg) {
+    var wait = traceBox.querySelector(".twait");
+    if (wait) wait.remove();
+    if (!traceBox.querySelector(".trace.is-live")) {
+      traceBox.textContent = "";
+      traceBox.appendChild(shell.content.cloneNode(true));
+      traceBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    var list = traceBox.querySelector("#trace-list");
+    list.insertAdjacentHTML("beforeend", msg.html);
+    bump("steps"); bump(msg.tone);
+    list.lastElementChild.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function handle(name, msg) {
+    if (name === "step") { onStep(msg); return; }
     if (msg.stage === "received" || msg.stage === "scene") { if (current !== "scene") enter("scene"); return; }
     if (msg.stage === "verify" || msg.stage === "fuse") { enter(msg.stage); return; }
-    if (msg.stage === "done") enter(null);
-    if (msg.stage === "error" && ORDER.indexOf(current) >= 0) rows()[ORDER.indexOf(current)].setAttribute("data-state", "error");
+    if (name === "done" || name === "error") clearInterval(tick);
+    if (name === "done") enter(null);
+    if (name === "error" && ORDER.indexOf(current) >= 0) rows()[ORDER.indexOf(current)].setAttribute("data-state", "error");
     if (msg.html) {
       result.innerHTML = msg.html;
+      if (msg.trace_html) traceBox.innerHTML = msg.trace_html;
+      else traceBox.textContent = "";
       result.focus({ preventScroll: true });
       result.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -181,15 +233,18 @@ document.addEventListener("DOMContentLoaded", function () {
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     err.textContent = "";
-    if (!input.files[0]) { err.textContent = "Choose a photo, a short video or a voice note first."; input.focus(); return; }
+    if (!chosen()) { err.textContent = "Choose a photo, a short video or a voice note first."; input.focus(); return; }
     if (!lat.value || !lon.value) { err.textContent = "Add a location: tap the map, use your location, or type coordinates."; lat.focus(); return; }
-    stages.hidden = false; result.textContent = ""; submit.disabled = true; submit.textContent = "Measuring";
+    document.getElementById("process").classList.add("is-busy");
+    document.getElementById("process-title").textContent = "Your report";
+    stages.hidden = false; result.textContent = ""; traceBox.textContent = ""; submit.disabled = true; submit.textContent = "Measuring";
+    document.getElementById("scene-sub").textContent = voice.files[0] && !input.files[0] ? "The voice model transcribes the note" : "Scene model, masks and the checking agent";
     rows().forEach(function (li) { li.removeAttribute("data-state"); li.querySelector(".val").textContent = ""; });
     document.getElementById("upbar").style.width = "0";
     current = null; enter("upload");
     var seen = 0, xhr = new XMLHttpRequest();
     xhr.open("POST", "/report");
-    xhr.setRequestHeader("Accept", "application/x-ndjson");
+    xhr.setRequestHeader("Accept", "text/event-stream");
     xhr.upload.onprogress = function (ev) {
       if (ev.lengthComputable) {
         var p = Math.round(ev.loaded / ev.total * 100);
@@ -197,12 +252,24 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("upval").textContent = p + "%";
       }
     };
-    xhr.onprogress = function () {
-      var lines = xhr.responseText.split("\n");
-      for (; seen < lines.length - 1; seen++) { if (lines[seen]) { try { handle(JSON.parse(lines[seen])); } catch (x) {} } }
-    };
-    xhr.onload = function () { xhr.onprogress(); var rest = xhr.responseText.split("\n").slice(seen).join(""); if (rest) { try { handle(JSON.parse(rest)); } catch (x) {} } done(); };
-    xhr.onerror = function () { err.textContent = "The upload failed. Check your connection and try again."; handle({ stage: "error" }); done(); };
+    // Server-sent events read from the POST response: blocks separated by
+    // a blank line, each with an event name and one JSON data line.
+    function pump(final) {
+      var text = xhr.responseText, blocks = text.slice(seen).split("\n\n");
+      var complete = final ? blocks.length : blocks.length - 1;
+      for (var i = 0; i < complete; i++) {
+        var name = "message", data = "";
+        blocks[i].split("\n").forEach(function (line) {
+          if (line.indexOf("event: ") === 0) name = line.slice(7);
+          else if (line.indexOf("data: ") === 0) data += line.slice(6);
+        });
+        seen += blocks[i].length + 2;
+        if (data) { try { handle(name, JSON.parse(data)); } catch (x) {} }
+      }
+    }
+    xhr.onprogress = function () { pump(false); };
+    xhr.onload = function () { pump(true); done(); };
+    xhr.onerror = function () { err.textContent = "The upload failed. Check your connection and try again."; handle("error", {}); done(); };
     function done() { submit.disabled = false; submit.textContent = "Measure the water"; }
     xhr.send(new FormData(form));
   });

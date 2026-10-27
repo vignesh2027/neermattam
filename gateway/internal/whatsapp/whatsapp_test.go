@@ -217,3 +217,14 @@ func TestStaleMediaIsNotPaired(t *testing.T) {
 		t.Fatal("a photo older than the pairing window was used")
 	}
 }
+
+func TestReplyNamesAnEstimateAsAnEstimate(t *testing.T) {
+	d, s := 23.0, 20.0
+	method := upstream.MethodModelEstimate
+	out := &report.Outcome{Status: report.StatusFused, Place: "near Velachery", DepthCm: &d, DepthSigmaCm: &s,
+		Measurement: &upstream.Measurement{Method: &method, Confidence: 0.6}, Advisory: report.Advisory}
+	txt := ReplyText(out, "")
+	if !strings.Contains(txt, "visual estimate") || strings.Contains(txt, "measured about") || strings.Contains(txt, "ruler") {
+		t.Fatalf("%q", txt)
+	}
+}

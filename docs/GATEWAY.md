@@ -19,10 +19,17 @@ Base map: OpenFreeMap's Positron style, recoloured toward the palette at load ti
 
 | Desktop | Mobile |
 |---|---|
-| ![Report result](img/gateway-report-result.png) | ![Report result on a phone](img/gateway-report-result-mobile.png) |
+| ![Agent trace arriving live](img/gateway-report-trace-live.png) | ![Agent trace on a phone](img/gateway-report-trace-live-mobile.png) |
+| ![A model estimate](img/gateway-report-result.png) | ![A model estimate on a phone](img/gateway-report-result-mobile.png) |
+| ![A Tamil voice note](img/gateway-report-voice.png) | ![An English voice note on a phone](img/gateway-report-voice-mobile.png) |
 | ![Route](img/gateway-route.png) | ![Route on a phone](img/gateway-route-mobile.png) |
 
-The result-card screenshots were taken against a fixture perception server, because the perception service was still being built. The fixture returns the true depth of a synthetic scene rendered by `perception/src/neermattam_perception/synth.py`; the overlay says "TEST FIXTURE" and the card names the models as `fixture-scene` and `fixture-masks`. They show the interface, not a measurement.
+Where the report screenshots come from, because it matters:
+
+- `gateway-report-voice.png` and `gateway-report-voice-mobile.png` are live runs: a Tamil and an English voice note, spoken by the macOS voices Vani and Rishi, transcribed by the real perception service (Muse Spark Open on Baseten) and fused by the real engine.
+- `gateway-report-real-rejected.png` and `gateway-report-waiting.png` are a live run of the real perception service on the Commons photo "India - Chennai - Monsoon - 04" by McKay Savage (CC BY 2.0). Perception found no measurable wheel and returned a model estimate; the gateway refused it because the photo was taken in 2008.
+- `gateway-report-trace*.png` and `gateway-report-result*.png` replay a recorded live perception response, `eval/out/x2.json` (Muse Spark Open and SAM 2.1 on "India - Chennai - Monsoon - 02" by McKay Savage, CC BY 2.0), through a small server that sends its 18 steps over `/v1/measure/stream`, since that endpoint was still being built. Every step, output and latency is the recorded one; only the pacing between steps is the replay's. Its `captured_at` was set to null so the 2008 photo is not refused as stale.
+- `gateway-report-result-geometry.png` uses a fixture perception server on a synthetic scene (`perception/src/neermattam_perception/synth.py`), because no real photo has yet produced a wheel measurement (see `eval/RESULTS_REAL.md`). Its overlay says "TEST FIXTURE" and its models are named `fixture-scene` and `fixture-masks`. It shows the interface for a measurement with a model estimate beside it, not a measurement.
 
 ## Request path
 
@@ -46,9 +53,23 @@ The same `report.Pipeline` runs for `POST /api/report` (JSON), `POST /report` (t
 
 **Rate limits.** A token bucket per client IP: reports 6 per minute with bursts of 4, API reads 120 per minute with bursts of 40. A refused request gets 429 with `Retry-After`. `X-Forwarded-For` is honoured only with `TRUST_PROXY=1`.
 
+**Method.** Perception says how it got the depth. `wheel_geometry` is shown as "Measured from a two-wheeler wheel" (or car or auto wheel). `model_estimate` gets a violet "Model estimate" badge, a note that no wheel could be measured and what the model based its estimate on, and the wide band drawn hatched on the depth gauge. When a measurement comes with the model's own estimate, the card shows both readings and draws the estimate as a second band; the measurement is the one fused.
+
+**Capture time.** The gateway uses perception's `captured_at` (read from EXIF before perception strips metadata). An RFC 3339 time with a zone is used as is; a time without an offset is read as India Standard Time. A null `captured_at` means the photo has none. Only when the field is missing altogether (an older perception) does the gateway read EXIF itself.
+
+**Voice notes.** An Ogg, WAV, M4A or MP3 voice note goes to `/v1/transcribe`. The page shows the transcript, the place said, the depth words, the language and the model. The depth is the voice model's own reading when it gives one, with sigma at least 10 cm or 30 percent; otherwise the gateway reads the depth words itself. The reading is fused with source `voice` at the map pin, never at the place said, since nothing geocodes it.
+
 **Duplicates.** The exact bytes (SHA-256) and the 64-bit difference hash of each photo are kept for 24 hours. An exact copy, or a photo within 5 bits of an earlier one (a re-encode, resize or screenshot), is refused with 409. Fusing the same water twice would make the engine overconfident. The reading id sent to the engine is derived from the SHA-256, so a retry is also ignored by the engine.
 
-**Progress.** `POST /report` with `Accept: application/x-ndjson` streams one line per stage as the pipeline reaches it (`received`, `scene`, `verify`, `fuse`) and ends with the result card rendered on the server. The page shows measured stage times; it never animates progress it does not have.
+**Progress and the agent trace.** `POST /report` with `Accept: text/event-stream` answers with server-sent events (the browser posts the form and reads the response, because `EventSource` cannot upload a file):
+
+- `stage`: `{"stage": "received" | "scene" | "verify" | "fuse"}`, sent as the pipeline reaches each stage;
+- `step`: one step of perception's agent the moment perception reports it, as a timeline item rendered on the server, `{"html", "tone", "index"}`;
+- `done` (or `error`): the result card and the complete trace panel, both rendered on the server.
+
+For photos and videos the gateway calls `POST /v1/measure/stream` and passes each step through. The gateway expects that stream to send `event: step` with one `agent_trace` entry, then `event: result` with the full `/v1/measure` response, or `event: error` with `{"detail", "status"}`; unnamed events are recognised by their shape and a plain JSON answer is accepted as the result. When perception answers 404, 405 or 501 the gateway falls back to `/v1/measure` and remembers that for five minutes, so an older perception costs one probe, not a second upload per report. In that case the page shows a waiting row, and the whole trace appears with the result and is revealed step by step. The page shows a live clock on the active stage and the recorded latency of every step; it never animates progress it does not have.
+
+The trace panel draws each step on a vertical timeline: read the scene, segment, verify or confirm, refine (a check that sent SAM a corrected box), give up, geometry and estimate, each with its target, model, output, decision, input and wall time, plus counts of accepted, refined and abandoned masks and the models involved. The summed model time is labelled as a sum, because perception runs checks in parallel.
 
 **Concurrency.** At most 8 reports are measured at once (`MAX_INFLIGHT_REPORTS`); the next gets 503 with a message to retry.
 
@@ -58,15 +79,15 @@ Package `internal/verify`. Each rule returns an outcome (`pass`, `lower`, `rejec
 
 | Rule | Outcome | Rationale |
 |---|---|---|
-| **Confidence floor** | Reject below 0.35. Between 0.35 and 0.6, trust is scaled by confidence / 0.6. | A measurement the model itself doubts should not move the map. Voice notes have no model confidence and skip this rule. |
+| **Confidence floor** | Measurements: reject below 0.35; between 0.35 and 0.6, trust is scaled by confidence / 0.6. Model estimates: reject below 0.15, otherwise pass. | A measurement the model itself doubts should not move the map. Perception keeps an estimate's confidence low on purpose (0.21 to 0.23 on the real photos in `eval/RESULTS_REAL.md`); its weight is already cut by a sigma of at least 20 cm and by the source rule, so scaling again would count the same doubt twice, and the old floor would have discarded every estimate. Voice notes have no model confidence and skip this rule. |
 | **Photo freshness** | From EXIF `DateTimeOriginal` (with `OffsetTimeOriginal` when present, otherwise read as IST). Up to 2 h old: pass. 2 to 6 h: 0.8. 6 to 24 h: 0.5. Over 24 h: reject. Clock more than 15 minutes ahead: 0.6 and the arrival time is used. No EXIF: 0.9 and the arrival time is used. | Water changes within hours. An old photo is fused at the time it was taken, so the engine's decay ages it correctly. WhatsApp strips EXIF, so its absence is only a small penalty. The engine refuses readings over 24 hours old anyway. |
-| **Source** | Voice: 0.6. Photo and video: pass. | A spoken "knee deep" is a rough estimate. |
+| **Source** | Voice: 0.6. Model estimate: 0.7. Measured photo or video: pass. | A spoken "knee deep" is a rough estimate, and a visual estimate is not a measurement. With a 20 cm sigma an estimate alone leaves a cell `unknown` in the engine, which is right. |
 | **Neighbour agreement** | Known engine cells within 300 m, excluding any cell touched by simulated readings, are combined by inverse variance, with 5 cm of extra spread per 100 m of distance. More than 3 standard deviations away: 0.4. 2 to 3: 0.75. Otherwise pass. No cells: skip. | Strong disagreement is suspicious but not proof: a subway can hold a metre of water 100 m from a dry road. Lowering trust lets the filter weigh it without discarding a true first report. |
 | **Rainfall plausibility** | Modelled hourly precipitation for the 48 hours before the observation, from the Open-Meteo forecast API (which serves the past days too). Depth over 10 cm with under 1 mm of rain: 0.6. Otherwise pass. API unavailable: skip. | Deep water on a dry day is unusual, but reservoir releases, burst mains and tides do flood Chennai streets, so it is never a rejection. |
 
 The thresholds are engineering judgements, not values fitted to data; they live in `verify.DefaultThresholds`. Open-Meteo is called without a key under its free non-commercial terms (fewer than 10,000 calls a day, CC BY 4.0 attribution on the About page). Each fetch covers a 0.05 degree square for 30 minutes, so a busy evening costs a handful of calls.
 
-Voice notes go to perception's `/v1/transcribe`. Words such as "ankle", "knee" or "waist" (and a few Tamil equivalents), or an explicit "30 cm" or "2 feet", become a depth with deliberately wide uncertainty (for example knee: 45 cm plus or minus 8, from assumed adult proportions). No depth words means the report is unusable.
+When the voice model gives no depth, words such as "ankle", "knee" or "waist" (and a few Tamil equivalents), or an explicit "30 cm" or "2 feet", become a depth with deliberately wide uncertainty (for example knee: 45 cm plus or minus 8, from assumed adult proportions). No depth at all means the report is unusable.
 
 ## Live map and the cell proxy
 
@@ -101,7 +122,7 @@ Every cell already in the engine when demo mode starts is labelled simulated, wh
 - `GET` answers Meta's handshake when `hub.verify_token` matches (constant-time compare).
 - `POST` checks `X-Hub-Signature-256` as HMAC-SHA256 of the raw body with the app secret, compared with `hmac.Equal`, before parsing anything. A bad or missing signature gets 401.
 - Image, video, audio and location messages are read. A media message waits up to 10 minutes for a location from the same sender, or the reverse. Redelivered message ids are ignored.
-- Media is fetched from the Graph API (`/{media-id}` for the URL, then the file, both with the bearer token and the same size limits), run through the same pipeline, and answered with a plain-text result such as "Neermattam measured about 34 cm of water near Velachery (plus or minus 4 cm), using a two wheeler wheel as the ruler. Confidence 0.82. ... Advisory only."
+- Media is fetched from the Graph API (`/{media-id}` for the URL, then the file, both with the bearer token and the same size limits), run through the same pipeline, and answered with a plain-text result such as "Neermattam measured about 34 cm of water near Velachery (plus or minus 4 cm), using a two wheeler wheel as the ruler. Confidence 0.82. ... Advisory only." A model estimate is called an estimate in the reply, and a voice note a rough spoken estimate.
 - The webhook answers 200 at once and works in the background, at most 4 reports at a time.
 
 ## Operations
@@ -110,7 +131,7 @@ Every cell already in the engine when demo mode starts is labelled simulated, wh
 - `GET /readyz`: 200 only when the engine and perception both answer their `/readyz`; otherwise 503 with each one's state, plus whether the engine stream is connected and whether WhatsApp is enabled.
 - `GET /metrics`: Prometheus text format from a small built-in exporter (`internal/metrics`; the official client would add a dozen modules for counters, gauges and histograms). Requests by route and status, request and upstream latency, report outcomes, verification rule outcomes, trust, rate-limit refusals, cache hits, live clients and dropped clients.
 - Logs are JSON from `log/slog`: one line per request (method, route pattern, status, duration, bytes, never client addresses), one per verification rule and one per report. Tokens and secrets are never logged.
-- Timeouts: engine 5 s, routes 20 s, perception 90 s, Open-Meteo 4 s, Graph API 30 s, request headers 10 s, request body 3 minutes, response write 3 minutes (except the live stream).
+- Timeouts: engine 5 s, routes 20 s, perception 180 s (a photo with wheels to check took up to 110 s in `eval/RESULTS_REAL.md`), Open-Meteo 4 s, Graph API 30 s, request headers 10 s, request body 3 minutes, response write 4 minutes (except the live stream).
 - Shutdown on SIGINT or SIGTERM closes the live streams, drains requests for up to 15 seconds and lets WhatsApp replies finish.
 
 ## Configuration
@@ -122,7 +143,7 @@ Every cell already in the engine when demo mode starts is labelled simulated, wh
 | `ENGINE_URL` | `http://127.0.0.1:8302` | Engine |
 | `PERCEPTION_URL` | `http://127.0.0.1:8301` | Perception |
 | `OPEN_METEO_URL` | `https://api.open-meteo.com` | Rainfall API |
-| `ENGINE_TIMEOUT`, `ROUTE_TIMEOUT`, `PERCEPTION_TIMEOUT`, `WEATHER_TIMEOUT` | `5s`, `20s`, `90s`, `4s` | Upstream timeouts |
+| `ENGINE_TIMEOUT`, `ROUTE_TIMEOUT`, `PERCEPTION_TIMEOUT`, `WEATHER_TIMEOUT` | `5s`, `20s`, `180s`, `4s` | Upstream timeouts |
 | `GATEWAY_BBOX` | `80.10,12.85,80.33,13.24` | Service area, same as the engine |
 | `MAX_IMAGE_BYTES`, `MAX_VIDEO_BYTES`, `MAX_AUDIO_BYTES` | 12 MiB, 40 MiB, 8 MiB | Upload sizes |
 | `MAX_VIDEO_SECONDS` | `30` | Video length |
@@ -168,4 +189,4 @@ go vet ./...
 gofmt -l .
 ```
 
-The tests use `httptest` fakes for the engine (including its SSE stream) and perception, a fake Graph API and a fake rainfall source. They cover upload limits (size, video length, missing header, disguised files, location, area), rate limiting and `Retry-After`, exact and near duplicates, the full report path with the reading the engine receives, the NDJSON stages, every verification rule, Open-Meteo summing and caching, WhatsApp signatures (good, tampered, missing, wrong secret), the handshake, pairing and the pairing window, template rendering of every page (no rejected values, no em dashes or arrows, every inline script carrying the CSP nonce), the cell cache and origin labels, the SSE fan-out with its client limit and resync, readiness, metrics format, gzip of static files, MP4 duration parsing, EXIF capture times and the demo scenario's validity.
+The tests use `httptest` fakes for the engine (including its SSE stream) and perception, a fake Graph API and a fake rainfall source. They cover the stage and live step events in order, the fallback when perception has no stream (and that it is probed once), the model-estimate card and its trust, both readings beside a measurement, perception's `captured_at` winning over the photo's own EXIF and an explicit null meaning none, voice reports end to end with a Tamil transcript, trace step classification, upload limits (size, video length, missing header, disguised files, location, area), rate limiting and `Retry-After`, exact and near duplicates, the full report path with the reading the engine receives, the NDJSON stages, every verification rule, Open-Meteo summing and caching, WhatsApp signatures (good, tampered, missing, wrong secret), the handshake, pairing and the pairing window, template rendering of every page (no rejected values, no em dashes or arrows, every inline script carrying the CSP nonce), the cell cache and origin labels, the SSE fan-out with its client limit and resync, readiness, metrics format, gzip of static files, MP4 duration parsing, EXIF capture times and the demo scenario's validity.

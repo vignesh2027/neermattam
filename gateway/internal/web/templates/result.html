@@ -9,19 +9,23 @@
   <header class="res-head">
     <p class="eyebrow">
       {{if eq .Status "fused"}}<span class="chip chip-ok">{{.Title}}</span>{{else if eq .Status "rejected"}}<span class="chip chip-amber">{{.Title}}</span>{{else}}<span class="chip chip-grey">{{.Title}}</span>{{end}}
-      {{if eq .Source "voice"}}<span class="chip chip-violet">Voice estimate</span>{{end}}
+      {{if eq .Method "geometry"}}<span class="chip method-chip">{{template "icon-ruler"}}{{.MethodLabel}}</span>{{end}}
+      {{if eq .Method "estimate"}}<span class="chip chip-violet method-chip">{{template "icon-eye"}}{{.MethodLabel}}</span>{{end}}
+      {{if eq .Source "voice"}}<span class="chip chip-violet method-chip">{{template "icon-mic"}}Voice estimate</span>{{end}}
     </p>
     {{if .HasDepth}}
     <h2 id="res-title" class="res-depth"><b>{{.Depth}}<small>cm</small></b><span>± {{.Sigma}} cm</span><span class="visually-hidden">of water, plus or minus {{.Sigma}} centimetres</span></h2>
     <p class="res-place">{{.Place}} · {{.When}}</p>
-    <div class="gauge" aria-hidden="true">
+    {{if .EstimateNote}}<p class="estimate-note">{{template "icon-eye"}}<span>{{.EstimateNote}}</span></p>{{end}}
+    <div class="gauge{{if .Gauge.HasEstimate}} has-est{{end}}{{if or (eq .Method "estimate") (eq .Source "voice")}} is-est{{end}}" aria-hidden="true">
       <div class="gauge-wrap">
         <div class="gauge-track"></div>
         <div class="gauge-band" style="left:{{.Gauge.LowPct}};width:{{.Gauge.WidthPct}}"></div>
         <div class="gauge-mark" style="left:{{.Gauge.MarkPct}}"></div>
+        {{if .Gauge.HasEstimate}}<div class="gauge-est" style="left:{{.Gauge.EstLowPct}};width:{{.Gauge.EstWidth}}"></div><div class="gauge-est-mark" style="left:{{.Gauge.EstMarkPct}}"></div>{{end}}
         {{range .Gauge.Ticks}}<span class="gauge-tick{{if .Row2}} row2{{end}}" style="left:{{.Pct}}">{{.Label}}</span>{{end}}
       </div>
-      <div class="gauge-axis"><span>0 cm</span><span>{{.Gauge.Max}} cm</span></div>
+      <div class="gauge-axis"><span>0 cm</span><span class="gauge-key"><i class="k-band"></i>{{if eq .Method "geometry"}}measured{{else}}estimate{{end}}, 2 standard deviations{{if .Gauge.HasEstimate}}<i class="k-est"></i>model estimate{{end}}</span><span>{{.Gauge.Max}} cm</span></div>
     </div>
     {{else}}
     <h2 id="res-title" style="font-size:22px;margin-top:10px">{{.Message}}</h2>
@@ -32,7 +36,7 @@
     {{if .Overlay}}
     <figure class="overlay-fig">
       <img src="{{.Overlay}}" alt="The photo with the detected wheel outline and waterline drawn on it">
-      <figcaption>What the models saw: the reference outline and the waterline.</figcaption>
+      <figcaption>{{if eq .Method "estimate"}}Perception's overlay: what it found in the photo. No wheel outline passed its checks, so nothing here was measured.{{else}}What the models saw: the reference outline and the waterline.{{end}}</figcaption>
     </figure>
     {{end}}
 
@@ -44,12 +48,34 @@
     </div>
     {{end}}
 
+    {{with .Readings}}
+    <div class="readings">
+      <p class="section-title">Two independent readings</p>
+      {{range .}}<div class="reading{{if .Primary}} primary{{end}}"><span class="r-label">{{.Label}}</span><b class="num">{{.Value}}</b>{{if .Note}}<span class="r-note">{{.Note}}</span>{{end}}</div>{{end}}
+    </div>
+    {{end}}
+
+    {{with .Voice}}
+    <figure class="voice">
+      <span class="voice-ic" aria-hidden="true">{{template "icon-mic"}}</span>
+      <blockquote>{{.Transcript}}</blockquote>
+      <figcaption>
+        <dl class="voice-facts">
+          {{if .Place}}<div><dt>Place said</dt><dd>{{.Place}}</dd></div>{{end}}
+          {{if .DepthWords}}<div><dt>Depth words</dt><dd>{{.DepthWords}}</dd></div>{{end}}
+          {{if .Language}}<div><dt>Language</dt><dd>{{.Language}}</dd></div>{{end}}
+          {{if .Model}}<div><dt>Heard by</dt><dd>{{.Model}}</dd></div>{{end}}
+        </dl>
+        <p class="small muted">{{.Basis}} The reading is placed at the map pin, not at the place said.</p>
+      </figcaption>
+    </figure>
+    {{end}}
+
     {{if .Facts}}
     <dl class="facts">
       {{range .Facts}}<div class="fact"><dt>{{.Label}}</dt><dd>{{.Value}}{{if .Note}}<small>{{.Note}}</small>{{end}}{{if .Meter}}<span class="meter" aria-hidden="true"><i style="width:{{.Meter}}"></i></span>{{end}}</dd></div>{{end}}
     </dl>
     {{end}}
-    {{if .Transcript}}<p class="small muted">Transcript: “{{.Transcript}}”</p>{{end}}
 
     {{if .Rules}}
     <div>

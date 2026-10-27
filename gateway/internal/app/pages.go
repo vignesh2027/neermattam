@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"neermattam/gateway/internal/places"
@@ -28,6 +30,7 @@ func (a *App) page(r *http.Request, title, active string, needsMap bool) *web.Pa
 		Limits: web.Limits{
 			ImageMB:      int(a.Cfg.MaxImageBytes >> 20),
 			VideoMB:      int(a.Cfg.MaxVideoBytes >> 20),
+			AudioMB:      int(a.Cfg.MaxAudioBytes >> 20),
 			VideoSeconds: int(a.Cfg.MaxVideoSeconds),
 		},
 	}
@@ -75,6 +78,7 @@ func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) reportPage(w http.ResponseWriter, r *http.Request) {
 	p := a.page(r, "Report water, Neermattam", "report", true)
+	p.LiveTrace = &web.TraceView{Live: true}
 	if at := r.URL.Query().Get("at"); at != "" {
 		if lat, lon, ok := strings.Cut(at, ","); ok {
 			if _, err := strconv.ParseFloat(lat, 64); err == nil {
@@ -91,16 +95,17 @@ func (a *App) reportPage(w http.ResponseWriter, r *http.Request) {
 // one JSON line per real pipeline stage and ends with the rendered result
 // card. Without it (no script) it renders the whole page.
 func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
-	streaming := strings.Contains(r.Header.Get("Accept"), "application/x-ndjson")
+	streaming := strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 	fail := func(re *report.Error) {
 		if streaming {
 			html, _ := a.Renderer.Fragment("result_card", web.ErrorView(re.Message))
-			w.Header().Set("Content-Type", "application/x-ndjson")
+			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(re.Status)
-			_ = json.NewEncoder(w).Encode(map[string]any{"stage": "error", "code": re.Code, "error": re.Message, "html": html})
+			writeEvent(w, "error", map[string]any{"code": re.Code, "error": re.Message, "html": html})
 			return
 		}
 		p := a.page(r, "Report water, Neermattam", "report", true)
+		p.LiveTrace = &web.TraceView{Live: true}
 		p.Report.Error = re.Message
 		a.render(w, re.Status, "report", p)
 	}
@@ -123,6 +128,7 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 	}
 	if !streaming {
 		p := a.page(r, "Report water, Neermattam", "report", true)
+		p.LiveTrace = &web.TraceView{Live: true}
 		p.Report.Lat, p.Report.Lon = strconv.FormatFloat(sub.Lat, 'f', 6, 64), strconv.FormatFloat(sub.Lon, 'f', 6, 64)
 		out, err := a.Pipeline.Run(r.Context(), sub, nil)
 		if err != nil {
@@ -132,30 +138,53 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.Result = web.NewResultView(out)
+		p.Trace = p.Result.Trace
 		a.render(w, http.StatusOK, "report", p)
 		return
 	}
 
+	// The browser posts the form and reads this response as server-sent
+	// events (EventSource cannot upload a file): one "stage" event per
+	// pipeline stage, one "step" event per agent step as perception makes
+	// it, and a final "done" with the result card and the full trace, all
+	// rendered here.
 	rc := http.NewResponseController(w)
-	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	enc := json.NewEncoder(w)
-	send := func(v map[string]any) {
-		_ = enc.Encode(v)
+	var mu sync.Mutex
+	send := func(event string, v map[string]any) {
+		mu.Lock()
+		defer mu.Unlock()
+		writeEvent(w, event, v)
 		_ = rc.Flush()
 	}
-	send(map[string]any{"stage": report.StageReceived})
-	out, err := a.Pipeline.Run(r.Context(), sub, func(stage string) {
-		send(map[string]any{"stage": stage})
+	send("stage", map[string]any{"stage": report.StageReceived})
+	steps := 0
+	out, err := a.Pipeline.Run(r.Context(), sub, func(ev report.Event) {
+		if ev.Stage == report.StageStep && ev.Step != nil {
+			st := web.NewTraceStep(steps, *ev.Step)
+			st.DelayMs = 0
+			steps++
+			html, ferr := a.Renderer.Fragment("trace_step", st)
+			if ferr != nil {
+				a.Log.Error("trace step render failed", "error", ferr.Error())
+				return
+			}
+			send("step", map[string]any{"html": html, "tone": st.Tone, "index": st.Index})
+			return
+		}
+		send("stage", map[string]any{"stage": ev.Stage})
 	})
 	var view *web.ResultView
-	final := map[string]any{"stage": "done"}
+	final := map[string]any{}
+	event := "done"
 	if err != nil {
 		re := asReportError(err)
 		view = web.ErrorView(re.Message)
-		final = map[string]any{"stage": "error", "code": re.Code, "error": re.Message}
+		event = "error"
+		final["code"], final["error"] = re.Code, re.Message
 	} else {
 		view = web.NewResultView(out)
 		final["status"] = out.Status
@@ -165,7 +194,21 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 		a.Log.Error("result render failed", "error", rerr.Error())
 	}
 	final["html"] = html
-	send(final)
+	if view.Trace != nil {
+		// Steps already shown live are not animated again.
+		view.Trace.Reveal = steps == 0
+		if th, terr := a.Renderer.Fragment("trace_panel", view.Trace); terr == nil {
+			final["trace_html"] = th
+		}
+	}
+	final["streamed_steps"] = steps
+	send(event, final)
+}
+
+// writeEvent writes one server-sent event with a JSON payload.
+func writeEvent(w io.Writer, event string, v any) {
+	b, _ := json.Marshal(v)
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
 }
 
 func clientKey(r *http.Request, trust bool) string {

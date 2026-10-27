@@ -134,8 +134,18 @@ func (p *Pipeline) Init() {
 	}
 }
 
-// Progress is told when a stage starts.
-type Progress func(stage string)
+// StageStep carries one agent step from perception while it works.
+const StageStep = "step"
+
+// Event is a progress notice: a stage starting, or (with StageStep) one
+// step of perception's agent as it happens.
+type Event struct {
+	Stage string              `json:"stage"`
+	Step  *upstream.AgentStep `json:"step,omitempty"`
+}
+
+// Progress is told about stages and agent steps.
+type Progress func(Event)
 
 type checked struct {
 	file    File
@@ -232,10 +242,24 @@ func (p *Pipeline) checkFile(f File) (*checked, error) {
 	return c, nil
 }
 
+// ParseCapturedAt reads perception's captured_at: RFC 3339 with a zone, or
+// local camera time without one, which is read as India Standard Time.
+func ParseCapturedAt(s string) (time.Time, bool, bool) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.UTC(), true, true
+	}
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02T15:04:05.999999999"} {
+		if t, err := time.ParseInLocation(layout, s, media.IST); err == nil {
+			return t.UTC(), false, true
+		}
+	}
+	return time.Time{}, false, false
+}
+
 // Run processes a submission end to end.
 func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (*Outcome, error) {
 	if progress == nil {
-		progress = func(string) {}
+		progress = func(Event) {}
 	}
 	start := p.now()
 	c, err := p.check(sub)
@@ -265,7 +289,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 		Channel: sub.Channel, Lat: sub.Lat, Lon: sub.Lon, Place: places.Near(sub.Lat, sub.Lon),
 		Media: c.info, Advisory: Advisory, ReceivedAt: start.UTC(),
 	}
-	progress(StageScene)
+	progress(Event{Stage: StageScene})
 
 	var in verify.Input
 	switch c.typ.Kind {
@@ -281,7 +305,14 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 			up.Field = "video"
 			req.Video = up
 		}
-		m, err := p.Perception.Measure(ctx, req)
+		// Prefer the stream so the agent's steps reach the page live; an
+		// older perception without it gets the plain request.
+		m, err := p.Perception.MeasureStream(ctx, req, func(st upstream.AgentStep) {
+			progress(Event{Stage: StageStep, Step: &st})
+		})
+		if errors.Is(err, upstream.ErrStreamUnsupported) {
+			m, err = p.Perception.Measure(ctx, req)
+		}
 		if err != nil {
 			p.count(sub.Channel, "error")
 			return nil, p.upstreamFail("perception", err)
@@ -295,7 +326,17 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 			return out, nil
 		}
 		in = verify.Input{DepthCm: *m.DepthCm, DepthSigmaCm: *m.DepthSigmaCm, Confidence: m.Confidence}
-		if c.typ.MIME == "image/jpeg" {
+		if m.Method != nil {
+			in.Method = *m.Method
+		}
+		// Perception reads the capture time from EXIF before it strips
+		// metadata, and null means there was none; the gateway's own reader
+		// is only a fallback for an older perception without the field.
+		if m.CapturedAt != nil {
+			if t, known, ok := ParseCapturedAt(*m.CapturedAt); ok {
+				in.CapturedAt, in.ZoneKnown = &t, known
+			}
+		} else if !m.CapturedAtSent && c.typ.MIME == "image/jpeg" {
 			if capt, ok := media.ExifCapture(c.file.Data); ok {
 				t := capt.Time
 				in.CapturedAt, in.ZoneKnown = &t, capt.ZoneKnown
@@ -309,10 +350,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 			return nil, p.upstreamFail("perception", err)
 		}
 		out.Transcript = t
-		est, ok := ParseDepthWords(t.DepthWords)
-		if !ok {
-			est, ok = ParseDepthWords(t.Text)
-		}
+		est, ok := FromTranscript(t)
 		if !ok {
 			out.Status = StatusUnusable
 			out.Summary = "No depth was mentioned in the voice note. Try saying how deep, such as knee deep or 30 centimetres."
@@ -325,7 +363,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 	}
 	in.Lat, in.Lon, in.Source, in.ReceivedAt = sub.Lat, sub.Lon, out.Source, start
 
-	progress(StageVerify)
+	progress(Event{Stage: StageVerify})
 	verdict := p.Verifier.Verify(ctx, in)
 	out.Verification = &verdict
 	depth, sigma := in.DepthCm, in.DepthSigmaCm
@@ -338,7 +376,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 		return out, nil
 	}
 
-	progress(StageFuse)
+	progress(Event{Stage: StageFuse})
 	reading := upstream.Reading{
 		ReadingID:    "r_" + hex.EncodeToString(c.sum[:10]),
 		Lat:          sub.Lat,

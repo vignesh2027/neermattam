@@ -204,3 +204,41 @@ func TestOpenMeteoSumsAndCaches(t *testing.T) {
 		t.Fatalf("a point in the same 0.05 degree square must hit the cache; %d calls", calls.Load())
 	}
 }
+
+func TestModelEstimateConfidenceAndSource(t *testing.T) {
+	in := baseInput()
+	in.Method = "model_estimate"
+	in.Confidence = 0.23 // perception keeps estimates low on purpose
+	r := verifier(nil, nil).Verify(context.Background(), in)
+	if c := rule(t, r, "confidence_floor"); !r.Accepted || c.Outcome != Pass {
+		t.Fatalf("an estimate at 0.23 must not be rejected: %+v", c)
+	}
+	if s := rule(t, r, "source"); s.Outcome != Lower || s.Factor != 0.7 {
+		t.Fatalf("source: %+v", s)
+	}
+	if r.Trust != 0.7 {
+		t.Fatalf("trust %v", r.Trust)
+	}
+	in.Confidence = 0.1
+	if r := verifier(nil, nil).Verify(context.Background(), in); r.Accepted {
+		t.Fatal("an estimate below 0.15 must be rejected")
+	}
+	in.Method, in.Confidence = "wheel_geometry", 0.23
+	if r := verifier(nil, nil).Verify(context.Background(), in); r.Accepted {
+		t.Fatal("a measurement at 0.23 is below the normal floor")
+	}
+}
+
+func TestLongAgesReadNaturally(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		30 * time.Hour:     "30 hours",
+		100 * time.Hour:    "4 days",
+		157909 * time.Hour: "about 18 years",
+		90 * time.Minute:   "1.5 hours",
+		20 * time.Second:   "under a minute",
+	} {
+		if got := roundDur(d); got != want {
+			t.Errorf("%v: %q, want %q", d, got, want)
+		}
+	}
+}

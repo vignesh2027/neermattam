@@ -38,12 +38,14 @@ type Page struct {
 	Footer     bool
 	Demo       bool
 
-	Stats  MapStats
-	Feed   []live.FeedItem
-	Limits Limits
-	Report ReportForm
-	Result *ResultView
-	Route  RouteForm
+	Stats     MapStats
+	Feed      []live.FeedItem
+	Limits    Limits
+	Report    ReportForm
+	Result    *ResultView
+	Trace     *TraceView
+	LiveTrace *TraceView
+	Route     RouteForm
 }
 
 // MapStats are the counters shown before the live data loads.
@@ -53,7 +55,7 @@ type MapStats struct {
 
 // Limits are the upload limits shown on the report page.
 type Limits struct {
-	ImageMB, VideoMB, VideoSeconds int
+	ImageMB, VideoMB, AudioMB, VideoSeconds int
 }
 
 // ReportForm keeps the report form's values.
@@ -101,7 +103,7 @@ var funcs = template.FuncMap{
 // NewRenderer parses every template once at start-up.
 func NewRenderer() (*Renderer, error) {
 	base, err := template.New("base").Funcs(funcs).ParseFS(templateFS,
-		"templates/layout.html", "templates/mapcore.html", "templates/result.html")
+		"templates/layout.html", "templates/mapcore.html", "templates/result.html", "templates/trace.html")
 	if err != nil {
 		return nil, err
 	}

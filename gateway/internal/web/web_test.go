@@ -72,3 +72,50 @@ func TestRouteViewEscapesGeoJSON(t *testing.T) {
 		t.Fatalf("%+v", v.Stats)
 	}
 }
+
+func TestTraceStepClassification(t *testing.T) {
+	cases := []struct {
+		step, decision, kind, tone, label, detail string
+	}{
+		{"scene", "segment and verify 2 wheels and the water", "scene", "neutral", "Read the scene", ""},
+		{"segment", "verify", "segment", "neutral", "Segment", ""},
+		{"verify", "accept", "verify", "ok", "Verify", ""},
+		{"confirm", "accept (coverage partial)", "confirm", "ok", "Confirm", "coverage partial"},
+		{"verify", "refine with box [1402,636,1519,813] px", "refine", "refine", "Refine", "with box [1402,636,1519,813] px"},
+		{"verify", "give up: tyre seen head-on, its outline cannot be measured", "giveup", "stop", "Give up", "tyre seen head-on, its outline cannot be measured"},
+		{"geometry", "report measurement", "geometry", "neutral", "Geometry", ""},
+		{"estimate", "report model estimate", "estimate", "neutral", "Estimate", ""},
+		{"mystery", "", "other", "neutral", "Mystery", ""},
+	}
+	for _, c := range cases {
+		v := NewTraceStep(0, upstream.AgentStep{Step: c.step, Decision: c.decision, LatencyMs: 11377})
+		if v.Kind != c.kind || v.Tone != c.tone || v.Label != c.label || v.Detail != c.detail {
+			t.Errorf("%s/%q: got kind %s tone %s label %s detail %q", c.step, c.decision, v.Kind, v.Tone, v.Label, v.Detail)
+		}
+		if v.Latency != "11.4 s" || !v.Slow {
+			t.Errorf("latency %q slow %v", v.Latency, v.Slow)
+		}
+	}
+	tv := NewTraceView([]upstream.AgentStep{
+		{Step: "scene", Target: "photo", Model: "muse-spark-open", LatencyMs: 15000},
+		{Step: "segment", Target: "wheel 1", Model: "sam-2.1-hiera-small", Decision: "verify", LatencyMs: 900},
+		{Step: "verify", Target: "wheel 1", Model: "muse-spark-open", Decision: "give up", LatencyMs: 61000},
+	}, false)
+	if tv.Count != 3 || tv.GiveUps != 1 || tv.TargetsSeen != 1 || len(tv.ModelsUsed) != 2 || tv.TotalTime != "1 min 16 s" {
+		t.Fatalf("%+v", tv)
+	}
+}
+
+func TestTracePanelRenders(t *testing.T) {
+	r, _ := NewRenderer()
+	tv := NewTraceView([]upstream.AgentStep{{Step: "verify", Target: "two wheeler wheel 1", Model: "muse-spark-open", Input: "crop <b>", Output: "is_target=true", Decision: "accept", LatencyMs: 18000}}, false)
+	html, err := r.Fragment("trace_panel", tv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"How the models reached this answer", "two wheeler wheel 1", "18.0 s", "Accept", "crop &lt;b&gt;", "timeline reveal"} {
+		if !strings.Contains(html, w) {
+			t.Errorf("panel lacks %q", w)
+		}
+	}
+}

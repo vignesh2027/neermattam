@@ -1,9 +1,12 @@
 package report
 
 import (
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"neermattam/gateway/internal/upstream"
 )
 
 // VoiceEstimate is a depth read from words such as "knee deep".
@@ -64,6 +67,31 @@ func ParseDepthWords(s string) (VoiceEstimate, bool) {
 		}
 	}
 	return VoiceEstimate{}, false
+}
+
+// FromTranscript takes the voice model's own depth when it gave one (with
+// the contract's floor on sigma: at least 10 cm or 30 percent), and
+// otherwise reads the depth words, then the whole transcript.
+func FromTranscript(t *upstream.Transcript) (VoiceEstimate, bool) {
+	if t.DepthCm != nil && *t.DepthCm >= 0 {
+		sigma := math.Max(10, 0.3**t.DepthCm)
+		if t.DepthSigmaCm != nil {
+			sigma = math.Max(sigma, *t.DepthSigmaCm)
+		}
+		words := t.DepthWords
+		if words == "" {
+			words = t.Text
+		}
+		basis := "the voice model's reading of the spoken words"
+		if t.Model != "" {
+			basis += " (" + t.Model + ")"
+		}
+		return VoiceEstimate{Words: words, DepthCm: round1(*t.DepthCm), SigmaCm: round1(sigma), Basis: basis}, true
+	}
+	if est, ok := ParseDepthWords(t.DepthWords); ok {
+		return est, true
+	}
+	return ParseDepthWords(t.Text)
 }
 
 func round1(x float64) float64 {

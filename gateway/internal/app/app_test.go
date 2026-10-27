@@ -81,20 +81,55 @@ func newFakeEngine(t *testing.T) *fakeEngine {
 }
 
 type fakePerception struct {
-	srv   *httptest.Server
-	calls atomic.Int32
-	body  string
+	srv         *httptest.Server
+	calls       atomic.Int32
+	streamCalls atomic.Int32
+	body        string
+	stream      bool // serve /v1/measure/stream; otherwise it answers 404
+	transcript  string
 }
 
 func newFakePerception(t *testing.T, usable bool) *fakePerception {
 	p := &fakePerception{}
-	p.body = `{"measurement_id":"m_1","usable":true,"reasons":["standing water visible"],"depth_cm":23.4,"depth_sigma_cm":3.1,"reference":{"kind":"two_wheeler_wheel","diameter_cm":43.4,"diameter_sigma_cm":2.0,"source":"catalogue:90/100-10"},"waterline":{"method":"sam_mask_intersection","y_px":812.5,"agreement_cm":1.2},"velocity_mps":null,"velocity_sigma_mps":null,"confidence":0.82,"overlay_png_b64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==","models":{"scene":"muse-spark-1.3","masks":"sam-3.1"},"timings_ms":{"scene":1400,"masks":900,"geometry":12},"cost_usd":0.0041}`
+	p.body = `{"measurement_id":"m_1","usable":true,"reasons":["standing water visible"],"depth_cm":23.4,"depth_sigma_cm":3.1,"reference":{"kind":"two_wheeler_wheel","diameter_cm":43.4,"diameter_sigma_cm":2.0,"source":"catalogue:90/100-10"},"waterline":{"method":"sam_mask_intersection","y_px":812.5,"agreement_cm":1.2},"velocity_mps":null,"velocity_sigma_mps":null,"confidence":0.82,"overlay_png_b64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==","models":{"scene":"muse-spark-1.3","masks":"sam-3.1"},"timings_ms":{"scene":1400,"masks":900,"geometry":12},"cost_usd":0.0041,"method":"wheel_geometry","model_estimate":{"depth_cm":30.0,"depth_sigma_cm":20.0,"basis":"water reaches the lower half of the scooter wheels","model":"muse-spark-open"},"agent_trace":[{"step":"scene","target":"photo","model":"muse-spark-open","input":"photo 1280x960 px","output":"water visible; references: two_wheeler_wheel","decision":"segment and verify 1 wheel and the water","latency_ms":15161},{"step":"segment","target":"two wheeler wheel 1","model":"sam-2.1-hiera-small","input":"box [612,580,660,628] px","output":"mask 1450 px, score 0.91","decision":"verify","latency_ms":70},{"step":"verify","target":"two wheeler wheel 1","model":"muse-spark-open","input":"crop with the outline drawn","output":"is_target=false, outline wrong","decision":"refine with box [600,570,670,640] px","latency_ms":11000},{"step":"verify","target":"two wheeler wheel 1","model":"muse-spark-open","input":"crop with the outline drawn","output":"is_target=true, outline good","decision":"accept","latency_ms":18000},{"step":"geometry","target":"two wheeler wheel 1","model":"geometry","input":"tyre outline and waterline","output":"23.4 cm, sigma 3.1 cm","decision":"report measurement","latency_ms":12}],"captured_at":null}`
 	if !usable {
 		p.body = `{"measurement_id":"m_2","usable":false,"reasons":["no reference object found"],"depth_cm":null,"depth_sigma_cm":null,"confidence":0.1,"models":{}}`
 	}
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/readyz" {
 			w.Write([]byte(`{}`))
+			return
+		}
+		if r.URL.Path == "/v1/transcribe" {
+			p.calls.Add(1)
+			if err := r.ParseMultipartForm(16 << 20); err != nil || r.MultipartForm.File["audio"] == nil {
+				http.Error(w, `{"detail":"audio required"}`, 422)
+				return
+			}
+			w.Write([]byte(p.transcript))
+			return
+		}
+		if r.URL.Path == "/v1/measure/stream" {
+			p.streamCalls.Add(1)
+			if !p.stream {
+				http.NotFound(w, r)
+				return
+			}
+			if err := r.ParseMultipartForm(64 << 20); err != nil {
+				http.Error(w, `{"detail":"bad form"}`, 422)
+				return
+			}
+			p.calls.Add(1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			var m struct {
+				Trace []json.RawMessage `json:"agent_trace"`
+			}
+			json.Unmarshal([]byte(p.body), &m)
+			for _, st := range m.Trace {
+				fmt.Fprintf(w, "event: step\ndata: %s\n\n", st)
+				w.(http.Flusher).Flush()
+			}
+			fmt.Fprintf(w, ": keep-alive\n\nevent: result\ndata: %s\n\n", p.body)
 			return
 		}
 		p.calls.Add(1)
@@ -310,36 +345,170 @@ func TestReportRateLimit(t *testing.T) {
 	}
 }
 
-func TestFormStreamsRealStages(t *testing.T) {
+// sseEvents reads a text/event-stream body into (name, data) pairs.
+func sseEvents(t *testing.T, r io.Reader) (names []string, data []map[string]any) {
+	t.Helper()
+	b, _ := io.ReadAll(r)
+	for _, block := range strings.Split(string(b), "\n\n") {
+		var name, d string
+		for _, line := range strings.Split(block, "\n") {
+			if v, ok := strings.CutPrefix(line, "event: "); ok {
+				name = v
+			}
+			if v, ok := strings.CutPrefix(line, "data: "); ok {
+				d += v
+			}
+		}
+		if name == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(d), &m); err != nil {
+			t.Fatalf("event %s has bad JSON: %v", name, err)
+		}
+		names = append(names, name)
+		data = append(data, m)
+	}
+	return names, data
+}
+
+func TestFormStreamsStagesAndLiveAgentSteps(t *testing.T) {
 	h := newHarness(t, nil, true)
-	r := h.post(t, "/report", loc, map[string][]byte{"media": photo(30)}, "application/x-ndjson")
-	if r.StatusCode != 200 || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-ndjson") {
+	h.perc.stream = true
+	r := h.post(t, "/report", loc, map[string][]byte{"media": photo(30)}, "text/event-stream")
+	if r.StatusCode != 200 || r.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("status %d, type %s", r.StatusCode, r.Header.Get("Content-Type"))
 	}
-	var stages []string
-	var last map[string]any
-	sc := bufio.NewScanner(r.Body)
-	sc.Buffer(nil, 1<<20)
-	for sc.Scan() {
-		var m map[string]any
-		json.Unmarshal(sc.Bytes(), &m)
-		stages = append(stages, m["stage"].(string))
-		last = m
-	}
-	if got := strings.Join(stages, ","); got != "received,scene,verify,fuse,done" {
-		t.Fatalf("stages %s", got)
-	}
-	html := last["html"].(string)
-	for _, want := range []string{"23<small>cm</small>", "± 3.1 cm", "Two-wheeler wheel", "Trust 0.90", "data:image/png;base64,", "Advisory only"} {
-		if !strings.Contains(html, want) {
-			t.Errorf("result card lacks %q", want)
+	names, data := sseEvents(t, r.Body)
+	var seq []string
+	for i, n := range names {
+		if n == "stage" {
+			seq = append(seq, data[i]["stage"].(string))
+		} else {
+			seq = append(seq, n)
 		}
 	}
-	// The page without script renders the same card.
+	want := "received,scene,step,step,step,step,step,verify,fuse,done"
+	if got := strings.Join(seq, ","); got != want {
+		t.Fatalf("events %s\nwant   %s", got, want)
+	}
+	// Steps arrive as server-rendered timeline items, classified.
+	if tone := data[4]["tone"]; tone != "refine" {
+		t.Errorf("third step tone %v, want refine", tone)
+	}
+	if html := data[2]["html"].(string); !strings.Contains(html, "Read the scene") || !strings.Contains(html, "15.2 s") || !strings.Contains(html, "muse-spark-open") {
+		t.Errorf("first step html: %s", html)
+	}
+	last := data[len(data)-1]
+	card := last["html"].(string)
+	for _, w := range []string{"23<small>cm</small>", "± 3.1 cm", "Measured from a two-wheeler wheel", "Two independent readings", "30 ± 20 cm", "muse-spark-open", "Trust 0.90", "data:image/png;base64,", "Advisory only"} {
+		if !strings.Contains(card, w) {
+			t.Errorf("result card lacks %q", w)
+		}
+	}
+	trace := last["trace_html"].(string)
+	if strings.Count(trace, `class="tstep`) != 5 || strings.Contains(trace, "timeline reveal") {
+		t.Errorf("final trace: %d steps, reveal=%v", strings.Count(trace, `class="tstep`), strings.Contains(trace, "timeline reveal"))
+	}
+	if last["streamed_steps"].(float64) != 5 {
+		t.Errorf("streamed_steps %v", last["streamed_steps"])
+	}
+}
+
+func TestStreamFallsBackToPlainMeasure(t *testing.T) {
+	h := newHarness(t, nil, true)
+	r := h.post(t, "/report", loc, map[string][]byte{"media": photo(32)}, "text/event-stream")
+	names, data := sseEvents(t, r.Body)
+	for _, n := range names {
+		if n == "step" {
+			t.Fatal("no live steps exist without the stream endpoint")
+		}
+	}
+	last := data[len(data)-1]
+	if names[len(names)-1] != "done" || !strings.Contains(last["trace_html"].(string), "timeline reveal") {
+		t.Fatalf("the trace should arrive with the result and be revealed: %v", names)
+	}
+	// The missing endpoint is remembered: the next report does not probe it.
+	h.post(t, "/api/report", loc, map[string][]byte{"image": photo(33)}, "")
+	if n := h.perc.streamCalls.Load(); n != 1 {
+		t.Fatalf("stream probed %d times, want 1", n)
+	}
+	// The page without script renders the card and the trace.
 	r = h.post(t, "/report", loc, map[string][]byte{"media": photo(31)}, "text/html")
 	b, _ := io.ReadAll(r.Body)
-	if r.StatusCode != 200 || !strings.Contains(string(b), "Added to the live map") {
+	if r.StatusCode != 200 || !strings.Contains(string(b), "Added to the live map") || !strings.Contains(string(b), "How the models reached this answer") {
 		t.Fatalf("no-script form: %d", r.StatusCode)
+	}
+}
+
+func TestModelEstimateIsLabelledAndCountsForLess(t *testing.T) {
+	h := newHarness(t, nil, true)
+	h.perc.body = `{"measurement_id":"m_e","usable":true,"reasons":["no wheel could be measured"],"depth_cm":23.0,"depth_sigma_cm":20.0,"reference":null,"waterline":null,"confidence":0.62,"models":{"scene":"muse-spark-open","masks":"sam-2.1-hiera-small"},"method":"model_estimate","model_estimate":{"depth_cm":23.0,"depth_sigma_cm":20.0,"basis":"the lower third of the tyres is under water","model":"muse-spark-open"},"agent_trace":[{"step":"scene","target":"photo","model":"muse-spark-open","input":"photo","output":"water visible","decision":"segment and verify 1 wheel","latency_ms":15000},{"step":"verify","target":"two wheeler wheel 1","model":"muse-spark-open","input":"crop","output":"view head_on","decision":"give up: tyre seen head-on, its outline cannot be measured","latency_ms":5861},{"step":"estimate","target":"photo","model":"muse-spark-open","input":"no measurable wheel","output":"23 cm, sigma 20 cm","decision":"report model estimate","latency_ms":0}],"captured_at":"2026-10-27T10:00:00Z"}`
+	r := h.post(t, "/report", loc, map[string][]byte{"media": photo(40)}, "text/event-stream")
+	_, data := sseEvents(t, r.Body)
+	card := data[len(data)-1]["html"].(string)
+	for _, w := range []string{"Model estimate", "No wheel in this photo could be measured", "muse-spark-open", "the lower third of the tyres is under water", "± 20.0 cm", "is-est"} {
+		if !strings.Contains(card, w) {
+			t.Errorf("estimate card lacks %q", w)
+		}
+	}
+	if strings.Contains(card, "Measured from a") {
+		t.Error("an estimate must not be called a measurement")
+	}
+	trace := data[len(data)-1]["trace_html"].(string)
+	if !strings.Contains(trace, "k-giveup") || !strings.Contains(trace, "tyre seen head-on") {
+		t.Error("give-up step not shown")
+	}
+	h.engine.mu.Lock()
+	defer h.engine.mu.Unlock()
+	rd := h.engine.readings[0]
+	// Confidence 0.62 passes and an estimate counts 0.7. The capture time
+	// may be stale or fresh depending on today's date, so only the ceiling
+	// is checked.
+	if rd["trust"].(float64) > 0.7 || rd["source"] != "photo" {
+		t.Fatalf("reading %v", rd)
+	}
+}
+
+func TestCapturedAtComesFromPerception(t *testing.T) {
+	h := newHarness(t, nil, true)
+	taken := time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second)
+	h.perc.body = strings.Replace(h.perc.body, `"captured_at":null`, `"captured_at":"`+taken.Format(time.RFC3339)+`"`, 1)
+	// The photo itself carries a different EXIF time; perception's wins.
+	jpg := testmedia.WithExif(photo(41), time.Now().Add(-30*time.Minute).In(time.FixedZone("IST", 19800)).Format("2006:01:02 15:04:05"), "")
+	out := decode(t, h.post(t, "/api/report", loc, map[string][]byte{"image": jpg}, ""))
+	v := out["verification"].(map[string]any)
+	if v["time_source"] != "exif" || v["observed_at"] != taken.Format(time.RFC3339) {
+		t.Fatalf("observed %v from %v", v["observed_at"], v["time_source"])
+	}
+	h.engine.mu.Lock()
+	defer h.engine.mu.Unlock()
+	if h.engine.readings[0]["observed_at"] != taken.Format(time.RFC3339) || h.engine.readings[0]["trust"] != 0.8 {
+		t.Fatalf("reading %v", h.engine.readings[0])
+	}
+}
+
+func TestVoiceReport(t *testing.T) {
+	h := newHarness(t, nil, true)
+	h.perc.transcript = `{"text":"வேளச்சேரி மெயின் ரோட்டில் முழங்கால் அளவு தண்ணீர், knee deep near the bus stop","language":"ta+en","place_text":"Velachery main road","depth_words":"knee deep","depth_cm":45.0,"depth_sigma_cm":13.5,"model":"muse-spark-open","cost_usd":0.004}`
+	ogg := append([]byte("OggS\x00\x02"), make([]byte, 2000)...)
+	r := h.post(t, "/report", loc, map[string][]byte{"voice": ogg}, "text/event-stream")
+	names, data := sseEvents(t, r.Body)
+	if names[len(names)-1] != "done" {
+		t.Fatalf("events %v", names)
+	}
+	card := data[len(data)-1]["html"].(string)
+	for _, w := range []string{"Voice estimate", "முழங்கால் அளவு", "Velachery main road", "knee deep", "Tamil and English", "45<small>cm</small>", "± 13.5 cm", "not at the place said"} {
+		if !strings.Contains(card, w) {
+			t.Errorf("voice card lacks %q", w)
+		}
+	}
+	h.engine.mu.Lock()
+	defer h.engine.mu.Unlock()
+	rd := h.engine.readings[0]
+	// No EXIF (0.9) and a spoken depth (0.6).
+	if rd["source"] != "voice" || rd["depth_sigma_cm"] != 13.5 || rd["trust"] != 0.54 {
+		t.Fatalf("voice reading %v", rd)
 	}
 }
 
@@ -560,5 +729,14 @@ func TestStaticIsGzippedAndCached(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	if resp.Header.Get("Content-Encoding") != "gzip" || len(b) > 400_000 || !strings.Contains(resp.Header.Get("Cache-Control"), "immutable") {
 		t.Fatalf("encoding %q, %d bytes, cache %q", resp.Header.Get("Content-Encoding"), len(b), resp.Header.Get("Cache-Control"))
+	}
+}
+
+func TestNullCapturedAtMeansNoCaptureTime(t *testing.T) {
+	h := newHarness(t, nil, true) // the fake sends "captured_at": null
+	jpg := testmedia.WithExif(photo(42), "2008:10:22 09:17:24", "")
+	out := decode(t, h.post(t, "/api/report", loc, map[string][]byte{"image": jpg}, ""))
+	if v := out["verification"].(map[string]any); v["time_source"] != "received" || out["status"] != "fused" {
+		t.Fatalf("perception said there is no capture time; got %v, %v", v["time_source"], out["status"])
 	}
 }

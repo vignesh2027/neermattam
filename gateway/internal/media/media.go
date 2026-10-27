@@ -45,6 +45,9 @@ func Sniff(b []byte) (Type, error) {
 		return Type{Image, "image/jpeg", ".jpg"}, nil
 	case bytes.HasPrefix(b, []byte("\x89PNG\r\n\x1a\n")):
 		return Type{Image, "image/png", ".png"}, nil
+	case bytes.HasPrefix(b, []byte("ID3")) || (len(b) >= 2 && b[0] == 0xFF && b[1]&0xE6 == 0xE2):
+		// ID3 tag, or an MPEG audio frame sync with layer III.
+		return Type{Audio, "audio/mpeg", ".mp3"}, nil
 	case bytes.HasPrefix(b, []byte("OggS")):
 		return Type{Audio, "audio/ogg", ".ogg"}, nil
 	case len(b) >= 12 && bytes.Equal(b[0:4], []byte("RIFF")) && bytes.Equal(b[8:12], []byte("WAVE")):

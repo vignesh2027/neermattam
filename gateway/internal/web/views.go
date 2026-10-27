@@ -32,6 +32,10 @@ type Gauge struct {
 	Max                       int
 	MarkPct, LowPct, WidthPct string
 	Ticks                     []Tick
+	// The scene model's own estimate, drawn as a second band when it
+	// accompanies a geometry measurement.
+	HasEstimate                     bool
+	EstMarkPct, EstLowPct, EstWidth string
 }
 
 // RuleView is one verification rule for display.
@@ -72,6 +76,27 @@ type ResultView struct {
 	Advisory   string
 	Transcript string
 	ModelsLine string
+
+	// Method badge: "geometry", "estimate" or "" (older perception).
+	Method      string
+	MethodLabel string
+	// EstimateNote explains a model estimate in plain words.
+	EstimateNote string
+	// Readings lists the measured and the estimated depth when both exist.
+	Readings []ReadingRow
+	Voice    *VoiceView
+	Trace    *TraceView
+}
+
+// ReadingRow is one way the depth was obtained.
+type ReadingRow struct {
+	Label, Value, Note string
+	Primary            bool
+}
+
+// VoiceView is what was heard in a voice note.
+type VoiceView struct {
+	Transcript, Language, Place, DepthWords, Basis, Model string
 }
 
 var ruleNames = map[string]string{
@@ -107,6 +132,7 @@ func NewResultView(o *report.Outcome) *ResultView {
 		v.DepthColor = DepthColor(*o.DepthCm)
 		v.Gauge = newGauge(*o.DepthCm, *o.DepthSigmaCm)
 	}
+	describeMethod(v, o)
 	switch o.Status {
 	case report.StatusFused:
 		v.Title = "Added to the live map"
@@ -118,6 +144,9 @@ func NewResultView(o *report.Outcome) *ResultView {
 		}
 	case report.StatusRejected:
 		v.Title = "Measured, but not added to the map"
+		if m != nil && m.MethodIs(upstream.MethodModelEstimate) || o.Source == "voice" {
+			v.Title = "Estimated, but not added to the map"
+		}
 	}
 	if m != nil {
 		if r := m.Reference; r != nil {
@@ -150,11 +179,15 @@ func NewResultView(o *report.Outcome) *ResultView {
 		}
 		v.ModelsLine = modelsLine(m)
 	}
-	if o.Voice != nil {
-		v.Facts = append(v.Facts, Fact{Label: "Heard", Value: o.Voice.Words, Note: "Read as " + o.Voice.Basis})
+	if t := o.Transcript; t != nil {
+		vv := &VoiceView{Transcript: t.Text, Language: languageName(t.Language), Place: t.PlaceText, DepthWords: t.DepthWords, Model: t.Model}
+		if o.Voice != nil {
+			vv.Basis = "Read as " + o.Voice.Basis + "."
+		}
+		v.Voice = vv
 	}
-	if o.Transcript != nil {
-		v.Transcript = o.Transcript.Text
+	if m != nil && len(m.AgentTrace) > 0 {
+		v.Trace = NewTraceView(m.AgentTrace, false)
 	}
 	if vr := o.Verification; vr != nil {
 		v.Trust = fmt.Sprintf("%.2f", vr.Trust)
@@ -194,6 +227,70 @@ func referenceName(k string) string {
 		return "Auto-rickshaw wheel"
 	}
 	return humanize(k)
+}
+
+// describeMethod sets the method badge, the plain-words note for a model
+// estimate, and both readings when perception gave both.
+func describeMethod(v *ResultView, o *report.Outcome) {
+	m := o.Measurement
+	if m == nil || m.Method == nil {
+		return
+	}
+	est := m.ModelEstimate
+	estModel := "scene model"
+	if est != nil && est.Model != "" {
+		estModel = est.Model
+	}
+	switch *m.Method {
+	case upstream.MethodModelEstimate:
+		v.Method = "estimate"
+		v.MethodLabel = "Model estimate"
+		note := fmt.Sprintf("No wheel in this photo could be measured, so this depth is the scene model's own visual estimate (%s), not a measurement.", estModel)
+		if est != nil && est.Basis != "" {
+			note += " It based it on: " + strings.TrimSuffix(est.Basis, ".") + "."
+		}
+		note += " The band is wide on purpose, and the map counts it for less than a measured photo."
+		v.EstimateNote = note
+	case upstream.MethodWheelGeometry:
+		v.Method = "geometry"
+		kind := "wheel"
+		if m.Reference != nil {
+			kind = strings.ToLower(strings.TrimSuffix(referenceName(m.Reference.Kind), " wheel")) + " wheel"
+		}
+		v.MethodLabel = "Measured from a " + kind
+		if est != nil && m.DepthCm != nil && m.DepthSigmaCm != nil {
+			v.Readings = []ReadingRow{
+				{Label: "Measured from the " + kind, Value: fmt.Sprintf("%.0f ± %.1f cm", *m.DepthCm, *m.DepthSigmaCm), Note: "Used for the map", Primary: true},
+				{Label: "Visual estimate by " + estModel, Value: fmt.Sprintf("%.0f ± %.0f cm", est.DepthCm, est.DepthSigmaCm), Note: capitalise(strings.TrimSuffix(est.Basis, "."))},
+			}
+			if math.Abs(*m.DepthCm-est.DepthCm) > 2*math.Hypot(*m.DepthSigmaCm, est.DepthSigmaCm) {
+				v.Readings[1].Note += ". The two disagree by more than twice their combined uncertainty, so confidence was lowered"
+			}
+			addEstimateBand(&v.Gauge, est.DepthCm, est.DepthSigmaCm)
+		}
+	}
+}
+
+func addEstimateBand(g *Gauge, depth, sigma float64) {
+	maxCm := float64(g.Max)
+	lo := math.Max(0, depth-2*sigma)
+	hi := math.Min(maxCm, depth+2*sigma)
+	g.HasEstimate = true
+	g.EstMarkPct = fmt.Sprintf("%.1f%%", math.Min(100, depth/maxCm*100))
+	g.EstLowPct = fmt.Sprintf("%.1f%%", lo/maxCm*100)
+	g.EstWidth = fmt.Sprintf("%.1f%%", (hi-lo)/maxCm*100)
+}
+
+func languageName(code string) string {
+	switch strings.ToLower(code) {
+	case "ta":
+		return "Tamil"
+	case "en":
+		return "English"
+	case "ta+en", "en+ta":
+		return "Tamil and English"
+	}
+	return code
 }
 
 func methodName(m string) string {

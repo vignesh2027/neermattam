@@ -54,6 +54,8 @@ type Input struct {
 	// has none (a voice note).
 	Confidence float64
 	Source     string // photo, video, voice
+	// Method is perception's method: wheel_geometry or model_estimate.
+	Method string
 	// CapturedAt is the EXIF DateTimeOriginal in UTC, when present.
 	CapturedAt *time.Time
 	ZoneKnown  bool
@@ -80,33 +82,37 @@ type Rainfall interface {
 // Thresholds are the tunable numbers behind the rules. They are engineering
 // judgements, documented in docs/GATEWAY.md, not fitted values.
 type Thresholds struct {
-	ConfidenceReject    float64       // below this the report is not fused
-	ConfidenceFull      float64       // at or above this, no reduction
-	FreshFor            time.Duration // full trust
-	StaleAfter          time.Duration // heavier reduction
-	MaxAge              time.Duration // reject; the engine refuses older readings too
-	FutureSkew          time.Duration // photo clock ahead of server by more than this
-	NearbyRadiusM       float64
-	SpatialSigmaPer100m float64 // cm of expected depth difference per 100 m
-	DryRainMM           float64 // 48-hour rain below this counts as dry
-	WetRainMM           float64 // 48-hour rain at or above this is heavy
-	DeepWithoutRainCm   float64 // depth above this is surprising on a dry day
+	ConfidenceReject float64 // below this the report is not fused
+	ConfidenceFull   float64 // at or above this, no reduction
+	// EstimateConfidenceReject is the floor for model estimates, whose
+	// confidence perception keeps low by design.
+	EstimateConfidenceReject float64
+	FreshFor                 time.Duration // full trust
+	StaleAfter               time.Duration // heavier reduction
+	MaxAge                   time.Duration // reject; the engine refuses older readings too
+	FutureSkew               time.Duration // photo clock ahead of server by more than this
+	NearbyRadiusM            float64
+	SpatialSigmaPer100m      float64 // cm of expected depth difference per 100 m
+	DryRainMM                float64 // 48-hour rain below this counts as dry
+	WetRainMM                float64 // 48-hour rain at or above this is heavy
+	DeepWithoutRainCm        float64 // depth above this is surprising on a dry day
 }
 
 // DefaultThresholds are the values the gateway runs with.
 func DefaultThresholds() Thresholds {
 	return Thresholds{
-		ConfidenceReject:    0.35,
-		ConfidenceFull:      0.6,
-		FreshFor:            2 * time.Hour,
-		StaleAfter:          6 * time.Hour,
-		MaxAge:              24 * time.Hour,
-		FutureSkew:          15 * time.Minute,
-		NearbyRadiusM:       300,
-		SpatialSigmaPer100m: 5,
-		DryRainMM:           1,
-		WetRainMM:           10,
-		DeepWithoutRainCm:   10,
+		ConfidenceReject:         0.35,
+		ConfidenceFull:           0.6,
+		EstimateConfidenceReject: 0.15,
+		FreshFor:                 2 * time.Hour,
+		StaleAfter:               6 * time.Hour,
+		MaxAge:                   24 * time.Hour,
+		FutureSkew:               15 * time.Minute,
+		NearbyRadiusM:            300,
+		SpatialSigmaPer100m:      5,
+		DryRainMM:                1,
+		WetRainMM:                10,
+		DeepWithoutRainCm:        10,
 	}
 }
 
@@ -163,7 +169,19 @@ func (v *Verifier) Verify(ctx context.Context, in Input) Result {
 func (v *Verifier) confidence(in Input) RuleResult {
 	r := RuleResult{Rule: "confidence_floor"}
 	c := in.Confidence
+	estimate := in.Method == "model_estimate"
 	switch {
+	case estimate && c >= v.T.EstimateConfidenceReject:
+		// Perception gives its visual estimates a low confidence on purpose.
+		// Their weight is already cut by the wide sigma (at least 20 cm) and
+		// by the source rule, so scaling again would count the doubt twice.
+		r.Outcome, r.Factor = Pass, 1
+		r.Reason = fmt.Sprintf("confidence %.2f, as expected for a visual estimate; its wide uncertainty limits its weight", c)
+		return r
+	case estimate:
+		r.Outcome, r.Factor = Reject, 0
+		r.Reason = fmt.Sprintf("estimate confidence %.2f is below the floor of %.2f", c, v.T.EstimateConfidenceReject)
+		return r
 	case c < 0:
 		r.Outcome, r.Factor = Skip, 1
 		r.Reason = "spoken report, so there is no model confidence to check"
@@ -221,11 +239,18 @@ func (v *Verifier) freshness(in Input) (RuleResult, time.Time, string) {
 
 func (v *Verifier) source(in Input) RuleResult {
 	r := RuleResult{Rule: "source", Outcome: Pass, Factor: 1}
-	switch in.Source {
-	case "voice":
+	switch {
+	case in.Source == "voice":
 		r.Outcome, r.Factor = Lower, 0.6
 		r.Reason = "a spoken depth is a rough estimate, so it counts for less than a measured photo"
-	case "video":
+	case in.Method == "model_estimate":
+		r.Outcome, r.Factor = Lower, 0.7
+		r.Reason = "no wheel could be measured, so this is the scene model's visual estimate; it counts for less than a measurement"
+	case in.Method == "wheel_geometry" && in.Source == "video":
+		r.Reason = "video measured from a wheel of known size"
+	case in.Method == "wheel_geometry":
+		r.Reason = "photo measured from a wheel of known size"
+	case in.Source == "video":
 		r.Reason = "video measurement"
 	default:
 		r.Reason = "photo measurement"
@@ -321,11 +346,15 @@ func roundDur(d time.Duration) string {
 	case d < time.Hour:
 		m := int(d.Minutes())
 		return fmt.Sprintf("%d %s", m, plural(m, "minute", "minutes"))
-	default:
+	case d < 48*time.Hour:
 		h := d.Hours()
 		if h < 10 {
 			return fmt.Sprintf("%.1f hours", h)
 		}
 		return fmt.Sprintf("%.0f hours", h)
+	case d < 2*365*24*time.Hour:
+		return fmt.Sprintf("%.0f days", d.Hours()/24)
+	default:
+		return fmt.Sprintf("about %.0f years", d.Hours()/24/365.25)
 	}
 }
