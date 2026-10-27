@@ -1,0 +1,71 @@
+{{define "content"}}
+<div class="page">
+  <section class="hero">
+    <p class="eyebrow">About Neermattam</p>
+    <h1>Forecasts say where Chennai will flood. Neermattam measures <em>how deep it is on your street.</em></h1>
+    <p>From one photo of a tyre, Neermattam estimates the depth of the water and how fast it moves, fuses every report into a live map with honest uncertainty, and routes your scooter, auto, car, bus or your own two feet around water you should not cross.</p>
+  </section>
+
+  <div class="how">
+    <article class="card"><span class="n">1</span><h3>Photograph a wheel</h3><p>A scooter, auto or car wheel has a known size. Standing in water, it becomes a ruler. Send a photo or a short video from the web or WhatsApp.</p></article>
+    <article class="card"><span class="n">2</span><h3>Measure with Meta models</h3><p>Muse Spark 1.3 reads the scene and picks the reference. SAM 3.1 masks the wheel and the water. Geometry turns the hidden part of the wheel into a depth with a plus or minus.</p></article>
+    <article class="card"><span class="n">3</span><h3>Fuse, rate and route</h3><p>Each report updates a hex cell about 66 m across with a Kalman filter that ages old water. Cells are rated with the Defra hazard formula and routes avoid what each vehicle cannot cross.</p></article>
+  </div>
+
+  <div class="prose">
+    <h2>What the map shows</h2>
+    <p>Every cell shows its mean depth and the standard deviation behind it. A cell with too little recent evidence is <b>unknown</b> and drawn with grey hatching. A street nobody has reported on is not shaded at all, and it is never treated as safe.</p>
+    <p>Hazard follows the UK Defra and Environment Agency method (FD2320 and FD2321, with the 2008 supplementary note):</p>
+    <p class="formula">HR = d × (v + 0.5) + DF</p>
+    <p>where d is depth in metres, v is velocity in metres per second and DF is the debris factor. When velocity has not been measured the engine assumes 1.0 m/s and says so.</p>
+
+    <h3>Vehicle limits</h3>
+    <p>A vehicle may cross a cell only when the mean depth plus 1.5 standard deviations is within its limit.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Vehicle</th><th>Depth limit</th><th>Depth times velocity</th><th>Basis</th></tr></thead>
+      <tbody>
+        <tr><td>Car</td><td class="num">15 cm</td><td class="num">0.30 m²/s</td><td>US National Weather Service guidance; Australian Rainfall and Runoff small vehicle limit</td></tr>
+        <tr><td>Auto</td><td class="num">15 cm</td><td class="num">0.30 m²/s</td><td>No auto-rickshaw source found; treated like a small car. Unverified.</td></tr>
+        <tr><td>Two-wheeler</td><td class="num">15 cm</td><td class="num">0.30 m²/s</td><td>No two-wheeler source found; car figure used as a floor. Unverified.</td></tr>
+        <tr><td>Bus</td><td class="num">30 cm</td><td class="num">0.60 m²/s</td><td>No bus source found. Unverified.</td></tr>
+        <tr><td>Walking</td><td colspan="2">Blocked at “danger for some” and above</td><td>A router cannot know whether the walker is a child or elderly.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>How a report is checked</h3>
+    <ul>
+      <li><b>Confidence.</b> A measurement the model itself is unsure of is not fused.</li>
+      <li><b>Freshness.</b> The photo's capture time is read from its EXIF data when present. Older photos count for less and are fused at the time they were taken.</li>
+      <li><b>Nearby cells.</b> A report that disagrees strongly with recent real reports nearby counts for less, but is not thrown away: water can change fast.</li>
+      <li><b>Rainfall.</b> Deep water after almost no modelled rain counts for less. It is not rejected, because reservoir releases, burst mains and tides also flood streets.</li>
+      <li><b>Duplicates.</b> The same photo, or a near copy of it, is never counted twice.</li>
+    </ul>
+
+    <h2>Credits</h2>
+  </div>
+  <div class="credits">
+    <article class="card"><h3>Muse Spark 1.3</h3><p>Meta's reasoning model. Reads the scene, picks the reference object, gives a second waterline estimate and parses spoken reports.</p></article>
+    <article class="card"><h3>SAM 3.1</h3><p>Meta's Segment Anything model. Masks the wheel and the water and tracks the surface in video, for depth and speed.</p></article>
+    <article class="card"><h3>Muse Voice Transcribe</h3><p>Meta's speech model. Turns WhatsApp voice notes in Tamil and English into text.</p></article>
+    <article class="card"><h3>OpenStreetMap</h3><p>Road network and base map data © OpenStreetMap contributors, available under the Open Database Licence (ODbL).</p></article>
+    <article class="card"><h3>OpenFreeMap and OpenMapTiles</h3><p>Free vector tiles and the Positron style, rendered with MapLibre GL JS (BSD licence).</p></article>
+    <article class="card"><h3>Open-Meteo</h3><p>Modelled hourly rainfall for report checks, used under CC BY 4.0 with caching to respect its fair use terms.</p></article>
+  </div>
+
+  <div class="prose">
+    <h2>Limitations</h2>
+    <ul>
+      <li>Every route and every depth is advisory. Check local news and official alerts, and turn back if the water looks deeper than expected.</li>
+      <li>Depth comes from a reference object. Without a visible wheel, kerb or person, a photo cannot be measured, and the app says so instead of guessing.</li>
+      <li>The vehicle limits for autos, two-wheelers and buses are not from an Indian source; none was found during the build.</li>
+      <li>Fusion settings, such as how fast water is assumed to recede, are engineering assumptions, not fitted to Chennai data.</li>
+      <li>Rainfall is modelled, not measured at a gauge, and covers an area about 5 km across.</li>
+      <li>Accuracy figures will be published only from the evaluation scripts in the repository, which anyone can rerun.</li>
+    </ul>
+    {{if .Demo}}
+    <h2>About the simulated scenario</h2>
+    <p>This instance runs with a simulated flood so the map is alive before real reports arrive. It places water at low points that flooded during Cyclone Michaung in December 2023: Velachery, Pallikaranai, T. Nagar and the Mambalam subways. The depths are invented. Simulated cells are labelled in the map, the popups and the routes, and a real report is outlined so it stands apart.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}

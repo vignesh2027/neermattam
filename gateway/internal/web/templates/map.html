@@ -1,0 +1,155 @@
+{{define "content"}}
+<section class="map-page" aria-label="Live flood depth map of Chennai">
+  <div id="map" class="map-full" role="region" aria-label="Map. Click a hex cell for its depth, uncertainty, hazard and reports."></div>
+
+  <div class="overlay glass status-card">
+    <h1><span class="live-dot" id="live-dot" aria-hidden="true"></span>Chennai flood depth, live</h1>
+    <p class="sub">Measured from street photos, fused into 66 m hex cells. Click a cell for details.</p>
+    <div class="stats" aria-live="polite">
+      <div class="stat"><b id="st-cells">{{.Stats.Cells}}</b><span>cells<span class="lg-only"> with evidence</span></span></div>
+      <div class="stat"><b id="st-deep">{{.Stats.Deep}}</b><span>over 30 cm</span></div>
+      <div class="stat"><b id="st-max">{{.Stats.Max}}</b><span>deepest<span class="lg-only"> mean</span></span></div>
+    </div>
+    {{if .Demo}}
+    <div class="sim-banner" role="note">
+      {{template "icon-flask"}}
+      <span><strong>Simulated scenario.</strong> <span class="lg-only">Water at the 2023 Michaung low points is invented for this demo. Real reports are outlined and labelled.</span><span class="sm-only">Depths are invented for this demo.</span></span>
+    </div>
+    {{end}}
+  </div>
+
+  <details class="overlay glass legend" id="legend" open>
+    <summary>Legend {{template "icon-chev"}}</summary>
+    <div class="legend-body">
+      <fieldset class="legend-toggle" style="border:0;margin:0 0 10px;padding:3px">
+        <legend class="visually-hidden">Colour cells by</legend>
+        <label><input type="radio" name="colour" value="depth" checked><span>Depth</span></label>
+        <label><input type="radio" name="colour" value="hazard"><span>Hazard</span></label>
+      </fieldset>
+      <div class="ramp" id="scale-depth">
+        <div class="ramp-bar" aria-hidden="true"><i style="background:#BAE6FD"></i><i style="background:#38BDF8"></i><i style="background:#2563EB"></i><i style="background:#4C1D95"></i><i style="background:#9F1239"></i></div>
+        <div class="ramp-labels"><span>0</span><span>15</span><span>30</span><span>50</span><span>80+ cm</span></div>
+        <p class="visually-hidden">Depth bands: under 15 cm, 15 to 30, 30 to 50, 50 to 80, and over 80 centimetres.</p>
+        <p class="ramp-note">Above 15 cm is over the car, auto and two-wheeler limit; above 30 cm is over the bus limit.</p>
+      </div>
+      <div class="ramp" id="scale-hazard" hidden>
+        <div class="ramp-bar four" aria-hidden="true"><i style="background:#BAE6FD"></i><i style="background:#38BDF8"></i><i style="background:#4C1D95"></i><i style="background:#9F1239"></i></div>
+        <div class="ramp-labels four"><span>Caution</span><span>Some</span><span>Most</span><span>All</span></div>
+        <p class="ramp-note">Danger for some (children, the elderly), for most, or for all including the emergency services. HR = d × (v + 0.5) + DF, after UK Defra.</p>
+      </div>
+      <ul class="keys">
+        <li><span class="sw sw-hatch" aria-hidden="true"></span>Unknown: reported, too uncertain</li>
+        <li><span class="sw sw-none" aria-hidden="true"></span>No reports: never assumed safe</li>
+        {{if .Demo}}<li><span class="sw sw-real" aria-hidden="true"></span>Real report, outlined</li>{{end}}
+      </ul>
+    </div>
+  </details>
+
+  <aside class="overlay glass feed" aria-labelledby="feed-title">
+    <h2 id="feed-title">Latest reports <span class="chip chip-grey" id="feed-state">Live</span></h2>
+    <ol id="feed" aria-live="polite">
+      {{range .Feed}}
+      <li class="{{if .Simulated}}is-sim{{else}}is-real{{end}}">
+        <span class="depth-badge {{if lt .DepthCm 15.0}}light{{end}}" style="background:{{depthColor .DepthCm}}">{{printf "%.0f" .DepthCm}}</span>
+        <span class="meta"><b>{{capitalise .Place}}</b><span>{{if .Simulated}}Simulated · {{else}}Real {{.Source}} report · {{end}}± {{printf "%.0f" .DepthSigmaCm}} cm · <time data-at="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{ago .At}}</time></span></span>
+      </li>
+      {{else}}
+      <li class="empty" id="feed-empty" style="display:block;border:0;background:none;padding:0">No reports yet. Reports appear here the moment they are fused.</li>
+      {{end}}
+    </ol>
+  </aside>
+
+  <div class="overlay map-actions">
+    <p class="advisory-pill" role="note">{{template "icon-alert"}}Advisory only. Check local news and official alerts.</p>
+    <a class="btn btn-primary btn-lg" href="/report" id="report-here">{{template "icon-camera"}}Report water here</a>
+  </div>
+</section>
+{{end}}
+
+{{define "scripts"}}<script nonce="{{.Nonce}}">
+document.addEventListener("DOMContentLoaded", function () {
+  "use strict";
+  var params = new URLSearchParams(location.search), at = (params.get("at") || "").split(",").map(Number);
+  var focus = at.length === 2 && isFinite(at[0]) && isFinite(at[1]) ? [at[1], at[0]] : null;
+  var mobile = matchMedia("(max-width: 560px)").matches;
+  var map = NM.create("map", focus ? { center: focus, zoom: 15 } : { center: mobile ? [80.215, 13.0] : [80.205, 13.0], zoom: mobile ? 10.6 : 11.6 });
+  if (mobile) document.getElementById("legend").removeAttribute("open");
+  var dot = document.getElementById("live-dot"), feedState = document.getElementById("feed-state");
+
+  map.on("load", function () {
+    NM.addCells(map, { showReal: {{.Demo}} });
+    NM.popups(map);
+    if (focus) new maplibregl.Marker({ color: "#2563EB" }).setLngLat(focus).addTo(map);
+    var framed = !!focus;
+    NM.live(map, {
+      onData: function (list) {
+        if (!framed && list.length) {
+          framed = true;
+          frame(list);
+        }
+        var known = list.filter(function (f) { return !f.properties.unknown; });
+        var deep = known.filter(function (f) { return f.properties.depth_cm >= 30; }).length;
+        var max = known.reduce(function (a, f) { return Math.max(a, f.properties.depth_cm); }, 0);
+        document.getElementById("st-cells").textContent = list.length.toLocaleString();
+        document.getElementById("st-deep").textContent = deep.toLocaleString();
+        document.getElementById("st-max").textContent = known.length ? Math.round(max) + " cm" : "None";
+      },
+      onStatus: function (s) {
+        dot.setAttribute("data-state", s);
+        feedState.textContent = s === "up" ? "Live" : "Reconnecting";
+      },
+      onReport: addFeed
+    });
+  });
+
+  // Frame the deepest water once, leaving room for the floating panels.
+  function frame(list) {
+    var b = new maplibregl.LngLatBounds(), n = 0;
+    list.forEach(function (f) {
+      if (f.properties.unknown || f.properties.depth_cm < 15) return;
+      f.geometry.coordinates[0].forEach(function (c) { b.extend(c); }); n++;
+    });
+    if (!n) return;
+    var pad = mobile ? { top: 230, bottom: 150, left: 24, right: 24 }
+      : { top: 70, bottom: 50, left: 360, right: innerWidth > 1100 ? 420 : 80 };
+    map.fitBounds(b, { padding: pad, maxZoom: 14, duration: 0 });
+  }
+
+  map.on("moveend", function () {
+    var c = map.getCenter();
+    document.getElementById("report-here").href = "/report?at=" + c.lat.toFixed(5) + "," + c.lng.toFixed(5);
+  });
+
+  document.querySelectorAll("input[name=colour]").forEach(function (r) {
+    r.addEventListener("change", function () {
+      NM.colourBy(map, r.value);
+      document.getElementById("scale-depth").hidden = r.value !== "depth";
+      document.getElementById("scale-hazard").hidden = r.value !== "hazard";
+    });
+  });
+
+  function addFeed(item) {
+    var ol = document.getElementById("feed"), empty = document.getElementById("feed-empty");
+    if (empty) empty.remove();
+    var li = NM.el("li", item.simulated ? "is-sim" : "is-real");
+    var badge = NM.el("span", "depth-badge" + (item.depth_cm < 15 ? " light" : ""), Math.round(item.depth_cm));
+    badge.style.background = NM.depthColor(item.depth_cm);
+    var meta = NM.el("span", "meta");
+    meta.appendChild(NM.el("b", null, item.place.charAt(0).toUpperCase() + item.place.slice(1)));
+    var sub = NM.el("span", null, (item.simulated ? "Simulated" : "Real " + item.source + " report") + " · ± " + Math.round(item.depth_sigma_cm) + " cm · ");
+    var t = NM.el("time", null, NM.ago(item.at)); t.setAttribute("data-at", item.at);
+    sub.appendChild(t); meta.appendChild(sub);
+    li.appendChild(badge); li.appendChild(meta);
+    // Real reports stay on top; the simulated drip never pushes them out.
+    var firstSim = ol.querySelector("li.is-sim");
+    ol.insertBefore(li, item.simulated ? firstSim : ol.firstChild);
+    while (ol.children.length > 5) {
+      var sims = ol.querySelectorAll("li.is-sim");
+      ol.removeChild(sims.length ? sims[sims.length - 1] : ol.lastChild);
+    }
+  }
+  setInterval(function () {
+    document.querySelectorAll("time[data-at]").forEach(function (t) { t.textContent = NM.ago(t.getAttribute("data-at")); });
+  }, 30000);
+});
+</script>{{end}}

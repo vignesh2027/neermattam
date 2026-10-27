@@ -1,0 +1,199 @@
+{{define "mapcore"}}<script nonce="{{.Nonce}}">
+/* Shared map glue: style tint, hex cell layers, live updates, popups. */
+window.NM = (function () {
+  "use strict";
+  var maps = [];
+  var STYLE = "https://tiles.openfreemap.org/styles/positron";
+  var DEPTH = ["step", ["get", "depth_cm"], "#BAE6FD", 15, "#38BDF8", 30, "#2563EB", 50, "#4C1D95", 80, "#9F1239"];
+  var HAZARD = ["match", ["get", "hazard_class"], "low", "#BAE6FD", "danger_some", "#38BDF8", "danger_most", "#4C1D95", "danger_all", "#9F1239", "#CBD5E1"];
+  var HAZ_TEXT = { low: "Caution", danger_some: "Danger for some", danger_most: "Danger for most", danger_all: "Danger for all", unknown: "Unknown" };
+  var HAZ_CHIP = { low: "chip", danger_some: "chip", danger_most: "chip chip-violet", danger_all: "chip chip-danger", unknown: "chip chip-grey" };
+
+  function depthColor(cm) {
+    return cm < 15 ? "#BAE6FD" : cm < 30 ? "#38BDF8" : cm < 50 ? "#2563EB" : cm < 80 ? "#4C1D95" : "#9F1239";
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function ago(iso) {
+    var s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+    if (s < 60) return "just now";
+    if (s < 3600) return Math.round(s / 60) + " min ago";
+    if (s < 86400) return (s / 3600).toFixed(s < 36000 ? 1 : 0) + " h ago";
+    return Math.round(s / 86400) + " d ago";
+  }
+
+  function tint(m) {
+    function set(id, prop, val) { if (m.getLayer(id)) m.setPaintProperty(id, prop, val); }
+    set("background", "background-color", "#F1F4F8");
+    set("water", "fill-color", "#D3DEEC");
+    set("waterway", "line-color", "#C3D2E6");
+    set("park", "fill-color", "#E5ECE8");
+    set("landcover_wood", "fill-color", "#E1E9E4");
+    set("landuse_residential", "fill-color", "#ECF0F5");
+    set("building", "fill-color", "#E5EAF1");
+    set("building", "fill-outline-color", "#D3DDEB");
+    ["highway_minor", "highway_path"].forEach(function (id) { set(id, "line-color", "#FFFFFF"); });
+    set("highway_major_casing", "line-color", "#CFDAEA");
+    set("highway_motorway_casing", "line-color", "#C3D2E7");
+    ["railway", "railway_transit", "railway_service"].forEach(function (id) { set(id, "line-color", "#D5DEEB"); });
+    ["label_city", "label_city_capital", "label_town", "label_village", "label_other", "label_state"].forEach(function (id) {
+      set(id, "text-color", "#1E3155"); set(id, "text-halo-color", "rgba(255,255,255,0.9)");
+    });
+    ["highway-name-minor", "highway-name-major", "highway-name-path"].forEach(function (id) { set(id, "text-color", "#56698A"); });
+    ["water_name_point_label", "water_name_line_label"].forEach(function (id) { set(id, "text-color", "#3A5C9C"); });
+  }
+
+  function hatch(m) {
+    if (m.hasImage("hatch")) return;
+    var s = 16, d = new Uint8Array(s * s * 4);
+    for (var y = 0; y < s; y++) for (var x = 0; x < s; x++) {
+      var i = (y * s + x) * 4, on = ((x + y) % 8) < 2;
+      d[i] = 92; d[i + 1] = 108; d[i + 2] = 134; d[i + 3] = on ? 170 : 34;
+    }
+    m.addImage("hatch", { width: s, height: s, data: d }, { pixelRatio: 2 });
+  }
+
+  function firstSymbol(m) {
+    var ls = m.getStyle().layers;
+    for (var i = 0; i < ls.length; i++) if (ls[i].type === "symbol") return ls[i].id;
+  }
+
+  function create(id, opts) {
+    var m = new maplibregl.Map(Object.assign({
+      container: id, style: STYLE, center: [80.2209, 13.0], zoom: 11.3, minZoom: 9, maxZoom: 18,
+      maxBounds: [[79.85, 12.6], [80.6, 13.45]], attributionControl: false, dragRotate: false, pitchWithRotate: false
+    }, opts || {}));
+    m.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: "Flood cells: Neermattam" }), "bottom-right");
+    if (m.getContainer().clientWidth < 720) {
+      // On small maps the credits start folded behind the (i) button; the
+      // page footer also credits OpenStreetMap and OpenFreeMap.
+      m.once("load", function () {
+        var a = m.getContainer().querySelector(".maplibregl-ctrl-attrib");
+        if (a) a.classList.remove("maplibregl-compact-show");
+      });
+    }
+    m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    m.touchZoomRotate.disableRotation();
+    m.on("style.load", function () { tint(m); });
+    maps.push(m);
+    return m;
+  }
+
+  function addCells(m, opts) {
+    opts = opts || {};
+    hatch(m);
+    m.addSource("cells", { type: "geojson", data: { type: "FeatureCollection", features: [] }, promoteId: "cell" });
+    var before = firstSymbol(m);
+    m.addLayer({ id: "cells-fill", type: "fill", source: "cells", filter: ["!", ["get", "unknown"]],
+      paint: { "fill-color": DEPTH, "fill-opacity": opts.opacity || 0.8 } }, before);
+    m.addLayer({ id: "cells-unknown", type: "fill", source: "cells", filter: ["get", "unknown"],
+      paint: { "fill-pattern": "hatch", "fill-opacity": 0.95 } }, before);
+    m.addLayer({ id: "cells-line", type: "line", source: "cells",
+      paint: { "line-color": "#FFFFFF", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.15, 15, 1.2], "line-opacity": 0.75 } }, before);
+    m.addLayer({ id: "cells-real", type: "line", source: "cells", filter: ["!=", ["get", "origin"], "simulated"],
+      paint: { "line-color": "#0B1B33", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1, 15, 2.4] } }, before);
+    m.addLayer({ id: "cells-flash", type: "line", source: "cells",
+      paint: { "line-color": "#FFFFFF", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1.5, 15, 4],
+        "line-opacity": ["case", ["boolean", ["feature-state", "flash"], false], 1, 0],
+        "line-opacity-transition": { duration: 600 } } }, before);
+    if (!opts.showReal) m.setLayoutProperty("cells-real", "visibility", "none");
+  }
+
+  function colourBy(m, mode) {
+    if (m.getLayer("cells-fill")) m.setPaintProperty("cells-fill", "fill-color", mode === "hazard" ? HAZARD : DEPTH);
+  }
+
+  /* Keeps the cells source in step with /api/cells and /api/stream. */
+  function live(m, hooks) {
+    hooks = hooks || {};
+    var feats = {}, timer = null, es = null;
+    function push() {
+      timer = null;
+      var list = Object.keys(feats).map(function (k) { return feats[k]; });
+      m.getSource("cells").setData({ type: "FeatureCollection", features: list });
+      if (hooks.onData) hooks.onData(list);
+    }
+    function schedule() { if (!timer) timer = setTimeout(push, 200); }
+    function key(f) { return (f.properties && f.properties.cell) || f.id; }
+    function load() {
+      return fetch("/api/cells", { headers: { Accept: "application/json" } })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function (fc) { feats = {}; (fc.features || []).forEach(function (f) { feats[key(f)] = f; }); push(); })
+        .catch(function () { if (hooks.onStatus) hooks.onStatus("down"); });
+    }
+    function flash(id) {
+      setTimeout(function () {
+        try { m.setFeatureState({ source: "cells", id: id }, { flash: true }); } catch (e) { return; }
+        setTimeout(function () { try { m.setFeatureState({ source: "cells", id: id }, { flash: false }); } catch (e) {} }, 1400);
+      }, 260);
+    }
+    function connect() {
+      if (!window.EventSource) return;
+      es = new EventSource("/api/stream");
+      es.onopen = function () { if (hooks.onStatus) hooks.onStatus("up"); };
+      es.onerror = function () { if (hooks.onStatus) hooks.onStatus("down"); };
+      es.addEventListener("cell", function (e) {
+        var f = JSON.parse(e.data), id = key(f);
+        feats[id] = f; schedule(); flash(id);
+        if (hooks.onCell) hooks.onCell(f);
+      });
+      es.addEventListener("resync", function () { load(); });
+      es.addEventListener("report", function (e) { if (hooks.onReport) hooks.onReport(JSON.parse(e.data)); });
+    }
+    load().then(connect);
+    return { reload: load };
+  }
+
+  function popupFor(p) {
+    var box = el("div");
+    var head = el("div", "pop-head");
+    if (p.unknown) {
+      head.appendChild(el("b", null, "Unknown"));
+      box.appendChild(head);
+      box.appendChild(el("div", "pop-bar")).style.background = "repeating-linear-gradient(135deg,#8A99B2 0 2px,#F1F4F9 2px 6px)";
+      box.appendChild(el("p", "pop-unknown", "Too little recent evidence here. Do not assume it is safe. Best guess " +
+        Math.round(p.depth_cm) + " cm, plus or minus " + Math.round(p.depth_sigma_cm) + " cm."));
+    } else {
+      head.appendChild(el("b", null, Math.round(p.depth_cm) + " cm"));
+      head.appendChild(el("span", null, "± " + (Math.round(p.depth_sigma_cm * 10) / 10) + " cm"));
+      box.appendChild(head);
+      box.appendChild(el("div", "pop-bar")).style.background = depthColor(p.depth_cm);
+    }
+    var dl = el("dl", "pop-rows");
+    function row(k, v) { dl.appendChild(el("dt", null, k)); dl.appendChild(el("dd", null, v)); }
+    if (!p.unknown) row("Upper estimate", Math.round(p.depth_upper_cm) + " cm");
+    row("Velocity", p.velocity_assumed || p.velocity_mps == null ? "Not measured" :
+      p.velocity_mps.toFixed(2) + " ± " + (p.velocity_sigma_mps || 0).toFixed(2) + " m/s");
+    if (p.hazard_rating != null && !p.unknown) row("Hazard rating", p.hazard_rating.toFixed(2) + (p.velocity_assumed ? " (1.0 m/s assumed)" : ""));
+    row("Reports", p.n_readings + " here, " + (p.n_neighbour || 0) + " nearby");
+    row("Updated", ago(p.updated_at));
+    box.appendChild(dl);
+    var tags = el("div", "pop-tags");
+    var cls = p.unknown ? "unknown" : p.hazard_class;
+    tags.appendChild(el("span", HAZ_CHIP[cls] || "chip", HAZ_TEXT[cls] || cls));
+    if (p.origin === "simulated") tags.appendChild(el("span", "chip chip-violet", "Simulated scenario"));
+    else if (p.origin === "mixed") tags.appendChild(el("span", "chip chip-violet", "Simulated and real reports"));
+    else tags.appendChild(el("span", "chip chip-ok", "Real reports"));
+    box.appendChild(tags);
+    return box;
+  }
+
+  function popups(m) {
+    ["cells-fill", "cells-unknown"].forEach(function (layer) {
+      m.on("click", layer, function (e) {
+        var f = e.features && e.features[0];
+        if (!f) return;
+        new maplibregl.Popup({ maxWidth: "300px", focusAfterOpen: true }).setLngLat(e.lngLat).setDOMContent(popupFor(f.properties)).addTo(m);
+      });
+      m.on("mouseenter", layer, function () { m.getCanvas().style.cursor = "pointer"; });
+      m.on("mouseleave", layer, function () { m.getCanvas().style.cursor = ""; });
+    });
+  }
+
+  return { maps: maps, create: create, addCells: addCells, live: live, popups: popups, colourBy: colourBy, depthColor: depthColor, el: el, ago: ago };
+})();
+</script>{{end}}

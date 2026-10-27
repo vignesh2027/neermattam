@@ -1,0 +1,51 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{.Title}}</title>
+<meta name="description" content="Neermattam measures floodwater depth on Chennai streets from one photo of a wheel, fuses reports into a live map, and routes each vehicle around water it cannot cross.">
+<meta name="theme-color" content="#F4F9FF">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/static/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/app.css?v={{.CSSVersion}}">
+{{if .NeedsMap}}<link rel="stylesheet" href="/static/vendor/maplibre-gl-5.6.0/maplibre-gl.css">
+<script src="/static/vendor/maplibre-gl-5.6.0/maplibre-gl.js" defer></script>{{end}}
+</head>
+<body class="page-{{.Active}}">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <a class="brand" href="/" aria-label="Neermattam, live map">
+    {{template "mark"}}
+    <span class="brand-name"><strong>Neermattam</strong><span lang="ta">நீர்மட்டம் · water level</span></span>
+  </a>
+  <nav class="nav" aria-label="Main">
+    <a href="/" {{if eq .Active "map"}}aria-current="page"{{end}}><span class="lg-only">Live map</span><span class="sm-only">Map</span></a>
+    <a href="/report" {{if eq .Active "report"}}aria-current="page"{{end}}>Report</a>
+    <a href="/route" {{if eq .Active "route"}}aria-current="page"{{end}}>Route</a>
+    <a href="/about" {{if eq .Active "about"}}aria-current="page"{{end}}>About</a>
+  </nav>
+  {{if ne .Active "report"}}<a class="btn btn-primary btn-sm header-cta" href="/report">{{template "icon-camera"}}Report water</a>{{end}}
+</header>
+<main id="main" tabindex="-1">
+{{template "content" .}}
+</main>
+{{if .Footer}}<footer class="site-footer"><div class="inner">
+  <span>Neermattam. Advisory only: check local news and official alerts before you travel.</span>
+  <span>Map data © OpenStreetMap contributors (ODbL). Tiles by OpenFreeMap. Rainfall from Open-Meteo.</span>
+</div></footer>{{end}}
+{{if .NeedsMap}}{{template "mapcore" .}}{{end}}
+{{block "scripts" .}}{{end}}
+</body>
+</html>{{end}}
+
+{{define "mark"}}<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="nm-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3B82F6"/><stop offset="1" stop-color="#4C1D95"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#nm-g)"/><path d="M16 5.5c3.8 4.5 6.8 8.4 6.8 12A6.8 6.8 0 0 1 9.2 17.5c0-3.6 3-7.5 6.8-12z" fill="#fff"/><path d="M10 19.4c1.5 1 2.7 1 4 0s2.6-1 4 0 2.6 1 4 0" stroke="#2563EB" stroke-width="1.7" fill="none" stroke-linecap="round"/></svg>{{end}}
+
+{{define "icon-camera"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>{{end}}
+{{define "icon-alert"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>{{end}}
+{{define "icon-flask"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7 15h10"/></svg>{{end}}
+{{define "icon-check"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>{{end}}
+{{define "icon-chev"}}<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>{{end}}
+{{define "icon-pin"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.1 7-11.5A7 7 0 0 0 5 9.5C5 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>{{end}}
+{{define "icon-upload"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>{{end}}
+{{define "icon-route"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h7.5a3.5 3.5 0 0 0 0-7h-7a3.5 3.5 0 0 1 0-7H16"/></svg>{{end}}

@@ -1,0 +1,81 @@
+# Neermattam: engine (Rust), perception (Python) and gateway (Go).
+# Only the gateway is published. The OSM extract is mounted read-only.
+#
+#   docker compose up --build            real reports only
+#   DEMO=1 docker compose up --build     with the labelled simulated scenario
+#
+# Secrets (Meta model API keys, WhatsApp tokens) come from .env, which is
+# gitignored and optional.
+name: neermattam
+
+services:
+  engine:
+    build: ./engine
+    restart: unless-stopped
+    environment:
+      ENGINE_BIND: 0.0.0.0:8302
+      ENGINE_OSM_PATH: /data/osm/chennai-roads.osm.pbf
+      ENGINE_SNAPSHOT_PATH: /var/lib/neermattam/cells.json
+    volumes:
+      - ./data/osm:/data/osm:ro
+      - engine-state:/var/lib/neermattam
+    expose:
+      - "8302"
+    networks: [internal]
+
+  perception:
+    build:
+      context: ./perception
+      # Inline so the perception directory needs no Docker files of its
+      # own; only the project metadata and sources enter the image.
+      dockerfile_inline: |
+        FROM python:3.12-slim-bookworm
+        RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 \
+         && rm -rf /var/lib/apt/lists/* \
+         && pip install --no-cache-dir uv==0.11.14
+        WORKDIR /app
+        COPY pyproject.toml uv.lock README.md ./
+        COPY src ./src
+        RUN uv sync --frozen --no-dev
+        RUN useradd --uid 10001 --no-create-home app
+        USER app
+        EXPOSE 8301
+        CMD ["/app/.venv/bin/neermattam-perception"]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PERCEPTION_HOST: 0.0.0.0
+      PERCEPTION_PORT: "8301"
+    expose:
+      - "8301"
+    networks: [internal, egress]
+
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    depends_on:
+      - engine
+      - perception
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GATEWAY_ADDR: :8080
+      ENGINE_URL: http://engine:8302
+      PERCEPTION_URL: http://perception:8301
+      DEMO: ${DEMO:-0}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+    ports:
+      - "8080:8080"
+    networks: [internal, egress]
+
+volumes:
+  engine-state:
+
+networks:
+  # The engine never needs the internet.
+  internal:
+    internal: true
+  egress: {}

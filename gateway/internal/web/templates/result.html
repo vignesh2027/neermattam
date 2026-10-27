@@ -1,0 +1,84 @@
+{{define "result_card"}}
+{{if eq .Status "error"}}
+<article class="card res-error" aria-labelledby="res-title">
+  <h2 id="res-title">{{.Title}}</h2>
+  <p>{{.Message}}</p>
+</article>
+{{else}}
+<article class="card" aria-labelledby="res-title">
+  <header class="res-head">
+    <p class="eyebrow">
+      {{if eq .Status "fused"}}<span class="chip chip-ok">{{.Title}}</span>{{else if eq .Status "rejected"}}<span class="chip chip-amber">{{.Title}}</span>{{else}}<span class="chip chip-grey">{{.Title}}</span>{{end}}
+      {{if eq .Source "voice"}}<span class="chip chip-violet">Voice estimate</span>{{end}}
+    </p>
+    {{if .HasDepth}}
+    <h2 id="res-title" class="res-depth"><b>{{.Depth}}<small>cm</small></b><span>± {{.Sigma}} cm</span><span class="visually-hidden">of water, plus or minus {{.Sigma}} centimetres</span></h2>
+    <p class="res-place">{{.Place}} · {{.When}}</p>
+    <div class="gauge" aria-hidden="true">
+      <div class="gauge-wrap">
+        <div class="gauge-track"></div>
+        <div class="gauge-band" style="left:{{.Gauge.LowPct}};width:{{.Gauge.WidthPct}}"></div>
+        <div class="gauge-mark" style="left:{{.Gauge.MarkPct}}"></div>
+        {{range .Gauge.Ticks}}<span class="gauge-tick{{if .Row2}} row2{{end}}" style="left:{{.Pct}}">{{.Label}}</span>{{end}}
+      </div>
+      <div class="gauge-axis"><span>0 cm</span><span>{{.Gauge.Max}} cm</span></div>
+    </div>
+    {{else}}
+    <h2 id="res-title" style="font-size:22px;margin-top:10px">{{.Message}}</h2>
+    <p class="res-place">{{.Place}} · {{.When}}</p>
+    {{end}}
+  </header>
+  <div class="res-body">
+    {{if .Overlay}}
+    <figure class="overlay-fig">
+      <img src="{{.Overlay}}" alt="The photo with the detected wheel outline and waterline drawn on it">
+      <figcaption>What the models saw: the reference outline and the waterline.</figcaption>
+    </figure>
+    {{end}}
+
+    {{if .Reasons}}
+    <div>
+      <p class="section-title">Why</p>
+      <ul class="reasons">{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>
+      <p class="small muted" style="margin-top:8px">Tips: stand a few metres away, keep the whole wheel in frame, side on, and include the point where it meets the water.</p>
+    </div>
+    {{end}}
+
+    {{if .Facts}}
+    <dl class="facts">
+      {{range .Facts}}<div class="fact"><dt>{{.Label}}</dt><dd>{{.Value}}{{if .Note}}<small>{{.Note}}</small>{{end}}{{if .Meter}}<span class="meter" aria-hidden="true"><i style="width:{{.Meter}}"></i></span>{{end}}</dd></div>{{end}}
+    </dl>
+    {{end}}
+    {{if .Transcript}}<p class="small muted">Transcript: “{{.Transcript}}”</p>{{end}}
+
+    {{if .Rules}}
+    <div>
+      <p class="section-title"><span>Verification</span><span class="chip">Trust {{.Trust}}</span></p>
+      <span class="meter" aria-hidden="true"><i style="width:{{.TrustPct}}"></i></span>
+      <ul class="rules">
+        {{range .Rules}}
+        <li class="o-{{.Outcome}}">
+          <span class="ic" aria-hidden="true">{{if eq .Outcome "pass"}}{{template "icon-check"}}{{else if eq .Outcome "reject"}}!{{else if eq .Outcome "lower"}}−{{else}}·{{end}}</span>
+          <span><b>{{.Name}} <span class="visually-hidden">({{.Outcome}})</span></b><span class="why">{{.Reason}}</span></span>
+          <span class="f">{{.Factor}}</span>
+        </li>
+        {{end}}
+      </ul>
+    </div>
+    {{end}}
+
+    {{with .Cell}}
+    <div class="cell-update">
+      <p class="section-title"><span>Map cell after fusion</span><span class="{{.HazardChip}}">{{.Hazard}}</span></p>
+      <p>{{if .Unknown}}The cell is still <b>unknown</b>: evidence there is too uncertain to rely on.{{else}}The cell now reads <b class="num">{{.Depth}} cm ± {{.Sigma}}</b>, upper estimate <b class="num">{{.Upper}} cm</b>, from {{.Readings}} {{if eq .Readings 1}}report{{else}}reports{{end}}.{{end}}</p>
+      {{if .Simulated}}<p class="small" style="color:var(--violet)">This cell also holds readings from the simulated demo scenario, so its value mixes both.</p>{{end}}
+      <div class="row"><a class="btn btn-primary btn-sm" href="{{$.MapLink}}">See it on the live map</a><a class="btn btn-ghost btn-sm" href="/route">Plan a route</a></div>
+    </div>
+    {{end}}
+
+    {{if .ModelsLine}}<p class="small muted">Models: {{.ModelsLine}}.</p>{{end}}
+    <p class="res-advisory">{{template "icon-alert"}}<span>{{.Advisory}} Depths carry uncertainty; water can rise quickly.</span></p>
+  </div>
+</article>
+{{end}}
+{{end}}
