@@ -1,0 +1,43 @@
+[package]
+name = "neermattam-engine"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Hex-grid flood depth fusion, Defra hazard rating and vehicle-aware routing for Chennai"
+license = "MIT"
+publish = false
+
+[dependencies]
+axum = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+h3o = "0.11"
+osmpbf = "0.3"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tower-http = { version = "0.7", features = ["trace", "timeout"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+[dev-dependencies]
+criterion = "0.8"
+http-body-util = "0.1"
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[[bench]]
+name = "engine"
+harness = false
+
+# Decoding the OSM extract and the h3 maths are slow without optimisation, so
+# dependencies are optimised even in debug builds. This keeps `cargo test`
+# (which loads the real Chennai graph) to a few seconds.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test]
+opt-level = 1
