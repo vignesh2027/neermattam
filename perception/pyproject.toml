@@ -1,0 +1,76 @@
+[project]
+name = "neermattam-perception"
+version = "0.1.0"
+description = "Floodwater depth and surface velocity from one photo or short video, using a wheel of known size as the ruler."
+readme = "README.md"
+authors = [
+    { name = "vigneshwar", email = "applemacbook6sep2004@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.162.0",
+    "httpx>=0.28.1",
+    # Pinned exactly: the official SAM 3.1 output parser. Tests also use its
+    # one_bit encoder to build wire-exact fixtures.
+    "meta-sam-parser==0.1.0",
+    "numpy>=2.5.4",
+    "opencv-python-headless>=5.0.0.93",
+    "pillow>=13.0.0",
+    "pydantic>=2.14.1",
+    # Required by FastAPI to read multipart/form-data uploads.
+    "python-multipart>=0.0.32",
+    "scipy>=1.18.1",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+neermattam-perception = "neermattam_perception.service:main"
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "ruff>=0.17.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # FastAPI's TestClient still imports httpx through starlette; harmless here.
+    "ignore::DeprecationWarning:fastapi.testclient",
+    "ignore:Using `httpx` with `starlette.testclient`",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "NPY"]
+ignore = [
+    "N803", "N806",  # maths variables such as A, D1, S3 follow the papers
+    "N818",  # MediaRejected reads better than MediaRejectedError
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/neermattam_perception/adapters.py" = ["E501"]  # the scene prompt is prose
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["cv2", "cv2.*", "scipy", "scipy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
