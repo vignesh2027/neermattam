@@ -11,8 +11,9 @@ Two interfaces keep the pipeline independent of where the models run:
   request, up to 16) and tracks a noun phrase through a video.
 
 :class:`MetaApiAdapter` implements both against the hosted Meta Model API.
-:class:`OpenWeightsAdapter` is the self-hosted path (SAM 3.1 weights plus Muse
-Glimmer on Modal) and is a stub for now.
+The open-weights path lives in ``muse_open.py`` (Muse Spark Open on Baseten)
+and ``sam_local.py`` (SAM 2.1 locally, and the SAM 3.1 slots).
+:class:`OpenWeightsAdapter` below is the older Modal plan, kept as a stub.
 """
 
 from __future__ import annotations
@@ -56,6 +57,11 @@ class SceneObject:
     vehicle: str | None = None  # catalogue key, or None when unknown
     position: str | None = None  # "front", "rear" or None
     confidence: float = 0.5
+    # Open-weights scene reading only (Muse Spark Open); empty for the hosted path.
+    waterline_points: tuple[tuple[int, int], ...] = ()  # where water meets this object
+    visible_fraction: float | None = None  # share of the object's height above water
+    depth_cm: float | None = None  # the scene model's own depth estimate at this object
+    depth_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +81,12 @@ class SceneReading:
     floating_debris: str | None
     quality: ImageQuality
     cost_usd: float = 0.0
+    water_box: tuple[int, int, int, int] | None = None  # a box on open water, when given
+    # The scene model's own estimate of the depth on the street, when given.
+    overall_depth_cm: float | None = None
+    overall_low_cm: float | None = None
+    overall_high_cm: float | None = None
+    overall_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

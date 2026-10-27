@@ -46,6 +46,36 @@ class ModelsOut(_Strict):
     masks: str
 
 
+class ModelEstimateOut(_Strict):
+    """The scene model's own visual estimate of the depth; not a measurement."""
+
+    depth_cm: float
+    depth_sigma_cm: float
+    basis: str
+    model: str
+
+
+class AgentStepOut(_Strict):
+    step: str
+    target: str
+    model: str
+    input: str
+    output: str
+    decision: str
+    latency_ms: int
+
+
+class TranscribeResponse(_Strict):
+    text: str
+    language: str
+    place_text: str
+    depth_words: str
+    depth_cm: float | None = None
+    depth_sigma_cm: float | None = None
+    model: str
+    cost_usd: float = 0.0
+
+
 class MeasureResponse(_Strict):
     measurement_id: str = Field(default_factory=new_measurement_id)
     usable: bool
@@ -61,3 +91,7 @@ class MeasureResponse(_Strict):
     models: ModelsOut
     timings_ms: dict[str, int] = Field(default_factory=dict)
     cost_usd: float = 0.0
+    method: str | None = None  # "wheel_geometry" or "model_estimate"
+    model_estimate: ModelEstimateOut | None = None
+    agent_trace: list[AgentStepOut] = Field(default_factory=list)
+    captured_at: str | None = None

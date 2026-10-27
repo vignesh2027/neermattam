@@ -1,6 +1,12 @@
 """FastAPI service for perception (docs/CONTRACTS.md section 1), port 8301.
 
-Endpoints: ``POST /v1/measure``, ``GET /healthz``, ``GET /readyz``.
+Endpoints: ``POST /v1/measure``, ``POST /v1/transcribe``, ``GET /healthz``,
+``GET /readyz``.
+
+Models are chosen by environment (see :func:`default_app`): the open-weights
+path (Muse Spark Open on Baseten, SAM 2.1 locally, with the verify-and-refine
+agent) when ``BASETEN_API_KEY`` is set, otherwise the hosted Meta Model API.
+A local mask model is loaded once, at start-up, before the first request.
 
 Uploads are size-limited while being read, images are dimension-limited before
 decoding, and only metadata-free re-encodes are kept or sent to models, so GPS
@@ -17,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -25,6 +33,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from .adapters import MetaApiAdapter, ModelError
+from .agent import VerifyRefineAgent
 from .media import (
     MAX_IMAGE_BYTES,
     MAX_VIDEO_BYTES,
@@ -34,13 +43,32 @@ from .media import (
     load_image,
     load_video,
 )
-from .models import MeasureResponse
+from .models import MeasureResponse, TranscribeResponse
+from .muse_open import MODEL_LABEL, MuseSparkOpenAdapter
 from .pipeline import Pipeline
 from .references import RefKind
+from .sam_local import mask_model_from_config
 
 PORT = 8301
 _IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _VIDEO_TYPES = {"video/mp4", "video/quicktime"}
+# Formats Muse Spark Open accepts (https://docs.baseten.co/inference/model-apis/audio).
+_AUDIO_TYPES = {
+    "audio/wav": "audio/wav",
+    "audio/x-wav": "audio/wav",
+    "audio/wave": "audio/wav",
+    "audio/mpeg": "audio/mpeg",
+    "audio/mp3": "audio/mpeg",
+    "audio/flac": "audio/flac",
+    "audio/x-flac": "audio/flac",
+    "audio/ogg": "audio/ogg",
+    "audio/opus": "audio/ogg",
+    "audio/mp4": "audio/mp4",
+    "audio/m4a": "audio/mp4",
+    "audio/x-m4a": "audio/mp4",
+    "audio/aac": "audio/aac",
+}
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
 
 async def _read_limited(upload: UploadFile, limit: int, what: str) -> bytes:
@@ -131,8 +159,20 @@ class BodyLimit:
         await send({"type": "http.response.body", "body": body})
 
 
-def create_app(pipeline: Pipeline, store_dir: str | None = None) -> FastAPI:
-    app = FastAPI(title="Neermattam perception", version="0.1.0")
+def create_app(
+    pipeline: Pipeline,
+    store_dir: str | None = None,
+    transcriber: MuseSparkOpenAdapter | None = None,
+) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        # Load local weights once, before serving (the first load downloads them).
+        load = getattr(pipeline.masks, "load", None)
+        if callable(load):
+            await asyncio.to_thread(load)
+        yield
+
+    app = FastAPI(title="Neermattam perception", version="0.2.0", lifespan=lifespan)
     app.add_middleware(BodyLimit)
     store = Path(store_dir) if store_dir else None
 
@@ -195,6 +235,31 @@ def create_app(pipeline: Pipeline, store_dir: str | None = None) -> FastAPI:
             headers["X-Captured-At"] = key.captured_at
         return JSONResponse(resp.model_dump(), headers=headers)
 
+    @app.post("/v1/transcribe", response_model=TranscribeResponse)
+    async def transcribe(audio: Annotated[UploadFile, File()]) -> TranscribeResponse:
+        ctype = (audio.content_type or "").split(";")[0].strip().lower()
+        if ctype not in _AUDIO_TYPES:
+            raise HTTPException(415, "audio must be WAV, MP3, FLAC, OGG or M4A")
+        raw = await _read_limited(audio, MAX_AUDIO_BYTES, "audio")
+        if not raw:
+            raise HTTPException(422, "audio is empty")
+        if transcriber is None:
+            raise HTTPException(503, "no audio model is configured (set BASETEN_API_KEY)")
+        try:
+            t = await transcriber.transcribe(raw, _AUDIO_TYPES[ctype])
+        except ModelError as exc:
+            raise HTTPException(503, f"audio model unavailable: {exc}") from exc
+        return TranscribeResponse(
+            text=t.text,
+            language=t.language,
+            place_text=t.place_text,
+            depth_words=t.depth_words,
+            depth_cm=t.depth_cm,
+            depth_sigma_cm=t.depth_sigma_cm,
+            model=MODEL_LABEL,
+            cost_usd=round(t.usage.cost_usd, 6),
+        )
+
     return app
 
 
@@ -224,9 +289,28 @@ def key_from_dotenv(start: Path | None = None) -> str | None:
 
 
 def default_app() -> FastAPI:
+    """The app with models chosen by environment.
+
+    ``NEERMATTAM_SCENE``: ``muse-spark-open`` (Baseten) or ``muse-spark-1.3``
+    (Meta Model API); by default the open model when ``BASETEN_API_KEY`` is set.
+    ``NEERMATTAM_MASKS``: ``sam2.1-local`` (default with the open model),
+    ``sam3.1-api`` or ``sam3.1-local``. With the open model the
+    verify-and-refine agent checks every mask.
+    """
+    store = os.environ.get("NEERMATTAM_STORE_DIR")
+    muse = MuseSparkOpenAdapter.from_env()
+    scene_choice = os.environ.get("NEERMATTAM_SCENE") or (
+        "muse-spark-open" if muse.api_key else "muse-spark-1.3"
+    )
     key = os.environ.get("MODEL_API_KEY") or key_from_dotenv()
-    adapter = MetaApiAdapter(key or "")
-    return create_app(Pipeline(adapter, adapter), os.environ.get("NEERMATTAM_STORE_DIR"))
+    meta = MetaApiAdapter(key or "")
+    if scene_choice == "muse-spark-1.3":
+        masks_name = os.environ.get("NEERMATTAM_MASKS", "sam3.1-api")
+        masks = meta if masks_name == "sam3.1-api" else mask_model_from_config(masks_name)
+        return create_app(Pipeline(meta, masks), store, muse if muse.api_key else None)
+    masks = mask_model_from_config(os.environ.get("NEERMATTAM_MASKS", "sam2.1-local"), api=meta)
+    agent = VerifyRefineAgent(muse, masks)
+    return create_app(Pipeline(muse, masks, agent=agent), store, muse)
 
 
 def main() -> None:

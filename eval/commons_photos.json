@@ -1,0 +1,95 @@
+{
+  "note": "Wikimedia Commons photos of Chennai street flooding used for the qualitative real-photo evaluation. The photos are not stored in git: eval/real_photos.py downloads the originals into eval/photos/ (gitignored). None of them has a measured water depth, so there is no ground truth. The set 'brief' is the four photos the brief names; 'extra' adds two photos with side-on wheels standing in water, so that the wheel geometry is exercised on real photos too.",
+  "photos": [
+    {
+      "id": "c1",
+      "title": "Chennai flood water logging near ofice nandanam4.jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Chennai_flood_water_logging_near_ofice_nandanam4.jpg",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/7/77/Chennai_flood_water_logging_near_ofice_nandanam4.jpg",
+      "author": "Vijayingarsal",
+      "licence": "CC0 1.0",
+      "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "date": "2015-12-03",
+      "size_px": [
+        1632,
+        918
+      ],
+      "set": "brief"
+    },
+    {
+      "id": "c2",
+      "title": "India - Chennai - Monsoon - 04 (3058215637).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_04_(3058215637).jpg",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/c/cf/India_-_Chennai_-_Monsoon_-_04_%283058215637%29.jpg",
+      "author": "McKay Savage (Flickr, https://www.flickr.com/photos/mckaysavage/3058215637/)",
+      "licence": "CC BY 2.0",
+      "licence_url": "https://creativecommons.org/licenses/by/2.0/",
+      "date": "2008-10-22",
+      "size_px": [
+        3264,
+        2448
+      ],
+      "set": "brief"
+    },
+    {
+      "id": "c3",
+      "title": "Inundation of Chennai in 2017-3.jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Inundation_of_Chennai_in_2017-3.jpg",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/f/fd/Inundation_of_Chennai_in_2017-3.jpg",
+      "author": "Kaitha Poo Manam",
+      "licence": "CC BY 3.0",
+      "licence_url": "https://creativecommons.org/licenses/by/3.0/",
+      "date": "2015-12-02",
+      "size_px": [
+        2560,
+        1920
+      ],
+      "set": "brief"
+    },
+    {
+      "id": "c4",
+      "title": "Chennai-floods-2015-dec-7.jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Chennai-floods-2015-dec-7.jpg",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/b/bb/Chennai-floods-2015-dec-7.jpg",
+      "author": "Destination8infinity",
+      "licence": "CC BY-SA 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "date": "2015-12-02",
+      "size_px": [
+        980,
+        735
+      ],
+      "set": "brief"
+    },
+    {
+      "id": "x1",
+      "set": "extra",
+      "title": "India - Chennai - Monsoon - 07 (3059060932).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_07_(3059060932).jpg",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/2/23/India_-_Chennai_-_Monsoon_-_07_%283059060932%29.jpg",
+      "author": "McKay Savage (Flickr, https://www.flickr.com/photos/mckaysavage/3059060932/)",
+      "licence": "CC BY 2.0",
+      "licence_url": "https://creativecommons.org/licenses/by/2.0/",
+      "date": "2008-10-22",
+      "size_px": [
+        3264,
+        2448
+      ]
+    },
+    {
+      "id": "x2",
+      "set": "extra",
+      "title": "India - Chennai - Monsoon - 02 (3059047958).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_02_(3059047958).jpg",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/4/4d/India_-_Chennai_-_Monsoon_-_02_%283059047958%29.jpg",
+      "author": "McKay Savage (Flickr, https://www.flickr.com/photos/mckaysavage/3059047958/)",
+      "licence": "CC BY 2.0",
+      "licence_url": "https://creativecommons.org/licenses/by/2.0/",
+      "date": "2008-10-22",
+      "size_px": [
+        3264,
+        2448
+      ]
+    }
+  ]
+}

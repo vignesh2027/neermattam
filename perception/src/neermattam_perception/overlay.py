@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import math
+from collections.abc import Sequence
 
 import cv2
 import numpy as np
@@ -20,6 +21,7 @@ PRIMARY = (0x25, 0x63, 0xEB)
 VIOLET = (0x4C, 0x1D, 0x95)
 DANGER = (0x9F, 0x12, 0x39)
 SURFACE = (0xFF, 0xFF, 0xFF)
+SKY = (0x38, 0xBD, 0xF8)
 
 
 def _poly(
@@ -70,10 +72,30 @@ def render_overlay(
     label: str | None = None,
     second_line: Line | None = None,
     max_side: int = 1024,
+    water_mask: NDArray[np.bool_] | None = None,
+    object_masks: Sequence[NDArray[np.bool_]] = (),
+    boxes: Sequence[tuple[int, int, int, int]] = (),
 ) -> NDArray[np.uint8]:
+    """The measurement drawn on the photo.
+
+    Optional context: the water mask tinted sky blue, the outlines of the
+    accepted object masks in violet, and boxes (for example the objects the
+    scene model's estimate is based on) in deep red.
+    """
     img = np.ascontiguousarray(rgb.copy())
     scale = max(img.shape[:2]) / 900.0
     w = max(2, round(2 * scale))
+    if water_mask is not None and water_mask.any():
+        tint = img.astype(np.float32)
+        tint[water_mask] = 0.7 * tint[water_mask] + 0.3 * np.array(SKY, dtype=np.float32)
+        img = np.ascontiguousarray(tint.astype(np.uint8))
+    for om in object_masks:
+        contours, _ = cv2.findContours(
+            np.ascontiguousarray(om, dtype=np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+        )
+        cv2.drawContours(img, contours, -1, VIOLET, max(1, w // 2), cv2.LINE_AA)
+    for b in boxes:
+        cv2.rectangle(img, (b[0], b[1]), (b[2], b[3]), DANGER, max(1, w // 2), cv2.LINE_AA)
     if m is not None:
         e = m.ellipse
         if m.outline.tread_px > 0:

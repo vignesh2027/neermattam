@@ -541,7 +541,7 @@ def _sampson_raw(
     but biased on partial arcs of eccentric ellipses, which showed up as a
     systematic depth underestimate in the synthetic evaluation.
     """
-    dx, dy = pts[:, 0] - cx, pts[:, 1] - cy
+    dx, dy = pts[..., 0] - cx, pts[..., 1] - cy
     x = np.abs(dx * c + dy * s)
     y = np.abs(-dx * s + dy * c)
     t = np.arctan2(a * y, b * x)
@@ -954,6 +954,16 @@ MODEL_BIAS_TABLE: tuple[tuple[float, float], ...] = (
 )
 
 
+# The batched Gauss-Newton refits (``uncertainty="linear"``) give a slightly
+# smaller spread than the full nonlinear refits of the Monte Carlo, mostly in
+# the tail where a full refit jumps to another local fit. On 124 usable cases
+# of the calibration seed 9945 (100 draws each) the root-mean-square sigma of
+# the Monte Carlo was 1.14 times that of the batched refits (median ratio
+# 1.07), so the batched sigma is scaled up by the larger factor. Produced by
+# `eval/sigma_methods.py`.
+LINEAR_SIGMA_SCALE = 1.14
+
+
 def model_bias(arc_deg: float, table: tuple[tuple[float, float], ...]) -> float:
     """Signed systematic error (share of the diameter) at ``arc_deg``; never positive."""
     return min(0.0, model_sigma(arc_deg, table))
@@ -978,6 +988,11 @@ class GeometryConfig:
     ransac_iters: int = 400
     line_iters: int = 300
     mc_draws: int = 200
+    # How the measurement noise is propagated (docs/GEOMETRY.md, section 4):
+    # "linear" refits each bootstrap draw with one vectorised Gauss-Newton step
+    # from the full-data fit (fast, the default); "monte_carlo" refits every
+    # draw with the nonlinear solver (slow, kept as the reference).
+    uncertainty: str = "linear"
     max_waterline_rms_frac: float = 0.04
     tyre_model: bool = True
     max_ambiguity: float = 0.15  # largest spread in submerged fraction across near-optimal fits
@@ -1360,7 +1375,9 @@ def measure_wheel_depth(
     if frac >= 1.0:
         return DepthFailure(FailureReason.FULLY_SUBMERGED)
 
-    fr_sigma, d_sigma = _monte_carlo(
+    linear = cfg.uncertainty == "linear"
+    propagate = _linear_bootstrap if linear else _monte_carlo
+    fr_sigma, d_sigma = propagate(
         outline,
         arc_pts,
         chord_pts,
@@ -1375,6 +1392,9 @@ def measure_wheel_depth(
         camera if corrected else None,
         rim_pts if outline.rim_scale is not None else None,
     )
+    if linear:
+        fr_sigma *= LINEAR_SIGMA_SCALE
+        d_sigma *= LINEAR_SIGMA_SCALE
     if spread > 0:
         # Treat the spread of near-optimal fits as a uniform range.
         amb = spread / math.sqrt(12.0)
@@ -1467,6 +1487,182 @@ def _monte_carlo(
         dk = diameter_cm + (rng.normal(0.0, diameter_sigma_cm) if diameter_sigma_cm > 0 else 0.0)
         fr[k] = f
         dep[k] = f * dk
+    return float(np.std(fr, ddof=1)), float(np.std(dep, ddof=1))
+
+
+def _tls_batch(pts: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Total least squares lines for a batch of point sets, shape ``(k, n, 2)``.
+
+    Returns per-set centroids and unit directions, oriented left to right as in
+    :func:`fit_line_tls`.
+    """
+    c = pts.mean(axis=1)
+    d = pts - c[:, None, :]
+    cov = np.einsum("kni,knj->kij", d, d)
+    _, vecs = np.linalg.eigh(cov)
+    direc = vecs[:, :, 1]  # eigenvector of the largest eigenvalue
+    direc = np.where(direc[:, :1] < 0, -direc, direc)
+    return c, direc / np.linalg.norm(direc, axis=1, keepdims=True)
+
+
+def _tread_shift_batch(
+    a: FloatArray, b: FloatArray, theta: FloatArray, t: FloatArray
+) -> tuple[FloatArray, FloatArray]:
+    """:func:`tread_shift` for arrays of parameters (any broadcastable shapes)."""
+    big, small = np.maximum(a, b), np.minimum(a, b)
+    ang = np.where(a >= b, theta, theta + math.pi / 2)
+    length = t * big * np.sqrt(np.maximum(0.0, 1.0 - (small / big) ** 2))
+    return -np.sin(ang) * length, np.cos(ang) * length
+
+
+def _batch_rows(
+    X: FloatArray,
+    arc: FloatArray,
+    anchors: FloatArray,
+    rim: FloatArray | None,
+    tread: bool,
+    anchor_w: float,
+) -> FloatArray:
+    """Outline residual rows for a batch of parameter vectors and point sets.
+
+    ``X`` is ``(k, p)`` in the parameterisation of :func:`_outline_residuals`;
+    ``arc``, ``anchors`` and ``rim`` are ``(k, n, 2)``. Returns ``(k, m)``: the
+    outline points (nearer sidewall), the weighted anchors, the rim points.
+    """
+    cx, cy = X[:, 0:1], X[:, 1:2]
+    a, b = np.exp(X[:, 2:3]), np.exp(X[:, 3:4])
+    th = X[:, 4:5]
+    c, s = np.cos(th), np.sin(th)
+    r = _sampson_raw(arc, cx, cy, a, b, c, s)  # type: ignore[arg-type]
+    if tread:
+        k = np.exp(X[:, 6:7])
+        shx, shy = _tread_shift_batch(a, b, th, X[:, 5:6])
+        r2 = _sampson_raw(arc, cx + shx, cy + shy, k * a, k * b, c, s)  # type: ignore[arg-type]
+        r = np.where(np.abs(r2) < np.abs(r), r2, r)
+    parts = [r, anchor_w * _sampson_raw(anchors, cx, cy, a, b, c, s)]  # type: ignore[arg-type]
+    if rim is not None:
+        rho = np.exp(X[:, -1:])
+        parts.append(_sampson_raw(rim, cx, cy, rho * a, rho * b, c, s))  # type: ignore[arg-type]
+    return np.concatenate(parts, axis=1)
+
+
+def _linear_bootstrap(
+    outline: Outline,
+    arc_pts: FloatArray,
+    chord_pts: FloatArray,
+    water_n: FloatArray,
+    line_rms: float,
+    tol: float,
+    limits: EllipseLimits,
+    diameter_cm: float,
+    diameter_sigma_cm: float,
+    draws: int,
+    rng: np.random.Generator,
+    camera: PinholeCamera | None,
+    rim_pts: FloatArray | None = None,
+    iterations: int = 4,
+) -> tuple[float, float]:
+    """The resampling of :func:`_monte_carlo`, with all refits solved as one batch.
+
+    Each draw resamples exactly what the Monte Carlo resamples: the outline
+    points (bootstrap plus pixel-quantisation jitter), the waterline points
+    (bootstrap plus jitter, refitted by total least squares), the level error,
+    the rim points and the diameter. Instead of one nonlinear solver call per
+    draw, every draw's outline is refitted at once by a few iteratively
+    reweighted Gauss-Newton steps (soft L1 weights, as the solver uses), with
+    the Jacobians of all draws formed together by forward differences. The
+    work is a handful of large numpy operations instead of a Python loop of
+    solver calls. ``docs/GEOMETRY.md`` (section 4) compares the two on the
+    calibration seed.
+    """
+    base_line = fit_line_tls(chord_pts)
+    if draws <= 1:
+        f0, _ = _fraction(outline.near, base_line, water_n, camera)
+        return 0.0, diameter_sigma_cm * f0
+    tread = outline.tread_px > 0
+    has_rim = rim_pts is not None and rim_pts.shape[0] >= 8
+    e0 = outline.near
+    core = [e0.cx, e0.cy, math.log(e0.a), math.log(e0.b), e0.theta]
+    lo = [-np.inf] * 5
+    hi = [np.inf] * 5
+    if tread:
+        core += [outline.tread, math.log(outline.scale)]
+        lo += [-MAX_TREAD, _LOG_SCALE_MIN]
+        hi += [MAX_TREAD, -_LOG_SCALE_MIN]
+    if has_rim:
+        core.append(math.log(outline.rim_scale or 0.6))
+        lo.append(_LOG_RIM_MIN)
+        hi.append(_LOG_RIM_MAX)
+    x0 = np.clip(np.array(core, dtype=np.float64), np.array(lo) + 1e-9, np.array(hi) - 1e-9)
+    lo_a, hi_a = np.array(lo) + 1e-9, np.array(hi) - 1e-9
+    na, nc = arc_pts.shape[0], chord_pts.shape[0]
+    anchor_w = math.sqrt(max(1.0, 0.1 * na))
+
+    # Same random streams, in the same roles, as the Monte Carlo.
+    quant = 1.0 / math.sqrt(12.0)
+    level_sigma = max(line_rms, quant)
+    ap = arc_pts[rng.integers(0, na, (draws, na))] + rng.normal(0.0, quant, (draws, na, 2))
+    cp = chord_pts[rng.integers(0, nc, (draws, nc))] + rng.normal(0.0, quant, (draws, nc, 2))
+    level = rng.normal(0.0, level_sigma, draws)
+    rk = None
+    if has_rim and rim_pts is not None:
+        rk = rim_pts[rng.integers(0, rim_pts.shape[0], (draws, rim_pts.shape[0]))]
+    dk = diameter_cm + (
+        rng.normal(0.0, diameter_sigma_cm, draws) if diameter_sigma_cm > 0 else np.zeros(draws)
+    )
+
+    # Waterline per draw: TLS on the resampled chord, shifted by the level error.
+    centre, direc = _tls_batch(cp)
+    normal = np.stack([-direc[:, 1], direc[:, 0]], axis=1)
+    centre = centre + level[:, None] * normal
+    t = np.einsum("kni,ki->kn", cp - centre[:, None, :], direc)
+    anchors = np.stack(
+        [centre + t.min(axis=1)[:, None] * direc, centre + t.max(axis=1)[:, None] * direc], axis=1
+    )
+
+    X = np.repeat(x0[None, :], draws, axis=0)
+    p = x0.shape[0]
+    f_scale = max(tol, 0.5)
+    h = 1e-6 * np.maximum(1.0, np.abs(x0))
+    eye = np.eye(p)[None]
+
+    def cost(R: FloatArray) -> FloatArray:
+        z = (R / f_scale) ** 2
+        out = np.sum(np.sqrt(1.0 + z) - 1.0, axis=1)
+        return np.asarray(np.where(np.isfinite(out), out, np.inf), dtype=np.float64)
+
+    for _ in range(iterations):
+        R = _batch_rows(X, ap, anchors, rk, tread, anchor_w)
+        J = np.empty((*R.shape, p))
+        for j in range(p):
+            Xp = X.copy()
+            Xp[:, j] += h[j]
+            J[:, :, j] = (_batch_rows(Xp, ap, anchors, rk, tread, anchor_w) - R) / h[j]
+        w = 1.0 / np.sqrt(1.0 + (R / f_scale) ** 2)  # soft L1 as reweighted least squares
+        A = np.einsum("km,kmi,kmj->kij", w, J, J)
+        g = np.einsum("km,kmi,km->ki", w, J, R)
+        A = A + 1e-6 * eye * np.maximum(np.einsum("kii->ki", A), 1e-12)[:, :, None]
+        try:
+            step = np.linalg.solve(A, -g[:, :, None])[:, :, 0]
+        except np.linalg.LinAlgError:
+            break
+        step = np.where(np.isfinite(step), step, 0.0)
+        # Accept a step only where it lowers the robust cost; otherwise try half of it.
+        c0 = cost(R)
+        X1 = np.clip(X + step, lo_a, hi_a)
+        c1 = cost(_batch_rows(X1, ap, anchors, rk, tread, anchor_w))
+        X_half = np.clip(X + 0.5 * step, lo_a, hi_a)
+        c_half = cost(_batch_rows(X_half, ap, anchors, rk, tread, anchor_w))
+        X = np.where((c1 <= c0)[:, None], X1, np.where((c_half < c0)[:, None], X_half, X))
+
+    fr = np.empty(draws)
+    for k in range(draws):
+        xk = X[k]
+        ek = Ellipse(xk[0], xk[1], math.exp(xk[2]), math.exp(xk[3]), xk[4]).normalised()
+        if not limits.accepts(ek):  # as in the Monte Carlo: an implausible refit keeps the start
+            ek = outline.near
+        fr[k], _ = _fraction(ek, Line(centre[k], direc[k]), water_n, camera)
+    dep = fr * dk
     return float(np.std(fr, ddof=1)), float(np.std(dep, ddof=1))
 
 

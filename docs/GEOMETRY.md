@@ -4,7 +4,7 @@ This note explains how `perception/` turns two masks (a wheel and the water) int
 
 ## 1. The idea in one paragraph
 
-A wheel is a circle of known diameter standing in a vertical plane. Floodwater hides its lower part. The waterline across the wheel is a horizontal chord of that circle, and the water depth at the wheel is the height of that chord above the bottom of the circle. So the depth is a fraction of the diameter: `depth = f x D`. The fraction `f` is a ratio of two lengths along the same line inside one object, which is why the camera distance and the focal length drop out. SAM 3.1 gives the masks, Muse Spark 1.3 says where to look, and the geometry below does the rest.
+A wheel is a circle of known diameter standing in a vertical plane. Floodwater hides its lower part. The waterline across the wheel is a horizontal chord of that circle, and the water depth at the wheel is the height of that chord above the bottom of the circle. So the depth is a fraction of the diameter: `depth = f x D`. The fraction `f` is a ratio of two lengths along the same line inside one object, which is why the camera distance and the focal length drop out. SAM 3.1 gives the masks, Muse Spark 1.3 says where to look, and the geometry below does the rest. On the open-weights path SAM 2.1 and Muse Spark Open play the same roles, and Muse Spark Open also checks every mask on a close-up before it is measured (`agent.py`).
 
 ## 2. The construction
 
@@ -111,7 +111,10 @@ Seen at an angle, a tyre shows its tread, and its outline is the convex hull of 
 
 `depth_sigma_cm` combines three parts in quadrature:
 
-1. **Monte Carlo over the measurement.** Each of 100 draws (in the service) bootstraps the outline points with pixel-quantisation jitter and refits the outline; bootstraps the waterline points and refits the line; shifts the line by a level error equal to the observed ripple (ripples are spatially correlated along the chord, so they do not average out); and draws a diameter from `N(D, sigma_D)`.
+1. **Resampling the measurement.** Each of 100 draws (in the service) bootstraps the outline points with pixel-quantisation jitter and refits the outline; bootstraps the waterline points and refits the line; shifts the line by a level error equal to the observed ripple (ripples are spatially correlated along the chord, so they do not average out); and draws a diameter from `N(D, sigma_D)`. Two ways of refitting the draws are implemented (`GeometryConfig.uncertainty`):
+   * `monte_carlo`, the reference: every draw's outline is refitted by the nonlinear solver, one call per draw. It took about 2.3 s per wheel at 100 draws (median, one process, M1), so a photo with several candidate wheels took many seconds.
+   * `linear`, the service default: the same draws, in the same roles and from the same random streams, but all outline refits are solved together as one batch of iteratively reweighted Gauss-Newton steps (four steps, the solver's soft L1 weights, forward-difference Jacobians formed for all draws at once, a step kept only where it lowers the robust cost). It took 0.94 s per wheel (median; 90th percentile 1.5 s against 3.4 s), most of which is now the single full fit that both methods share, and the wheels of one photo are measured on parallel threads.
+   * The batched refits come out a little narrower than full refits, mostly in the tail where a full refit jumps to another local fit: on 124 usable cases of the calibration seed 9945 the batched sigma was 0.94 times the Monte Carlo sigma at the median (10th to 90th percentile 0.72 to 1.09), and the root-mean-square Monte Carlo sigma was 1.14 times the batched one. The batched sigma is therefore multiplied by `geometry.LINEAR_SIGMA_SCALE = 1.14`, the larger of the two factors. These numbers come from `uv run python ../eval/sigma_methods.py` (`--cases 160 --workers 7` for the ratios, `--cases 40 --workers 1` for the times).
 2. **Model ambiguity.** The fit is started from several tread hypotheses. All fits within 15 percent of the best cost are kept, and the spread of the depths they imply enters as a uniform range.
 3. **Model error.** Resampling the same masks cannot reveal fit bias on short arcs, residual perspective or tyre shape. The errors are one-sided: on short arcs the fit sometimes locks onto the tread and far sidewall and returns a near sidewall that is too small and sits too high, so the depth reads low, sometimes by 20 to 40 cm, and almost never reads high by much. Two tables against visible arc, as shares of the diameter, are calibrated on synthetic scenes with a seed disjoint from the evaluation (`synth_eval --calibrate`):
    * `geometry.MODEL_BIAS_TABLE`: the median signed error per arc bin. It is subtracted from the fraction. It is clamped to be no more than zero, so the correction can only raise a depth.
@@ -121,7 +124,12 @@ Seen at an angle, a tyre shows its tread, and its outline is the convex hull of 
 
 The `confidence` field is a 0 to 1 ranking score built from the scene model's image-quality score, the relative sigma and the agreement of the two waterlines. It is not a probability.
 
-**Second waterline.** Muse Spark independently points to where the water meets the wheel's left and right edges. That line is measured on the same fitted wheel, and `waterline.agreement_cm` is the difference between the two depths. It flags splash, reflections and mask errors that the masks alone cannot see.
+**Second waterline.** Muse Spark independently points to where the water meets the wheel's left and right edges (on the open-weights path, the verifier gives these points on its close-up crop of the accepted wheel). That line is measured on the same fitted wheel, and `waterline.agreement_cm` is the difference between the two depths. It flags splash, reflections and mask errors that the masks alone cannot see. Since we cannot tell which of the two lines is wrong, the difference is added to `depth_sigma_cm` in quadrature, so a disagreement widens the uncertainty as well as lowering the confidence.
+
+**Corrections applied after the geometry** (`pipeline.py`), each carrying its own uncertainty:
+
+* Tyre squash (section 5) is subtracted for the tyres with a listed loaded radius, and half of the correction is added to the sigma in quadrature (`references.SQUASH_REL_SIGMA`): the listed loaded radius holds at the rated load and pressure, while a vehicle in the street carries anything from its kerb weight upwards, and deflection grows roughly with load. That half is an assumption, not a measurement.
+* When no wheel can be measured, the scene model's own visual estimate is returned as `method: model_estimate`, with a sigma of at least 20 cm or 30 percent of the estimate, whichever is larger (and at least half of any range the model gave). When both exist, the geometry is used and the estimate is reported beside it; if they differ by more than twice their combined sigma, the confidence is halved and the reasons say so.
 
 ## 5. Error budget
 
@@ -130,13 +138,13 @@ The `confidence` field is a 0 to 1 ranking score built from the scene model's im
 | Mask edge noise | wobbles the outline by 1 to 2 px; biases short arcs | robust fit, orthogonal distance, Monte Carlo, model table |
 | Little arc above water | the fit is poorly conditioned once less than about 150 degrees shows | declined below 100 degrees; sigma grows through the model table; the pipeline prefers the wheel with the smallest sigma, so a bigger wheel in view wins |
 | Ripples and wakes | move the waterline locally by about their amplitude | robust line fit; level error in the Monte Carlo equals the observed scatter |
-| Splash hiding the waterline | scattered chord points | declined when the scatter is large; the second waterline disagrees |
+| Splash hiding the waterline | scattered chord points | declined when the scatter is large; the second waterline disagrees and the disagreement widens sigma |
 | Water seen behind the wheel | touches the outline above the waterline | orientation rule in step 3; only points cutting through the outline form the chord |
 | Bodywork over the wheel | straight occluding edge | straight-run removal; arc check |
 | Tyre width at oblique views | outline is two sidewalls | two-sidewall model, anchors, rim |
 | Perspective | ratios not exactly preserved at close range | exact correction available; measured on the synthetic set |
 | Wheel off vertical | a wheel leaning by `e` makes the in-plane distance `d / cos(e)`: +1.5 percent at 10 degrees, +3.5 percent at 15 degrees (a scooter on its side stand) | not corrected; part of the stated limits |
-| Tyre squash | a loaded tyre's axle sits below its unloaded radius, so the fitted circle reaches below the road by the deflection and the depth reads high by it | subtracted for the auto-rickshaw (4.00-8, 1.9 cm) and the bus (10.00 R20, 3.2 cm), whose loaded radii come from tyre listings; for two-wheeler and car tyres no verified figure was found, so no correction is made and those depths may read slightly high |
+| Tyre squash | a loaded tyre's axle sits below its unloaded radius, so the fitted circle reaches below the road by the deflection and the depth reads high by it | subtracted for the auto-rickshaw (4.00-8, 1.9 cm) and the bus (10.00 R20, 3.2 cm), whose loaded radii come from tyre listings, with half the correction added to sigma in quadrature for the unknown load; for two-wheeler and car tyres no verified figure was found, so no correction is made and those depths may read slightly high |
 | Tread wear | a worn tread is smaller by a few millimetres of radius | inside the per-tyre sigma |
 | Wheel size | catalogue tyre: sigma 1.0 cm (two-wheeler), 1.5 cm (car), 2.0 cm (auto, bus); variants mixed when the position or trim is unknown; generic priors are the mixture of all catalogue wheels of the kind | carried into the Monte Carlo |
 
@@ -165,7 +173,7 @@ Masks are rasterised by pixel coverage (4x supersampling), since filling polygon
 **Results.** Generated by the command shown in the first line; the true diameter is used, so diameter uncertainty adds `f x sigma_D` on top.
 
 <!-- synth-eval:begin -->
-Generated by `uv run python -m neermattam_perception.synth_eval --cases 500 --seed 2026` (40 Monte Carlo draws per case, 298 s wall time).
+Generated by `uv run python -m neermattam_perception.synth_eval --cases 500 --seed 2026 --draws 100` (100 resampling draws per case, propagated by batched Gauss-Newton refits; 329 s wall time).
 
 **All cases, by depth method** (errors over usable cases only)
 
@@ -215,7 +223,7 @@ Generated by `uv run python -m neermattam_perception.synth_eval --cases 500 --se
 | 180 degrees | 35% | 1.64 | 0.71 | 4.28 | 2.7% |
 | 220 degrees | 14% | 0.74 | 0.45 | 1.62 | 1.2% |
 
-**Uncertainty calibration** (depth_sigma_cm: Monte Carlo plus the calibrated model term, on seeds disjoint from the calibration)
+**Uncertainty calibration** (depth_sigma_cm: resampled measurement noise plus the calibrated model term, on seeds disjoint from the calibration)
 
 | Measure | Value |
 |---|---|
@@ -225,7 +233,8 @@ Generated by `uv run python -m neermattam_perception.synth_eval --cases 500 --se
 | median abs error / sigma | 0.26 |
 | share with true depth above depth + 1.5 sigma (ideal 6.7%) | 7.9% |
 | share with true depth below depth - 1.5 sigma (ideal 6.7%) | 0.0% |
-| median geometry time per case | 2730 ms |
+| median geometry time per case | 1900 ms |
+
 <!-- synth-eval:end -->
 
 **Reading the results.**
@@ -236,6 +245,8 @@ Generated by `uv run python -m neermattam_perception.synth_eval --cases 500 --se
 * Before the bias correction the method read low on average, mostly because of a tail of short-arc cases where the fit settles on a near sidewall that is too small and too high (section 4). The median correction removes the typical offset; the tail is not removed but is now covered by the sigma at the 1.5 sigma blocking line. The errors stay one-sided, so the two-sided coverage rows overstate the risk on the high side and the low-side row is the one that matters for routing.
 * Only the main method is bias-corrected; the perspective and outline-only rows are raw, for comparison with each other.
 * The tables were fitted on seed 9945 and checked on seed 4242, which neither the calibration nor this table used (500 cases, 387 usable, 40 draws). Before the change that seed read 2.69 cm low on average (median 0.93 cm low, MAE 3.17 cm) and 17.1 percent of true depths lay above `depth + 1.5 sigma`; after it, 1.55 cm low on average (median 0.13 cm low, MAE 2.80 cm) and 5.7 percent, with the median sigma going from 2.58 to 5.08 cm. The wider sigma is the honest price of the heavy low tail.
+* The tables were calibrated with Monte Carlo sigmas. With the batched refits that the service now uses (and the 1.14 scale), the same held-out seed 4242 gives 387 usable cases, MAE 2.80 cm, bias 1.55 cm low, a median sigma of 5.07 cm, 87 percent of errors within one sigma, 95 percent within two, and 5.9 percent of true depths above `depth + 1.5 sigma` (`uv run python ../eval/synthetic.py --cases 500 --seed 4242 --draws 100`). The coverage still holds.
+* "Median geometry time per case" in the table is measured with six cases running in parallel on an eight-core laptop, so it is slower than the single-process figures in section 4.
 * The perspective correction did not help on these noisy masks, so it stays off by default.
 
 ## 8. Sources

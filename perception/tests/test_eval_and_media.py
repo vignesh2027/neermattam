@@ -70,3 +70,50 @@ def test_eval_report_and_docs_markers(tmp_path: Path) -> None:
     synth_eval.write_docs(doc, body)
     text = doc.read_text()
     assert "STALE TABLE" not in text and body in text and text.endswith("end\n")
+
+
+def test_real_photo_report_and_commons_metadata(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """eval/real_photos.py: every photo has a licence and author, and the report renders."""
+    import importlib.util
+    import json
+
+    root = Path(__file__).resolve().parents[2] / "eval"
+    meta = json.loads((root / "commons_photos.json").read_text())["photos"]
+    assert {m["id"] for m in meta if m["set"] == "brief"} == {"c1", "c2", "c3", "c4"}
+    for m in meta:
+        assert m["licence"] and m["licence_url"].startswith("https://creativecommons.org/")
+        assert m["author"] and m["download"].startswith("https://upload.wikimedia.org/")
+    spec = importlib.util.spec_from_file_location("real_photos", root / "real_photos.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod, "RESULTS", tmp_path / "R.md")
+    body = {
+        "usable": True,
+        "method": "model_estimate",
+        "depth_cm": 30.0,
+        "depth_sigma_cm": 20.0,
+        "confidence": 0.2,
+        "model_estimate": {"depth_cm": 30.0, "depth_sigma_cm": 20.0, "basis": "knee deep"},
+        "captured_at": None,
+        "reasons": ["standing water visible"],
+        "timings_ms": {"scene": 20000},
+        "cost_usd": 0.01,
+        "agent_trace": [
+            {
+                "step": "scene",
+                "target": "photo",
+                "model": "m",
+                "input": "a|b",
+                "output": "o",
+                "decision": "d",
+                "latency_ms": 1,
+            }
+        ],
+    }
+    text = mod.summarise("c1", meta[0], body, 20.5)
+    assert "named in the brief" in text and "a/b" in text and "CC0" in text
+    mod.write_results([text], "header")
+    mod.write_results([text.replace("30.0", "31.0")], "header 2")
+    out = (tmp_path / "R.md").read_text()
+    assert out.count("<!-- real-eval:begin -->") == 1 and "header 2" in out and "31.0" in out

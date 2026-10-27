@@ -1,0 +1,32 @@
+{
+ "id": "chatcmpl-recorded-scene-c3",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "content": "{\"water_visible\":true,\"water\":{\"box\":[380,895,470,948],\"point\":[425,922]},\"references\":[{\"kind\":\"person\",\"box\":[282,812,341,928],\"point\":[312,864],\"rim_point\":null,\"waterline\":[[285,925],[338,926]],\"visible_fraction\":0.42,\"vehicle\":\"unknown\",\"position\":\"unknown\",\"depth_cm\":105,\"depth_reason\":\"water reaches mid-chest of adult standing on road\",\"confidence\":0.83},{\"kind\":\"person\",\"box\":[179,834,220,885],\"point\":[200,861],\"rim_point\":null,\"waterline\":[[182,882],[217,883]],\"visible_fraction\":0.55,\"vehicle\":\"unknown\",\"position\":\"unknown\",\"depth_cm\":85,\"depth_reason\":\"water at waist level of adult\",\"confidence\":0.69},{\"kind\":\"person\",\"box\":[269,830,315,890],\"point\":[290,859],\"rim_point\":null,\"waterline\":[[271,887],[312,888]],\"visible_fraction\":0.5,\"vehicle\":\"unknown\",\"position\":\"unknown\",\"depth_cm\":90,\"depth_reason\":\"water at lower back/waist of adult\",\"confidence\":0.63},{\"kind\":\"two_wheeler_wheel\",\"box\":[789,888,827,920],\"point\":[808,900],\"rim_point\":[808,895],\"waterline\":[[791,917],[825,918]],\"visible_fraction\":0.28,\"vehicle\":\"unknown\",\"position\":\"unknown\",\"depth_cm\":60,\"depth_reason\":\"water covers most of wheel up to hub on sidewalk\",\"confidence\":0.41}],\"overall\":{\"depth_cm\":100,\"low_cm\":85,\"high_cm\":120,\"reason\":\"water reaches waist to chest of adults wading mid-street\"},\"floating_debris\":\"\",\"image_quality\":{\"score\":0.76,\"blurred\":false,\"too_dark\":false,\"issues\":[\"mild compression\",\"foliage occlusion\"]}}",
+    "role": "assistant",
+    "reasoning_content": "Need to locate things precisely.\n\nWe need to return JSON.\n\nWe have image: street flooded, water visible. Need to provide:\n- water box lying entirely on open water surface, away from people and vehicles. Need find area.\n- water point on open water.\n- references: up to 5 objects standing in water that show its depth, best first. A vehicle wheel with part of tyre above water is best reference. Each kind: two_wheeler_wheel, car_wheel, auto_wheel, bus_wheel, kerb, person etc.\n\nWe have people wading. Also scooters/motorbikes submerged? On right side near building, there is a parked two-wheeler? Let's see: At right near building, water partially covers motorbikes. Also center? Need to identify wheels.\n\nVisible objects:\n- People standing in water: center left and middle. There are 4 persons.\n  - L"
+   },
+   "finish_reason": "stop"
+  }
+ ],
+ "created": 1793117903,
+ "model": "meta-models/muse-spark-open-1026",
+ "object": "chat.completion",
+ "usage": {
+  "prompt_tokens": 1556,
+  "completion_tokens": 4660,
+  "total_tokens": 6216,
+  "prompt_tokens_details": {
+   "audio_tokens": 0,
+   "cached_tokens": 128
+  },
+  "completion_tokens_details": {
+   "accepted_prediction_tokens": 0,
+   "audio_tokens": 0,
+   "reasoning_tokens": 4241,
+   "rejected_prediction_tokens": 0
+  }
+ }
+}

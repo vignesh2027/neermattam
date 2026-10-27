@@ -303,6 +303,17 @@ KERB = KerbEntry(
 )
 
 
+# Uncertainty of a tyre-squash correction, as a share of the correction. The
+# listed static loaded radius holds at the tyre's rated load and pressure; a
+# vehicle in the street carries anything from its kerb weight to more than the
+# rating, and on soft or under-inflated tyres, and the deflection scales
+# roughly with load. So the real squash may be about half to one and a half
+# times the listed figure, and its sigma is taken as half the figure. (The
+# spread of the listings themselves, 192 to 195.5 mm for the auto tyre, is
+# much smaller.) This is an assumption, not a measurement.
+SQUASH_REL_SIGMA = 0.5
+
+
 @dataclass(frozen=True, slots=True)
 class ReferenceChoice:
     kind: RefKind
@@ -311,6 +322,11 @@ class ReferenceChoice:
     source: str
     label: str = ""
     squash_cm: float = 0.0
+
+    @property
+    def squash_sigma_cm(self) -> float:
+        """Uncertainty of the squash correction, added in quadrature where it is subtracted."""
+        return SQUASH_REL_SIGMA * self.squash_cm
 
 
 def mixture(entries: Iterable[WheelEntry]) -> tuple[float, float]:

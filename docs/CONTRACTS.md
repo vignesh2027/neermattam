@@ -27,13 +27,26 @@ Response 200:
   "overlay_png_b64": "...",
   "models": {"scene": "muse-spark-1.3", "masks": "sam-3.1"},
   "timings_ms": {"scene": 1400, "masks": 900, "geometry": 12},
-  "cost_usd": 0.0041
+  "cost_usd": 0.0041,
+  "method": "wheel_geometry",
+  "model_estimate": {"depth_cm": 30.0, "depth_sigma_cm": 20.0, "basis": "water reaches the lower half of the scooter wheels", "model": "muse-spark-open"},
+  "agent_trace": [
+    {"step": "segment", "target": "two wheeler wheel 1", "model": "sam-2.1-hiera-small", "input": "box [612,580,660,628] px + point [636,600]", "output": "mask 1450 px, bbox [610,578,661,626] px, score 0.91", "decision": "verify", "latency_ms": 70},
+    {"step": "verify", "target": "two wheeler wheel 1", "model": "muse-spark-open", "input": "crop [520,488,752,720] px with the outline drawn", "output": "is_target=true, outline good, waterline visible", "decision": "accept", "latency_ms": 18000}
+  ],
+  "captured_at": "2015-12-02T07:56:12"
 }
 ```
 When `usable` is false, `depth_cm` is null and `reasons` explains why (no water, no reference object, blurred, ambiguous waterline).
 
+- `method`: how `depth_cm` was obtained. `wheel_geometry` is a measurement from a wheel of known size (docs/GEOMETRY.md). `model_estimate` means no wheel could be measured and `depth_cm` is the scene model's own visual estimate, with `depth_sigma_cm` at least 20 cm or 30 percent of the estimate, whichever is larger; the UI must label it as an estimate. Null when `usable` is false.
+- `model_estimate`: the scene model's own estimate whenever it gave one (null otherwise), reported alongside a geometry measurement too. When both exist the map uses the geometry; if they differ by more than twice their combined sigma, `confidence` is lowered and `reasons` says so.
+- `waterline.agreement_cm`: when the scene model's waterline and the mask waterline disagree, the difference is added in quadrature to `depth_sigma_cm`, so disagreement widens the uncertainty as well as lowering `confidence`.
+- `agent_trace`: every model step that led to the answer, in order: the scene reading, each mask proposal (`segment`), each check of a mask by the scene model (`verify`, with decision `accept`, `refine with box ...` or `give up`), each geometry attempt and the estimate. `latency_ms` is the wall time of that step. On the single-request hosted path there is one `segment` step for all objects and no `verify` steps.
+- `captured_at`: EXIF `DateTimeOriginal` of the photo (RFC 3339; UTC with `Z` when the camera recorded a zone offset, otherwise local time without an offset), or null. Also sent as the `X-Captured-At` response header.
+
 ### POST /v1/transcribe
-Multipart `audio` (wav/ogg/m4a). Returns `{"text": "...", "language": "ta+en", "place_text": "Velachery main road", "depth_words": "knee deep"}`.
+Multipart `audio` (wav/ogg/m4a/mp3, at most 25 MB). Returns `{"text": "...", "language": "ta+en", "place_text": "Velachery main road", "depth_words": "knee deep", "depth_cm": 45.0, "depth_sigma_cm": 13.5, "model": "muse-spark-open", "cost_usd": 0.004}`. `depth_cm` and `depth_sigma_cm` are the model's reading of the spoken depth words (null when none were spoken), with a sigma of at least 10 cm or 30 percent of the depth. Returns 503 with a reason when the audio model is unavailable.
 
 ## 2. Engine (Rust, port 8302)
 
