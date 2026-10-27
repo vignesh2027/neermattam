@@ -17,7 +17,7 @@ use crate::fusion::{CellView, Grid, Observation};
 use crate::graph::RoadGraph;
 use crate::hazard::{assess, HazardClass};
 use crate::persist;
-use crate::routing::{plan_route, RouteError, RouteKind, RouteSummary};
+use crate::routing::{blocking_estimate, plan_route, RouteError, RouteKind, RouteSummary};
 use crate::vehicle::{CrossingLimit, Vehicle};
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{DefaultBodyLimit, Query, State};
@@ -31,7 +31,7 @@ use futures_util::{Stream, StreamExt};
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -46,43 +46,50 @@ use tracing::{info, warn, Level};
 /// get a `lagged` comment and should refetch `/v1/cells`.
 const EVENT_BUFFER: usize = 4096;
 
-/// A bounded set of recently seen reading ids, so a retried POST is not
-/// fused twice.
+/// How far in the future `observed_at` may be, for client clock drift.
+/// Later times are refused, and times up to this far ahead are clamped to
+/// the server clock. A reading dated hours ahead would hold its cell at that
+/// time, and every real reading would then arrive "late", be decayed across
+/// the gap and lose almost all its weight: one future-dated dry report could
+/// hide deep water for a day.
+pub const MAX_FUTURE_SKEW_SECS: i64 = 300;
+
+/// A bounded map of recently fused reading ids to the cell each fell in, so
+/// a retried POST is not fused twice and is answered with the original cell.
 #[derive(Debug)]
 struct RecentIds {
-    set: HashSet<String>,
-    order: VecDeque<String>,
+    cells: HashMap<Arc<str>, h3o::CellIndex>,
+    order: VecDeque<Arc<str>>,
     cap: usize,
 }
 
 impl RecentIds {
     fn new(cap: usize) -> Self {
         RecentIds {
-            set: HashSet::new(),
+            cells: HashMap::new(),
             order: VecDeque::new(),
             cap: cap.max(1),
         }
     }
 
-    /// Record `id`. Returns false when it was already present.
-    fn insert(&mut self, id: &str) -> bool {
-        if self.set.contains(id) {
-            return false;
+    /// The cell an id was fused into, if it is remembered.
+    fn get(&self, id: &str) -> Option<h3o::CellIndex> {
+        self.cells.get(id).copied()
+    }
+
+    /// Remember `id`, forgetting the oldest id when full.
+    fn insert(&mut self, id: &str, cell: h3o::CellIndex) {
+        if self.cells.contains_key(id) {
+            return;
         }
         if self.order.len() >= self.cap {
             if let Some(old) = self.order.pop_front() {
-                self.set.remove(&old);
+                self.cells.remove(&old);
             }
         }
-        self.set.insert(id.to_owned());
-        self.order.push_back(id.to_owned());
-        true
-    }
-
-    fn remove(&mut self, id: &str) {
-        if self.set.remove(id) {
-            self.order.retain(|x| x != id);
-        }
+        let id: Arc<str> = Arc::from(id);
+        self.cells.insert(Arc::clone(&id), cell);
+        self.order.push_back(id);
     }
 }
 
@@ -313,15 +320,27 @@ pub fn validate_reading(
         }
         (Some(v), Some(s)) => (Some(v), Some(s)),
     };
-    let skew_h = (r.observed_at - now).num_seconds() as f64 / 3600.0;
-    if skew_h.abs() > cfg.max_observation_skew_h {
+    let ahead_s = (r.observed_at - now).num_seconds();
+    if ahead_s > MAX_FUTURE_SKEW_SECS {
         return Err(format!(
-            "observed_at {} is more than {} hours from the server time {}",
+            "observed_at {} is in the future; the server time is {} and at most {} seconds of clock drift is allowed",
+            r.observed_at.to_rfc3339(),
+            now.to_rfc3339(),
+            MAX_FUTURE_SKEW_SECS
+        ));
+    }
+    let age_h = -(ahead_s as f64) / 3600.0;
+    if age_h > cfg.max_observation_skew_h {
+        return Err(format!(
+            "observed_at {} is more than {} hours before the server time {}",
             r.observed_at.to_rfc3339(),
             cfg.max_observation_skew_h,
             now.to_rfc3339()
         ));
     }
+    // Small clock drift ahead of the server is clamped, so no cell state is
+    // ever dated in the future.
+    let observed_at = r.observed_at.min(now);
     if let Some(s) = &r.source {
         if !matches!(s.as_str(), "photo" | "video" | "voice" | "official") {
             return Err(format!(
@@ -342,7 +361,7 @@ pub fn validate_reading(
         depth_sigma_cm: r.depth_sigma_cm,
         velocity_mps,
         velocity_sigma_mps,
-        observed_at: r.observed_at,
+        observed_at,
         trust,
     })
 }
@@ -357,8 +376,12 @@ pub struct CellProperties {
     pub depth_cm: f64,
     /// Depth standard deviation, cm.
     pub depth_sigma_cm: f64,
-    /// `depth_cm + k x depth_sigma_cm`, the value routing uses.
+    /// The depth routing judges the cell at (see `routing::blocking_estimate`).
     pub depth_upper_cm: f64,
+    /// Standard deviation of the fused measurements alone, cm.
+    pub depth_sigma_meas_cm: f64,
+    /// The deeper side of a conflict in force, cm; routing blocks on it.
+    pub conflict_high_mean_cm: Option<f64>,
     /// Mean velocity, m/s, when known.
     pub velocity_mps: Option<f64>,
     /// Velocity standard deviation, m/s, when known.
@@ -375,18 +398,26 @@ pub struct CellProperties {
     pub debris_factor: Option<f64>,
     /// Too little evidence. Never treat as safe.
     pub unknown: bool,
+    /// Every piece of evidence is older than the expiry window: unknown, and
+    /// no longer blocks routes.
+    pub expired: bool,
     /// Direct readings.
     pub n_readings: u32,
     /// Readings from adjacent cells.
     pub n_neighbour: u32,
+    /// Direct readings that disagreed with the cell's estimate.
+    pub conflicts: u32,
     /// Latest evidence time.
     pub updated_at: DateTime<Utc>,
+    /// Direct depth estimate just after the latest direct reading, cm.
+    pub last_depth_cm: Option<f64>,
+    /// Hours since the latest direct reading.
+    pub last_reading_age_h: Option<f64>,
 }
 
 /// Build the properties for a cell view.
 #[must_use]
 pub fn cell_properties(v: &CellView, cfg: &Config) -> CellProperties {
-    let k = cfg.policy.safety_sigmas;
     let p = &cfg.policy;
     let mean = assess(
         v.depth.mean,
@@ -394,17 +425,20 @@ pub fn cell_properties(v: &CellView, cfg: &Config) -> CellProperties {
         p.default_velocity_mps,
         p.debris_rule,
     );
+    let (depth_upper, velocity_upper, assumed) = blocking_estimate(v, p);
     let upper = assess(
-        v.depth.upper(k),
-        v.velocity.map(|g| g.upper(k)),
-        p.default_velocity_mps,
+        depth_upper,
+        (!assumed).then_some(velocity_upper),
+        velocity_upper,
         p.debris_rule,
     );
     CellProperties {
         cell: v.cell.to_string(),
         depth_cm: r1(v.depth.mean),
         depth_sigma_cm: r1(v.depth.sigma()),
-        depth_upper_cm: r1(v.depth.upper(k).max(0.0)),
+        depth_upper_cm: r1(depth_upper),
+        depth_sigma_meas_cm: r1(v.sigma_meas_cm),
+        conflict_high_mean_cm: v.conflict_high_mean_cm.map(r1),
         velocity_mps: v.velocity.map(|g| r2(g.mean)),
         velocity_sigma_mps: v.velocity.map(|g| r2(g.sigma())),
         velocity_assumed: mean.velocity_assumed,
@@ -421,9 +455,13 @@ pub fn cell_properties(v: &CellView, cfg: &Config) -> CellProperties {
         },
         debris_factor: (!v.unknown).then_some(mean.debris_factor),
         unknown: v.unknown,
+        expired: v.expired,
         n_readings: v.n_readings,
         n_neighbour: v.n_neighbour,
+        conflicts: v.conflicts,
         updated_at: v.updated_at,
+        last_depth_cm: v.last_depth_cm.map(r1),
+        last_reading_age_h: v.last_reading_age_h.map(r2),
     }
 }
 
@@ -468,6 +506,7 @@ struct ReadingOut {
     velocity_sigma_mps: Option<f64>,
     unknown: bool,
     n_readings: u32,
+    conflicts: u32,
     updated_at: DateTime<Utc>,
     hazard: HazardOut,
     duplicate: bool,
@@ -496,6 +535,7 @@ fn reading_out(
         velocity_sigma_mps: p.velocity_sigma_mps,
         unknown: p.unknown,
         n_readings: p.n_readings,
+        conflicts: p.conflicts,
         updated_at: p.updated_at,
         hazard: HazardOut {
             rating: p.hazard_rating,
@@ -519,43 +559,50 @@ async fn post_reading(
     let now = Utc::now();
     let obs = validate_reading(&r, &st.config, now).map_err(ApiError::bad_request)?;
 
-    if let Some(id) = &r.reading_id {
-        if !st.recent_ids.lock().insert(id) {
-            let cell = st
-                .grid
-                .read()
-                .cell_at(obs.lat, obs.lon)
-                .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    // The id check, the fusion and the id record happen under one lock, so a
+    // retry that races the original waits for it and is then answered from
+    // the cell the original was fused into. Lock order: ids, then grid.
+    let ingested = {
+        let mut ids = st.recent_ids.lock();
+        if let Some((id, cell)) = r
+            .reading_id
+            .as_deref()
+            .and_then(|id| ids.get(id).map(|c| (id, c)))
+        {
+            drop(ids);
             info!(reading_id = %id, cell = %cell, "duplicate reading ignored");
-            return reading_out(&st, cell, r.reading_id.clone(), true, now).map(Json);
+            return reading_out(&st, cell, r.reading_id.clone(), true, now)
+                .map_err(|_| ApiError {
+                    status: StatusCode::CONFLICT,
+                    message: format!(
+                        "reading_id '{id}' was already fused, and its cell has since been forgotten"
+                    ),
+                })
+                .map(Json);
         }
-    }
-
-    let ingested = st.grid.write().ingest(&obs);
-    let ingested = match ingested {
-        Ok(i) => i,
-        Err(e) => {
-            if let Some(id) = &r.reading_id {
-                st.recent_ids.lock().remove(id);
-            }
-            return Err(ApiError::bad_request(e.to_string()));
+        let ingested = st
+            .grid
+            .write()
+            .ingest(&obs)
+            .map_err(|e| ApiError::bad_request(e.to_string()))?;
+        if let Some(id) = &r.reading_id {
+            ids.insert(id, ingested.cell);
         }
+        ingested
     };
     st.dirty.store(true, Ordering::SeqCst);
 
-    // Publish every changed cell. Views are built under one read lock.
-    let features: Vec<String> = {
+    // Publish every changed cell. The events are sent while the read lock is
+    // held, so no later write can slip in between building a cell's view and
+    // sending it: a subscriber never receives an older state after a newer one.
+    {
         let g = st.grid.read();
-        ingested
-            .touched
-            .iter()
-            .filter_map(|c| g.view(*c, now))
-            .map(|v| cell_feature(&v, &st.config).to_string())
-            .collect()
-    };
-    for f in features {
-        // No subscribers is fine.
-        let _ = st.events.send(Arc::from(f));
+        for v in ingested.touched.iter().filter_map(|c| g.view(*c, now)) {
+            // No subscribers is fine.
+            let _ = st
+                .events
+                .send(Arc::from(cell_feature(&v, &st.config).to_string()));
+        }
     }
 
     let out = reading_out(&st, ingested.cell, r.reading_id.clone(), false, now)?;
@@ -658,6 +705,10 @@ fn route_feature(s: &RouteSummary, vehicle: Vehicle, cfg: &Config, now: DateTime
             "eta_min": r1(s.eta_min),
             "max_depth_cm_on_route": s.max_depth_cm_on_route.map(r1),
             "max_depth_sigma_cm": s.max_depth_sigma_cm.map(r1),
+            "max_known_depth_cm": s.max_depth_cm_on_route.map(r1),
+            "max_unknown_depth_cm": s.max_unknown_depth_cm.map(r1),
+            "max_unknown_depth_age_h": s.max_unknown_depth_age_h.map(r1),
+            "old_deep_cells_crossed": s.old_deep_cells_crossed,
             "cells_on_route": s.cells_on_route,
             "cells_avoided": s.cells_avoided,
             "unknown_cells_crossed": s.unknown_cells_crossed,
@@ -767,6 +818,13 @@ async fn readyz(State(st): State<Arc<AppState>>) -> Response {
         .into_response()
 }
 
+async fn method_not_allowed() -> ApiError {
+    ApiError {
+        status: StatusCode::METHOD_NOT_ALLOWED,
+        message: "method not allowed on this endpoint; see docs/CONTRACTS.md section 2".into(),
+    }
+}
+
 async fn not_found() -> ApiError {
     ApiError {
         status: StatusCode::NOT_FOUND,
@@ -790,6 +848,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .merge(timed)
         .route("/v1/stream", get(stream))
+        .method_not_allowed_fallback(method_not_allowed)
         .fallback(not_found)
         .layer(DefaultBodyLimit::max(cfg.body_limit_bytes))
         .layer(
@@ -862,13 +921,39 @@ mod tests {
 
     #[test]
     fn recent_ids_are_bounded() {
+        let c = |lat: f64| {
+            h3o::LatLng::new(lat, 80.2)
+                .unwrap()
+                .to_cell(h3o::Resolution::Ten)
+        };
         let mut ids = RecentIds::new(2);
-        assert!(ids.insert("a"));
-        assert!(!ids.insert("a"));
-        assert!(ids.insert("b"));
-        assert!(ids.insert("c"));
-        assert!(ids.insert("a"), "oldest id should have been evicted");
-        ids.remove("c");
-        assert!(ids.insert("c"));
+        ids.insert("a", c(13.0));
+        ids.insert("a", c(13.1));
+        assert_eq!(ids.get("a"), Some(c(13.0)), "first cell is kept");
+        ids.insert("b", c(13.0));
+        ids.insert("c", c(13.0));
+        assert_eq!(ids.get("a"), None, "oldest id should have been evicted");
+        assert_eq!(ids.get("c"), Some(c(13.0)));
+    }
+
+    #[test]
+    fn future_observations_are_refused_or_clamped() {
+        // Regression: observed_at up to 24 hours ahead was accepted, and one
+        // future-dated dry report then hid real deep water for that long.
+        let cfg = Config::default();
+        let now = Utc::now();
+        let mut r = reading();
+        r.observed_at = now + chrono::Duration::hours(2);
+        let e = validate_reading(&r, &cfg, now).unwrap_err();
+        assert!(e.contains("in the future"), "{e}");
+        r.observed_at = now + chrono::Duration::seconds(MAX_FUTURE_SKEW_SECS + 1);
+        assert!(validate_reading(&r, &cfg, now).is_err());
+        r.observed_at = now + chrono::Duration::seconds(120);
+        assert_eq!(validate_reading(&r, &cfg, now).unwrap().observed_at, now);
+        r.observed_at = now - chrono::Duration::hours(3);
+        assert_eq!(
+            validate_reading(&r, &cfg, now).unwrap().observed_at,
+            r.observed_at
+        );
     }
 }

@@ -207,6 +207,85 @@ async fn invalid_readings_are_rejected_with_clear_messages() {
 }
 
 #[tokio::test]
+async fn a_future_dated_dry_report_cannot_hide_deep_water() {
+    // Regression: observed_at 20 hours ahead was accepted. The cell's state
+    // then sat in the future, the real 60 cm report arrived "late", was
+    // decayed across 20 hours and the cell read 0 cm, low hazard.
+    let app = app_with(&AppState::new(config()));
+    let mut fake = reading("fake", 12.9791, 80.2209, 0.0);
+    fake["observed_at"] = json!((Utc::now() + chrono::Duration::hours(20)).to_rfc3339());
+    let (s, b) = send(&app, post_json("/v1/readings", &fake)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{b}");
+    assert!(b["error"].as_str().unwrap().contains("in the future"));
+    // A couple of minutes of clock drift is accepted and clamped to now.
+    let mut drift = reading("drift", 12.9791, 80.2209, 0.0);
+    drift["observed_at"] = json!((Utc::now() + chrono::Duration::seconds(120)).to_rfc3339());
+    let (s, b) = send(&app, post_json("/v1/readings", &drift)).await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let updated: chrono::DateTime<Utc> = b["updated_at"].as_str().unwrap().parse().unwrap();
+    assert!(updated <= Utc::now());
+    let (_, b) = send(
+        &app,
+        post_json("/v1/readings", &reading("real", 12.9791, 80.2209, 60.0)),
+    )
+    .await;
+    assert!(b["depth_cm"].as_f64().unwrap() > 25.0, "{b}");
+    assert_ne!(b["hazard"]["class"], "low");
+}
+
+#[tokio::test]
+async fn a_duplicate_id_is_answered_from_the_original_cell() {
+    // Regression: a duplicate id whose body named another place answered
+    // 500 "cell state missing after update"; so did a retry that raced the
+    // original.
+    let app = app_with(&AppState::new(config()));
+    let (_, first) = send(
+        &app,
+        post_json("/v1/readings", &reading("dup", 12.9791, 80.2209, 40.0)),
+    )
+    .await;
+    let (s, b) = send(
+        &app,
+        post_json("/v1/readings", &reading("dup", 13.1, 80.25, 0.0)),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(b["duplicate"], true);
+    assert_eq!(b["cell"], first["cell"]);
+    assert_eq!(b["depth_cm"], first["depth_cm"]);
+    // Many concurrent retries of one id: one fusion, no errors.
+    let mut tasks = Vec::new();
+    for _ in 0..32 {
+        let app = app.clone();
+        tasks.push(tokio::spawn(async move {
+            send(
+                &app,
+                post_json("/v1/readings", &reading("race", 12.99, 80.23, 10.0)),
+            )
+            .await
+        }));
+    }
+    let mut fused = 0;
+    for t in tasks {
+        let (s, b) = t.await.unwrap();
+        assert_eq!(s, StatusCode::OK, "{b}");
+        if b["duplicate"] == false {
+            fused += 1;
+        }
+    }
+    assert_eq!(fused, 1);
+}
+
+#[tokio::test]
+async fn wrong_method_is_a_json_error() {
+    let app = app_with(&AppState::new(config()));
+    let req = Request::delete("/v1/readings").body(Body::empty()).unwrap();
+    let (s, b) = send(&app, req).await;
+    assert_eq!(s, StatusCode::METHOD_NOT_ALLOWED);
+    assert!(b["error"].is_string(), "{b}");
+}
+
+#[tokio::test]
 async fn oversized_body_is_refused() {
     let app = app_with(&AppState::new(config()));
     let mut r = reading("big", 12.98, 80.22, 10.0);
@@ -242,6 +321,12 @@ async fn cells_are_geojson() {
         "hazard_rating",
         "hazard_class",
         "n_readings",
+        "conflicts",
+        "conflict_high_mean_cm",
+        "depth_sigma_meas_cm",
+        "expired",
+        "last_depth_cm",
+        "last_reading_age_h",
         "updated_at",
     ] {
         assert!(p.get(key).is_some(), "missing {key}");
@@ -294,6 +379,10 @@ async fn route_returns_advisory_linestring_with_baseline() {
         "distance_m",
         "eta_min",
         "max_depth_cm_on_route",
+        "max_known_depth_cm",
+        "max_unknown_depth_cm",
+        "max_unknown_depth_age_h",
+        "old_deep_cells_crossed",
         "unknown_cells_crossed",
         "explanation",
     ] {

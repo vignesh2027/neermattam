@@ -133,6 +133,12 @@ async fn main() -> ExitCode {
         }
     };
     info!(addr = %state.config.bind, "listening");
+    if !state.config.bind_is_internal() {
+        warn!(
+            addr = %state.config.bind,
+            "ENGINE_BIND is not a loopback or private address; the engine has no authentication and must only be reachable from the gateway"
+        );
+    }
 
     let shutdown_state = Arc::clone(&state);
     let (drain_tx, drain_rx) = tokio::sync::oneshot::channel::<()>();

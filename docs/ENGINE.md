@@ -2,30 +2,29 @@
 
 The engine is the Rust service at `engine/` (crate `neermattam-engine`, port 8302). It does four things:
 
-1. Fuses street-level flood depth readings into a live hex map of Chennai, with uncertainty and time decay.
+1. Fuses street-level flood depth readings into a live hex map of Chennai, with uncertainty that grows with time.
 2. Rates each cell with the UK Defra and Environment Agency flood hazard formula.
 3. Loads the Chennai road network from OpenStreetMap into a compact directed graph.
 4. Routes pedestrians, two-wheelers, autos, cars and buses around water each of them should not cross, and returns the plain shortest route next to it for comparison.
 
-Every route is advisory. A cell with too little evidence is reported as `unknown`, never as safe, and every depth the engine returns comes with its standard deviation.
+Every route is advisory. A cell with too little evidence is reported as `unknown`, never as safe, and every depth the engine returns comes with its standard deviation. The rules that keep a flooded road from being shown as safe are collected in [Safety model](#safety-model).
 
 ## Why it is built this way
 
-Reports from the public are noisy, arrive out of order, repeat each other and go stale as water recedes. A per-cell Kalman filter handles all four problems with a few lines of arithmetic: each report is weighted by how certain it is, old information decays toward dry while its uncertainty grows, and late reports are folded in exactly as if they had arrived on time. An H3 hex grid gives every cell the same shape and six equidistant neighbours, so a report can inform the street next to it in a principled way. Routing then only needs, for each road segment, the list of cells it touches, which is computed once when the graph is loaded.
+Reports from the public are noisy, arrive out of order, repeat each other, contradict each other and go stale. A per-cell Kalman filter handles this with a few lines of arithmetic: each report is weighted by how certain it is, old information grows less certain without being assumed to drain away, reports that contradict each other widen the estimate instead of averaging it, and late reports are folded in as if they had arrived on time. An H3 hex grid gives every cell the same shape and six equidistant neighbours, so a report can inform the street next to it in a principled way. Routing then only needs, for each road segment, the list of cells it touches, which is computed once when the graph is loaded.
 
 ## Fusion model
 
 Each H3 cell (resolution 10 by default, edges of about 66 m) holds two independent Gaussian states: depth in centimetres and, once anyone has measured it, surface velocity in metres per second.
 
-**Time decay.** Between two moments `dt` hours apart:
+**Holding the level.** Between two moments `dt` hours apart:
 
 ```
-a   = 2^(-dt / half_life)        half_life = 3 h by default
-mu  = a * mu                     the mean relaxes toward dry
-P   = a^2 * P + q^2 * dt         uncertainty grows like a random walk
+mu  = mu                         the last level is held
+P   = P + q^2 * dt               uncertainty grows like a random walk
 ```
 
-`q` is 6 cm per square-root hour by default: after one hour without news a cell gains 6 cm of standard deviation, after four hours 12 cm. Velocity uses the same steps with `q = 0.2 m/s` per square-root hour.
+`q` is 6 cm per square-root hour by default: after one hour without news a cell gains 6 cm of standard deviation, after four hours 12 cm. Velocity uses the same steps with `q = 0.2 m/s` per square-root hour. The engine does not assume water recedes: Chennai streets can stay flooded for days, and an assumed recession is exactly what turns an old report of deep water into a green light. Recession is an opt-in (`ENGINE_HALF_LIFE_HOURS`), in which case `a = 2^(-dt / half_life)`, `mu = a * mu` and `P = a^2 * P + q^2 * dt`.
 
 **Update.** A reading `z` with standard deviation `s` and trust `w` in (0, 1] is fused by inverse-variance weighting, with observation variance `R = s^2 / w`:
 
@@ -34,15 +33,55 @@ mu = (mu / P + z / R) / (1 / P + 1 / R)
 P  = 1 / (1 / P + 1 / R)
 ```
 
-The first reading in a cell becomes its state.
+The first reading in a cell becomes its state. Trust is computed server-side by the gateway from the source and the checks it ran; the engine never takes it from the person reporting.
 
-**Late readings.** A reading older than the cell's state is carried forward to the state time with the same decay step and then fused. Fusion is commutative, so the result is identical to receiving the readings in time order. A unit test checks this.
+**Conflicting readings.** When a direct reading differs from the cell's direct estimate by more than `3 x sqrt(sigma_old^2 + sigma_new^2)`, the two cannot both be right, and averaging them would give a confident answer that matches neither. With `delta` the difference:
 
-**Neighbours.** Each reading also updates the six cells of its k = 1 ring, with 8 cm of extra standard deviation added in quadrature (0.3 m/s for velocity). Neighbour evidence is counted separately (`n_neighbour`). Repeated neighbour updates are treated as independent, which overstates certainty when one cell gets many reports; this is a known approximation.
+- a newer reading replaces the mean, with variance `max(sigma_new^2, delta^2 / 4)`;
+- an older reading is fused with its variance inflated to at least `delta^2 / 4`.
 
-**Unknown.** A cell is `unknown` when its depth standard deviation, predicted to now, exceeds 10 cm, or when no evidence has arrived for 6 hours. The 10 cm threshold is deliberate: a known cell with zero mean then has an upper bound of at most 15 cm, the lowest vehicle limit. A larger threshold would let a vague report of a dry street block cars while a street nobody reported on stays open. Cells with no evidence for 48 hours are dropped from memory.
+Either way the cell counts a conflict (`conflicts`), `delta^2 / 4` becomes a floor on the cell's direct variance, and the deeper of the two disagreeing means is kept as `conflict_high_mean_cm`, which routing blocks on. One 40 cm report followed by ten dry ones within twenty minutes shows 0 cm with a sigma of 20 cm, one conflict and a conflict mean of 40 cm, and stays closed to cars; plain fusion gave 3.6 plus or minus 0.9 cm, open to cars.
 
-The half-life, noise rates, neighbour inflation and thresholds are engineering assumptions for Chennai street flooding. They are not fitted to data and are all configurable.
+**Clearing a conflict.** A conflict clears when five consecutive direct readings, each observed at least 30 minutes after the deeper side was reported, agree with the cell's current mean within `3 x sqrt(sigma_meas_cell^2 + sigma_meas_reading^2)` (measurement sigmas, defined below). A reading that does not agree resets the count. Clearing removes the variance floor and the conflict mean, so the agreeing readings can then show the street as clear. If nothing clears it, a conflict lapses with the evidence, 12 hours after it began.
+
+**Measurement uncertainty.** Each track also carries the variance of the same fusion with no growth with time, plus the 8 cm offset for neighbour tracks. Its square root is `sigma_meas` (`depth_sigma_meas_cm` in the API). Blocking uses it with a bounded growth term; the displayed sigma and the unknown flag keep the full sigma, which grows without bound.
+
+**Late readings.** A reading older than the cell's state is carried forward to the state time with the same prediction step and then fused. With one earlier state the result is identical to receiving the readings in time order, and a unit test checks this. With three or more readings it is an approximation: the carried reading and the state both contain the process noise of the interval they share, so the fused sigma comes out a few percent smaller than in time order (2.62 cm against 2.73 cm for readings of 30, 24 and 28 cm an hour apart, pinned by a unit test).
+
+**Neighbours.** Each reading also informs the six cells of its k = 1 ring. The depth next door differs from the depth here by an unknown offset with a standard deviation of 8 cm (0.3 m/s for velocity). That offset is the same for every report from the same neighbour, so it does not average away. Each cell therefore keeps one track per adjacent cell, fuses that neighbour's readings into it at their own variance, and adds the 8 cm offset in quadrature once, when the cell is read. One report from a neighbour counts with variance `R + 8^2`, as a single independent observation would, but any number of reports from the same neighbour never count for less than `8^2`. Fifty reports of a dry street cannot outvote one direct report of deep water in the underpass beside it: a unit test checks that the underpass stays above 50 cm. Neighbour evidence is counted separately (`n_neighbour`).
+
+**Input floors.** A reading's standard deviation is floored at 1 cm for depth and 0.05 m/s for velocity before fusion, so one over-confident report cannot pin a cell, and every variance is capped at 10^12 so it stays finite and can be written to the snapshot.
+
+**Unknown.** A cell is `unknown` when its depth standard deviation, predicted to now, exceeds 10 cm, or when no evidence has arrived for 6 hours. Unknown does not mean passable: an unknown cell that still holds evidence is judged by the same blocking rule as a known one (see [Safety model](#safety-model)).
+
+**Expiry.** Each track (the cell's own readings, and the readings from each adjacent cell) expires 12 hours after its latest reading and then stops counting. When every track has expired the cell is `expired`: unknown, never blocking, and still reporting `last_depth_cm` (the direct level just after the latest direct reading) and `last_reading_age_h`, so a map can say "last report 40 cm, 13 h ago". Cells with no evidence for 48 hours are dropped from memory.
+
+The noise rates, neighbour offset, thresholds and windows are engineering assumptions for Chennai street flooding. They are not fitted to data and are all configurable.
+
+## Safety model
+
+The engine must never present a flooded road as safe. These rules carry that, each with a unit or HTTP test.
+
+1. **Every route is advisory** (`advisory: true`), and every explanation says so.
+2. **One blocking rule.** A cell with a direct reading in force, known or unknown, is impassable for a vehicle when
+
+   ```
+   depth_block = max(mean, conflict_high_mean)
+               + 1.5 x min(sigma_meas, 10 cm)
+               + min(6 cm x sqrt(age in hours), 5 cm)
+   ```
+
+   is strictly greater than the vehicle's depth limit, or `depth_block` times velocity is strictly greater than its depth-velocity limit. `age` is the time since the latest evidence in force. Velocity is `mean + 1.5 x min(sigma, 0.5 m/s)` when measured, and never less than the 1 m/s default once it is too uncertain to show. Pedestrians use the hazard class at `depth_block`. The caps are `ENGINE_BLOCK_SIGMA_CAP_CM` and `ENGINE_BLOCK_GROWTH_CAP_CM`.
+3. **Neighbour evidence blocks on its mean alone.** A cell whose only evidence in force comes from adjacent cells is impassable only when the neighbour-derived mean itself is over the limit, with no sigma or growth added. A 30 cm report closes the six surrounding cells to cars (not to buses); a 2.2 cm or a 14 cm report does not.
+4. **Monotonic.** More measurement uncertainty or more age never unblocks a cell before it expires, and a conflicting report never unblocks one either; a unit test sweeps mean, measurement sigma, growth and the unknown flag for every vehicle. Because the measurement sigma is capped at 10 cm and growth at 5 cm, a vague report of a dry street (mean 0) reaches at most 15 cm, which is not greater than the car limit, so it does not block.
+5. **What that means for single reports**, with the usual 3 cm sigma: a 3 cm report never blocks a car before it expires (at most 3 + 4.5 + 5 = 12.5 cm). A 10 cm report sits at 14.5 cm at the instant it is made and blocks a car within the first minute, as growth passes 0.5 cm, until it expires; with a 4 cm sigma it blocks at once. A 14 cm report blocks a car at every trust from 1 down to 0.000001.
+6. **No optimistic recession.** The level is held; only the uncertainty grows. An old deep report keeps blocking until it expires: a 40 cm report blocks cars and buses for the full 12 hours.
+7. **Expiry is explicit.** After 12 hours without a reading a track expires. When all of a cell's tracks have expired it becomes unknown, stops blocking, keeps the unknown-cell routing penalty, and keeps its last level and age for display and for route explanations.
+8. **Conflicts never unblock.** While a conflict is in force the cell blocks on the deeper side of it. A 40 cm report followed by one dry report ten minutes later stays closed to cars. It reopens only after five consecutive agreeing reports, each at least 30 minutes after the deep one, or when the conflict lapses at 12 hours.
+9. **Unknown is never safe.** Cells with no report, stale cells and expired cells are `unknown` and cost 1.5 times their length, so routes prefer streets with recent evidence of shallow water. Many reports from one neighbouring cell never count for less than the 8 cm neighbour offset.
+10. **Route text names old water.** Routes report `max_known_depth_cm` (the deepest mean among known cells) and `max_unknown_depth_cm` with `max_unknown_depth_age_h` (the deepest last level among unknown cells that still carry one). When a route crosses unknown cells whose last report was too deep for the vehicle, the explanation says how many, how deep and how old, and tells the traveller to treat them as flooded.
+11. **Inputs are bounded.** Readings dated more than 5 minutes ahead are refused; sigmas are floored; variances stay finite so a snapshot can always be reloaded.
+12. **Trust and network.** `trust` is computed server-side by the gateway. The engine has no authentication, so it must only listen on the internal network: `ENGINE_BIND` defaults to `127.0.0.1:8302`, and the engine logs a warning at start when it is bound to anything other than a loopback or private address.
 
 ## Hazard rating
 
@@ -79,7 +118,7 @@ Two choices are ours, not the source's: a dry street (depth 0) has HR = 0, and w
 
 ## Vehicle limits
 
-A vehicle may cross a known cell only when the upper estimate `mean + 1.5 sigma` of depth is within its depth limit, and upper depth (m) times upper velocity (or the default) is within its depth-velocity limit.
+A vehicle may cross a cell that holds evidence only when the blocking depth (rule 2 of the [Safety model](#safety-model), or the neighbour mean for a cell with only neighbour evidence) is within its depth limit, and that depth (m) times the upper velocity (or the default) is within its depth-velocity limit.
 
 | Vehicle | Depth limit | D x V limit | Basis |
 |---|---|---|---|
@@ -107,24 +146,25 @@ The road graph is built from `data/osm/chennai-roads.osm.pbf` with the `osmpbf` 
 - Access is per vehicle and per direction. Pedestrians use everything except motorways, in both directions. Motor vehicles skip footways, paths, steps, pedestrian streets and cycleways. Two-wheelers and autos skip motorways. Buses skip service roads and living streets.
 - `access`, `foot`, `motor_vehicle`, `motorcar`, `motorcycle`, `psv` and `bus` tags are honoured. `oneway` (including `-1`), implied one-way on motorways and roundabouts, and `oneway:bus=no` are honoured for motor vehicles.
 - Route ends snap to the nearest node, within 1.5 km, that lies in the vehicle's largest connected component, so a request never starts on a disconnected scrap of road.
+- When both ends snap to the same node there is no route to plan, but the response still reports the water in that node's cell, and `passable` is false when it is too deep.
 
 On the Chennai extract (99,897 highway ways and 387,959 nodes in the file) the engine keeps 83,902 ways that some vehicle may use. That gives 316,734 graph nodes, 355,037 segments, 709,504 directed edges and 470,587 segment-to-cell references. The graph's vectors hold 18,407,658 bytes (17.6 MiB), as reported by `RoadGraph::memory_bytes` and `/readyz`. The whole release process measured 88 MiB resident (`ps -o rss`) once the graph was loaded; the rest is the allocator keeping memory freed after the decode, the Tokio runtime and the binary. Decoding takes about 125 ms and building about 215 ms in the release build; the server is ready about one second after start.
 
 Each request runs A* with a haversine heuristic up to three times:
 
 1. **Baseline:** shortest distance, ignoring water.
-2. **Water-aware:** edges through impassable cells are removed. Edges through unknown cells cost 1.5 times their length but stay usable, so routes prefer streets with recent reports of shallow water. An unknown cell is still impassable if its mean alone breaks the limit: uncertainty never turns evidence of deep water into a green light.
+2. **Water-aware:** edges through impassable cells are removed. Edges through unknown cells that do not block cost 1.5 times their length but stay usable, so routes prefer streets with recent reports of shallow water. Unknown cells with evidence in force are judged by the same blocking rule as known ones, so uncertainty never turns evidence of deep water into a green light.
 3. **Least-bad fallback,** only when no dry path exists: impassable edges are allowed again at a steep cost that grows with how far the water exceeds the limit. The response says `passable: false` and explains why.
 
 When the map holds no cell that is clear for the vehicle, every edge costs at least 1.5 per metre, so the heuristic is scaled by 1.5 and stays admissible. This makes routing on a sparsely reported map much faster.
 
-`cells_avoided` counts impassable cells on the baseline route that the recommended route avoids. `max_depth_cm_on_route` is the deepest mean among known cells on the route, with `max_depth_sigma_cm` beside it.
+`cells_avoided` counts impassable cells on the baseline route that the recommended route avoids. `max_depth_cm_on_route` (also returned as `max_known_depth_cm`) is the deepest mean among known cells on the route, with `max_depth_sigma_cm` beside it. `max_unknown_depth_cm` and `max_unknown_depth_age_h` give the deepest last level among unknown cells on the route that still carry one, and `old_deep_cells_crossed` counts those whose last level was too deep for the vehicle; the explanation then adds a sentence such as "1 of the unknown cells had reports of water too deep for a car that are now out of date, the deepest 45 cm reported 13 hours ago; treat it as flooded until you can see otherwise."
 
 ## API
 
 The contract is `docs/CONTRACTS.md` section 2. All errors are JSON, `{"error": "..."}`. Invalid input is 400 with a message naming the field; an oversized body (over 16 KiB) is 413; routing before the graph has loaded is 503; no road connection is 404.
 
-Readings are validated: lat and lon inside the service area (`80.10,12.85,80.33,13.24` by default), `depth_cm` from 0 to 500, `depth_sigma_cm` above 0, `velocity_sigma_mps` required when `velocity_mps` is given, `observed_at` within 24 hours of server time, `source` one of `photo`, `video`, `voice`, `official`, and `trust` in (0, 1]. A repeated `reading_id` is not fused twice; the response says `"duplicate": true`. The last 100,000 ids are remembered in memory only, so a retry that arrives after a restart is fused again.
+Readings are validated: lat and lon inside the service area (`80.10,12.85,80.33,13.24` by default), `depth_cm` from 0 to 500, `depth_sigma_cm` above 0 (fused as at least 1 cm), `velocity_sigma_mps` required when `velocity_mps` is given, `observed_at` no more than 24 hours old and no more than 5 minutes in the future (times up to 5 minutes ahead are clamped to server time, so no cell is ever dated in the future; a reading dated hours ahead would otherwise hold its cell at that time and make every real report arrive late and decayed), `source` one of `photo`, `video`, `voice`, `official`, and `trust` in (0, 1]. A repeated `reading_id` is not fused twice; the response says `"duplicate": true`. The last 100,000 ids are remembered in memory only, so a retry that arrives after a restart is fused again.
 
 The examples below are real responses from the release binary, trimmed where marked.
 
@@ -138,14 +178,14 @@ curl -s -X POST http://127.0.0.1:8302/v1/readings -H 'content-type: application/
 ```
 
 ```json
-{"reading_id":"r_demo1","cell":"8a618c4e2d47fff","depth_cm":42.0,"depth_sigma_cm":3.2,"depth_upper_cm":46.7,
- "velocity_mps":0.4,"velocity_sigma_mps":0.21,"unknown":false,"n_readings":1,"updated_at":"2026-10-27T09:11:14Z",
+{"reading_id":"r_demo1","cell":"8a618c4e2d47fff","depth_cm":42.0,"depth_sigma_cm":3.2,"depth_upper_cm":46.8,
+ "velocity_mps":0.4,"velocity_sigma_mps":0.21,"unknown":false,"n_readings":1,"conflicts":0,"updated_at":"2026-10-27T09:11:14Z",
  "hazard":{"rating":1.38,"class":"danger_most","class_upper":"danger_most","debris_factor":1.0,
            "velocity_mps":0.4,"velocity_assumed":false},
  "duplicate":false}
 ```
 
-`depth_sigma_cm` is 3.2 rather than 3 because trust 0.9 divides the variance by 0.9. `depth_upper_cm` is the mean plus 1.5 sigma, the value routing uses. `class_upper` is the hazard class at that upper estimate.
+`depth_sigma_cm` is 3.2 rather than 3 because trust 0.9 divides the variance by 0.9. `depth_upper_cm` is the depth routing judges the cell at: 42 plus 1.5 times the 3.16 cm measurement sigma, plus 0.1 cm of growth for the second between the observation time and the response. `class_upper` is the hazard class at that upper estimate.
 
 An invalid reading:
 
@@ -169,10 +209,12 @@ curl -s 'http://127.0.0.1:8302/v1/cells?bbox=80.21,12.98,80.23,13.00'
  {"type":"Feature","id":"8a618c4e2d47fff",
   "geometry":{"type":"Polygon","coordinates":[[[80.21821,12.990811],[80.218229,12.991533],[80.217619,12.991902],
      [80.216992,12.991549],[80.216973,12.990827],[80.217582,12.990458],[80.21821,12.990811]]]},
-  "properties":{"cell":"8a618c4e2d47fff","depth_cm":42.0,"depth_sigma_cm":3.2,"depth_upper_cm":46.7,
+  "properties":{"cell":"8a618c4e2d47fff","depth_cm":42.0,"depth_sigma_cm":3.2,"depth_upper_cm":46.8,
      "velocity_mps":0.4,"velocity_sigma_mps":0.21,"velocity_assumed":false,
      "hazard_rating":1.38,"hazard_class":"danger_most","hazard_class_upper":"danger_most","debris_factor":1.0,
-     "unknown":false,"n_readings":1,"n_neighbour":0,"updated_at":"2026-10-27T09:11:14Z"}}]}
+     "depth_sigma_meas_cm":3.2,"conflict_high_mean_cm":null,
+     "unknown":false,"expired":false,"n_readings":1,"n_neighbour":0,"conflicts":0,
+     "updated_at":"2026-10-27T09:11:14Z","last_depth_cm":42.0,"last_reading_age_h":0.0}}]}
 ```
 
 Only cells with some evidence are returned. Any cell not in the response has no reports and must be drawn as unknown.
@@ -186,7 +228,8 @@ curl -s 'http://127.0.0.1:8302/v1/route?from=12.9791,80.2209&to=13.0067,80.2206&
 ```json
 {"type":"Feature","geometry":{"type":"LineString","coordinates":[[80.22113,12.979179],"..."]},
  "properties":{"vehicle":"car","route_kind":"water_aware","distance_m":4171.0,"eta_min":12.5,
-   "max_depth_cm_on_route":null,"max_depth_sigma_cm":null,"cells_on_route":37,"cells_avoided":1,
+   "max_depth_cm_on_route":null,"max_depth_sigma_cm":null,"max_known_depth_cm":null,
+   "max_unknown_depth_cm":null,"max_unknown_depth_age_h":null,"old_deep_cells_crossed":0,"cells_on_route":37,"cells_avoided":1,
    "unknown_cells_crossed":37,"impassable_cells_crossed":0,"passable":true,"advisory":true,
    "depth_limit_cm":15.0,"pedestrian_block_class":null,"safety_sigmas":1.5,"computed_at":"...",
    "explanation":"Advisory only. This route avoids 1 map cell on the shortest path with water that may be deeper than 15 cm, or flowing too fast, for a car. It is 659 m (19%) longer than the shortest route. None of the 37 map cells along it has a recent report, so conditions on it are unknown. Check conditions as you go and turn back if the water looks deeper than expected."},
@@ -222,7 +265,7 @@ curl -s http://127.0.0.1:8302/readyz
 
 ## Persistence
 
-Cell state is written to `data/engine/cells.json` (set `ENGINE_SNAPSHOT_PATH`; empty disables it) at most once every 5 seconds and only when something changed, plus once on shutdown. Each write goes to a temporary file in the same directory, is flushed to disk and is renamed over the old file, so a crash never leaves a half-written snapshot. On start the snapshot is loaded; a snapshot written at a different H3 resolution, or one that cannot be parsed, is moved aside and the engine starts with an empty map.
+Cell state is written to `data/engine/cells.json` (set `ENGINE_SNAPSHOT_PATH`; empty disables it) at most once every 5 seconds and only when something changed, plus once on shutdown. Each write goes to a temporary file in the same directory, is flushed to disk and is renamed over the old file, so a crash never leaves a half-written snapshot. On start the snapshot is loaded; a snapshot written at a different H3 resolution or by an older format version (the current one is 3), one that cannot be parsed, or one holding a cell with no evidence or a number that is not finite, is moved aside and the engine starts with an empty map.
 
 Shutdown on SIGTERM or Ctrl-C is graceful: open SSE streams are closed, in-flight requests finish (up to 10 seconds), and the final snapshot is written.
 
@@ -238,13 +281,13 @@ The road graph loads in the background; `/readyz` returns 503 with a reason unti
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ENGINE_BIND` | `127.0.0.1:8302` | Listen address |
+| `ENGINE_BIND` | `127.0.0.1:8302` | Listen address; internal network only (a warning is logged otherwise) |
 | `ENGINE_OSM_PATH` | `../data/osm/chennai-roads.osm.pbf` | Road extract |
 | `ENGINE_SNAPSHOT_PATH` | `../data/engine/cells.json` | Snapshot file; empty disables |
 | `ENGINE_SNAPSHOT_INTERVAL_SECS` | `5` | Minimum seconds between snapshots |
 | `ENGINE_H3_RESOLUTION` | `10` | H3 resolution, 7 to 12 |
 | `ENGINE_BBOX` | `80.10,12.85,80.33,13.24` | Service area |
-| `ENGINE_HALF_LIFE_HOURS` | `3` | Recession half-life |
+| `ENGINE_HALF_LIFE_HOURS` | `off` | Opt-in recession half-life; `off` holds the level |
 | `ENGINE_DEPTH_NOISE_CM_PER_SQRT_HOUR` | `6` | Depth process noise |
 | `ENGINE_VELOCITY_NOISE_MPS_PER_SQRT_HOUR` | `0.2` | Velocity process noise |
 | `ENGINE_NEIGHBOUR_SIGMA_CM` | `8` | Extra sigma for ring cells |
@@ -252,14 +295,18 @@ The road graph loads in the background; `/readyz` returns 503 with a reason unti
 | `ENGINE_UNKNOWN_SIGMA_CM` | `10` | Depth sigma above which a cell is unknown |
 | `ENGINE_UNKNOWN_VELOCITY_SIGMA_MPS` | `0.5` | Velocity sigma above which velocity is unknown |
 | `ENGINE_STALE_HOURS` | `6` | Hours without evidence before a cell is unknown |
+| `ENGINE_EXPIRE_HOURS` | `12` | Hours after its latest reading that evidence stops counting |
 | `ENGINE_FORGET_HOURS` | `48` | Hours without evidence before a cell is dropped |
-| `ENGINE_SAFETY_SIGMAS` | `1.5` | k in mean + k sigma |
+| `ENGINE_SAFETY_SIGMAS` | `1.5` | k in the blocking rule |
+| `ENGINE_BLOCK_SIGMA_CAP_CM` | `10` | Depth sigma cap in the blocking rule |
+| `ENGINE_BLOCK_VELOCITY_SIGMA_CAP_MPS` | `0.5` | Velocity sigma cap in the blocking rule |
+| `ENGINE_BLOCK_GROWTH_CAP_CM` | `5` | Cap on growth with time in the blocking rule |
 | `ENGINE_UNKNOWN_PENALTY` | `1.5` | Cost multiplier through unknown cells |
 | `ENGINE_DEFAULT_VELOCITY_MPS` | `1.0` | Velocity assumed when not measured |
 | `ENGINE_PEDESTRIAN_BLOCK_CLASS` | `danger_some` | Lowest class that blocks walkers |
 | `ENGINE_DEBRIS_RULE` | `fd2320` | `fd2320`, `fd2321_urban`, `fd2321_woodland` or `fd2321_pasture` |
 | `ENGINE_MAX_SNAP_M` | `1500` | Furthest a route end may be from a road |
-| `ENGINE_MAX_OBSERVATION_SKEW_HOURS` | `24` | How far `observed_at` may be from now |
+| `ENGINE_MAX_OBSERVATION_SKEW_HOURS` | `24` | How old `observed_at` may be; at most 5 minutes ahead is always allowed |
 | `ENGINE_BODY_LIMIT_BYTES` | `16384` | Request body limit |
 | `ENGINE_REQUEST_TIMEOUT_SECS` | `15` | Timeout for non-streaming requests |
 | `ENGINE_MAX_CELLS` | `20000` | Most features one `/v1/cells` call returns |
@@ -274,7 +321,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-- Unit tests cover the fusion maths, decay, out-of-order readings, neighbour inflation, trust, the unknown rules, the hazard formula against cells of Table 4 of the 2008 note, class boundaries, the FD2321 debris table, OSM access and one-way rules, snapping, and snapshot round trips.
+- Unit tests cover the fusion maths, holding the level and the opt-in recession, expiry, conflicting readings and how a conflict clears, measurement sigma, out-of-order readings, neighbour inflation, trust, the unknown rules, the monotonic blocking rule and its bounded growth, neighbour-only blocking, the hazard formula against cells of Table 4 of the 2008 note, class boundaries, the FD2321 debris table, OSM access and one-way rules, snapping, and snapshot round trips.
 - Routing tests on a synthetic street grid show the route bending around a flooded cell, a bus crossing water that blocks a car, and the least-bad fallback when every path is flooded.
 - `tests/chennai.rs` loads the real extract, routes Velachery railway station (12.9791, 80.2209) to Guindy (13.0067, 80.2206), seeds 50 cm of water at the middle of the shortest path and checks the new route avoids it. It takes about 0.4 s. When the extract is missing the test prints how to build it and passes; set `NEERMATTAM_REQUIRE_OSM=1` to make that a failure.
 - `tests/http.rs` drives the full router with `tower::ServiceExt`: health, readiness, validation messages, body limit, duplicates, GeoJSON cells, routes, the SSE stream and its shutdown, and a snapshot restart.
@@ -284,6 +331,8 @@ cargo fmt --check
 `cargo bench --bench engine` (criterion). The routing cases are skipped when the extract is missing.
 
 Measured on an 8 GB M1 MacBook Air (Apple M1, 8 cores), release profile, Rust 1.97.1, 27 October 2026, with other work paused. Criterion reports a confidence interval; the middle value is shown.
+
+The timings below were measured at commit f8e8fb6. Since then the engine has gained per-neighbour tracks, the conflict check and per-track expiry, which add a small allocation per newly touched cell and a few more fusions per cell read, so the ingestion figures in particular are expected to be somewhat higher. They have not been refreshed because the machine was heavily loaded throughout the review (load average 18 to 40 on 8 cores), and timings taken that way would not be honest. The route kinds printed by the benchmark were rechecked under the new rules and are unchanged: with 200 readings every trip still finds a dry route, with 2000 none does. Rerun `cargo bench --bench engine` with other work paused to refresh the tables.
 
 **Ingestion**
 

@@ -14,20 +14,42 @@
 //!
 //! # When is a cell impassable?
 //!
-//! For a known cell, the engine uses the upper estimate `mean + k x sigma`
-//! (`k = safety_sigmas`, 1.5 by default) for depth and, when measured, for
-//! velocity; when velocity is unknown it uses the conservative default.
+//! Every cell that holds evidence in force, known or unknown, is judged by
+//! one rule. For a cell with a direct reading in force the engine takes
 //!
-//! - Motor vehicles: impassable when upper depth exceeds the vehicle depth
-//!   limit, or upper depth (m) times velocity exceeds its D x V limit
-//!   (see [`crate::vehicle`]).
-//! - Pedestrians: impassable when the Defra hazard rating of the upper depth
+//! ```text
+//! depth_block = max(mean, conflict_high_mean)
+//!             + k x min(sigma_meas, sigma_cap)            k = 1.5, sigma_cap = 10 cm
+//!             + min(q x sqrt(age_h), growth_cap)          q = 6 cm/sqrt(h), growth_cap = 5 cm
+//! ```
+//!
+//! where `sigma_meas` is the uncertainty of the fused measurements alone,
+//! `age_h` is the time since the latest evidence in force, and
+//! `conflict_high_mean` is the deeper side of a conflict still in force
+//! (see [`crate::fusion`]). The displayed sigma and the unknown flag keep the
+//! full sigma, which grows without bound; blocking uses this bounded form so
+//! that a shallow report does not grow into a closure. A cell whose only
+//! evidence in force comes from adjacent cells blocks on the neighbour mean
+//! alone, with no margin: deep water next door still closes the road, shallow
+//! water does not.
+//!
+//! Velocity is `mean + k x min(sigma, 0.5 m/s)` when measured (the mean alone
+//! for neighbour-only cells), and never less than the conservative default
+//! once it is too uncertain to show.
+//!
+//! - Motor vehicles: impassable when `depth_block` is strictly greater than
+//!   the vehicle depth limit, or `depth_block` (m) times velocity is strictly
+//!   greater than its D x V limit (see [`crate::vehicle`]).
+//! - Pedestrians: impassable when the Defra hazard rating at `depth_block`
 //!   reaches `pedestrian_block_class` (danger for some by default, because a
-//!   router cannot know whether the walker is a child or elderly).
+//!   router cannot know whether the walker is a child or elderly). Class
+//!   boundaries belong to the higher class, as in the source.
 //!
-//! An unknown cell is passable at a penalty, unless its *mean* alone already
-//! breaks the limit. Uncertainty never turns evidence of deep water into a
-//! green light. A cell nobody has reported on is unknown.
+//! The rule is monotonic: more measurement uncertainty or more age never
+//! unblocks a cell before it expires, and neither does a conflicting report.
+//! A cell that passes and is unknown costs `unknown_penalty` times its length.
+//! An expired cell (every track older than the expiry window) and a cell
+//! nobody has reported on are unknown and never block.
 //!
 //! The heuristic is admissible because every edge costs at least its length
 //! and segment lengths are themselves haversine distances.
@@ -47,8 +69,14 @@ const FALLBACK_FACTOR: f64 = 50.0;
 /// Routing policy, from configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RoutePolicy {
-    /// `k` in `mean + k x sigma`.
+    /// `k` in `mean + k x min(sigma, cap)`.
     pub safety_sigmas: f64,
+    /// Cap on the depth sigma in the blocking rule, cm.
+    pub sigma_cap_cm: f64,
+    /// Cap on the velocity sigma in the blocking rule, m/s.
+    pub velocity_sigma_cap_mps: f64,
+    /// Cap on the growth-with-time term in the blocking rule, cm.
+    pub growth_cap_cm: f64,
     /// Cost multiplier for edges through unknown cells.
     pub unknown_penalty: f64,
     /// Lowest hazard class that blocks pedestrians.
@@ -65,6 +93,9 @@ impl Default for RoutePolicy {
     fn default() -> Self {
         RoutePolicy {
             safety_sigmas: 1.5,
+            sigma_cap_cm: 10.0,
+            velocity_sigma_cap_mps: 0.5,
+            growth_cap_cm: 5.0,
             unknown_penalty: 1.5,
             pedestrian_block_class: HazardClass::DangerSome,
             default_velocity_mps: 1.0,
@@ -113,6 +144,44 @@ fn excess(depth_cm: f64, velocity_mps: f64, vehicle: Vehicle, policy: &RoutePoli
     }
 }
 
+/// The depth (cm) and velocity (m/s) a cell is judged at, and whether the
+/// velocity is the assumed default. See the module docs.
+#[must_use]
+pub fn blocking_estimate(v: &CellView, policy: &RoutePolicy) -> (f64, f64, bool) {
+    // Evidence only from adjacent cells counts at its mean, with no margin.
+    let k = if v.neighbour_only {
+        0.0
+    } else {
+        policy.safety_sigmas
+    };
+    let depth = if v.neighbour_only {
+        v.depth.mean
+    } else {
+        let mean = v.depth.mean.max(v.conflict_high_mean_cm.unwrap_or(0.0));
+        mean + k * v.sigma_meas_cm.min(policy.sigma_cap_cm) + v.growth_cm.min(policy.growth_cap_cm)
+    }
+    .max(0.0);
+    let (velocity, assumed) = match v.velocity_any {
+        None => (policy.default_velocity_mps, true),
+        Some(g) => {
+            let upper = g.upper_capped(k, policy.velocity_sigma_cap_mps).max(0.0);
+            if v.velocity.is_some() {
+                (upper, false)
+            } else {
+                // Too uncertain to show: never assume less than the default.
+                (upper.max(policy.default_velocity_mps), true)
+            }
+        }
+    };
+    (depth, velocity, assumed)
+}
+
+/// True when water this deep, at the default velocity, is too much for the
+/// vehicle. Used to describe old reports.
+fn too_deep(depth_cm: f64, vehicle: Vehicle, policy: &RoutePolicy) -> bool {
+    excess(depth_cm, policy.default_velocity_mps, vehicle, policy).is_some()
+}
+
 /// Classify one cell for one vehicle. `None` means no one has reported on it.
 #[must_use]
 pub fn cell_passability(
@@ -123,11 +192,10 @@ pub fn cell_passability(
     let Some(v) = view else {
         return Passability::Unknown;
     };
-    let k = if v.unknown { 0.0 } else { policy.safety_sigmas };
-    let depth = v.depth.upper(k);
-    let velocity = v
-        .velocity
-        .map_or(policy.default_velocity_mps, |g| g.upper(k).max(0.0));
+    if v.expired {
+        return Passability::Unknown;
+    }
+    let (depth, velocity, _) = blocking_estimate(v, policy);
     match excess(depth, velocity, vehicle, policy) {
         Some(severity) => Passability::Blocked { severity },
         None if v.unknown => Passability::Unknown,
@@ -158,10 +226,19 @@ pub struct RouteSummary {
     pub distance_m: f64,
     /// Travel time at the vehicle's average speed, minutes.
     pub eta_min: f64,
-    /// Deepest mean depth among known cells on the route, cm.
+    /// Deepest mean depth among known cells on the route, cm. Also returned
+    /// as `max_known_depth_cm`.
     pub max_depth_cm_on_route: Option<f64>,
     /// Standard deviation of that depth, cm.
     pub max_depth_sigma_cm: Option<f64>,
+    /// Deepest last direct level among unknown cells on the route that still
+    /// carry one, cm.
+    pub max_unknown_depth_cm: Option<f64>,
+    /// Hours since that level was reported.
+    pub max_unknown_depth_age_h: Option<f64>,
+    /// Unknown cells on the route whose last report was too deep for the
+    /// vehicle.
+    pub old_deep_cells_crossed: usize,
     /// Distinct cells the route passes through.
     pub cells_on_route: usize,
     /// Impassable cells on the baseline route that this route avoids.
@@ -379,6 +456,8 @@ struct Stats {
     blocked: HashSet<u64>,
     unknown: usize,
     max_depth: Option<(f64, f64)>,
+    max_unknown: Option<(f64, f64)>,
+    old_deep: usize,
 }
 
 fn path_stats(
@@ -394,6 +473,13 @@ fn path_stats(
     let mut distance_m = 0.0;
     let mut cells = Vec::new();
     let mut seen = HashSet::new();
+    // The start node's own cell, so a route whose ends snap to one node still
+    // reports the water the traveller is standing in.
+    if let Ok(ll) = h3o::LatLng::new(la, lo) {
+        let c = u64::from(ll.to_cell(g.resolution()));
+        seen.insert(c);
+        cells.push(c);
+    }
     for &e in path {
         let seg = g.edge_segment(e);
         distance_m += g.segment_len_m(seg);
@@ -408,6 +494,8 @@ fn path_stats(
     let mut blocked = HashSet::new();
     let mut unknown = 0;
     let mut max_depth: Option<(f64, f64)> = None;
+    let mut max_unknown: Option<(f64, f64)> = None;
+    let mut old_deep = 0;
     for &c in &cells {
         let view = water.get(&c);
         match cell_passability(view, vehicle, policy) {
@@ -422,6 +510,16 @@ fn path_stats(
                 max_depth = Some((v.depth.mean, v.depth.sigma()));
             }
         }
+        if let Some(v) = view.filter(|v| v.unknown) {
+            if let (Some(d), Some(age)) = (v.last_depth_cm, v.last_reading_age_h) {
+                if max_unknown.is_none_or(|(m, _)| d > m) {
+                    max_unknown = Some((d, age));
+                }
+                if too_deep(d, vehicle, policy) {
+                    old_deep += 1;
+                }
+            }
+        }
     }
     Stats {
         coordinates,
@@ -430,6 +528,8 @@ fn path_stats(
         blocked,
         unknown,
         max_depth,
+        max_unknown,
+        old_deep,
     }
 }
 
@@ -447,8 +547,31 @@ fn limit_phrase(vehicle: Vehicle, policy: &RoutePolicy) -> String {
     }
 }
 
-/// What is known about the water along a route, in one or two sentences.
-fn evidence_sentences(s: &Stats) -> String {
+/// A sentence about unknown cells whose last report was too deep, if any.
+fn old_report_sentence(s: &Stats, vehicle: Vehicle) -> Option<String> {
+    let (depth, age) = s.max_unknown?;
+    (s.old_deep > 0).then(|| {
+        format!(
+            "{} of the unknown cells had reports of water too deep for {} that are now out of date, the deepest {:.0} cm reported {:.0} hours ago; treat {} as flooded until you can see otherwise.",
+            s.old_deep,
+            vehicle.noun(),
+            depth,
+            age,
+            if s.old_deep == 1 { "it" } else { "them" }
+        )
+    })
+}
+
+/// What is known about the water along a route, in one to three sentences.
+fn evidence_sentences(s: &Stats, vehicle: Vehicle) -> String {
+    let base = evidence_base(s);
+    match old_report_sentence(s, vehicle) {
+        Some(old) => format!("{base} {old}"),
+        None => base,
+    }
+}
+
+fn evidence_base(s: &Stats) -> String {
     let total = s.cells.len();
     if total > 0 && s.unknown == total {
         return format!(
@@ -485,6 +608,9 @@ fn summarise(
         eta_min: s.distance_m / speed_m_per_min,
         max_depth_cm_on_route: s.max_depth.map(|m| m.0),
         max_depth_sigma_cm: s.max_depth.map(|m| m.1),
+        max_unknown_depth_cm: s.max_unknown.map(|m| m.0),
+        max_unknown_depth_age_h: s.max_unknown.map(|m| m.1),
+        old_deep_cells_crossed: s.old_deep,
         cells_on_route: s.cells.len(),
         cells_avoided,
         unknown_cells_crossed: s.unknown,
@@ -560,11 +686,20 @@ pub fn plan_route(
     let limit = limit_phrase(vehicle, policy);
 
     let main_text = match kind {
+        _ if path.is_empty() => format!(
+            "Advisory only. The start and the destination snap to the same point on the road network, so there is no route to plan.{} {} Check conditions before moving.",
+            if main.blocked.is_empty() {
+                String::new()
+            } else {
+                format!(" That point is in {limit}.")
+            },
+            evidence_sentences(&main, vehicle),
+        ),
         RouteKind::LeastBad => format!(
             "Advisory only. No route avoids {limit}. This is the least risky route found, and it still crosses {} map cell{} where the water may be too deep. {} Do not attempt it unless you can see the water is shallow; waiting for it to recede is safer.",
             main.blocked.len(),
             if main.blocked.len() == 1 { "" } else { "s" },
-            evidence_sentences(&main),
+            evidence_sentences(&main, vehicle),
         ),
         _ => {
             let extra = main.distance_m - base.distance_m;
@@ -586,7 +721,7 @@ pub fn plan_route(
             };
             format!(
                 "Advisory only. {lead} {} Check conditions as you go and turn back if the water looks deeper than expected.",
-                evidence_sentences(&main),
+                evidence_sentences(&main, vehicle),
             )
         }
     };
@@ -610,7 +745,7 @@ pub fn plan_route(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fusion::{FusionParams, Grid, Observation};
+    use crate::fusion::{FusionParams, Gaussian, Grid, Observation};
     use crate::graph::GraphBuilder;
     use chrono::{DateTime, TimeZone, Utc};
     use h3o::Resolution;
@@ -744,44 +879,53 @@ mod tests {
         assert!(r.route.advisory);
     }
 
-    #[test]
-    fn pedestrians_use_the_hazard_class() {
-        let p = RoutePolicy::default();
-        let view = |depth: f64, unknown: bool| CellView {
+    fn cv(depth: Gaussian, velocity: Option<Gaussian>, unknown: bool) -> CellView {
+        CellView {
             cell: h3o::LatLng::new(13.0, 80.2)
                 .unwrap()
                 .to_cell(Resolution::Ten),
-            depth: crate::fusion::Gaussian::new(depth, 2.0),
-            velocity: Some(crate::fusion::Gaussian::new(0.0, 0.05)),
+            depth,
+            velocity,
+            velocity_any: velocity,
             unknown,
+            expired: false,
+            sigma_meas_cm: depth.sigma(),
+            growth_cm: 0.0,
+            neighbour_only: false,
+            conflict_high_mean_cm: None,
             n_readings: 1,
             n_neighbour: 0,
+            conflicts: 0,
             updated_at: now(),
-        };
+            last_depth_cm: Some(depth.mean),
+            last_reading_age_h: Some(0.0),
+        }
+    }
+
+    fn blocked(v: &CellView, vehicle: Vehicle) -> bool {
+        matches!(
+            cell_passability(Some(v), vehicle, &RoutePolicy::default()),
+            Passability::Blocked { .. }
+        )
+    }
+
+    #[test]
+    fn pedestrians_use_the_hazard_class() {
+        let p = RoutePolicy::default();
+        let still = Some(Gaussian::new(0.0, 0.05));
+        let view = |depth: f64, unknown: bool| cv(Gaussian::new(depth, 2.0), still, unknown);
         // 10 cm still water: HR about 0.07 + 0.5, low.
         assert_eq!(
             cell_passability(Some(&view(10.0, false)), Vehicle::Pedestrian, &p),
             Passability::Clear
         );
         // 30 cm: DF 1 makes HR >= 1.15, danger for some.
-        assert!(matches!(
-            cell_passability(Some(&view(30.0, false)), Vehicle::Pedestrian, &p),
-            Passability::Blocked { .. }
-        ));
+        assert!(blocked(&view(30.0, false), Vehicle::Pedestrian));
         // A car is blocked at 14 cm once the 1.5 sigma margin is added.
-        assert!(matches!(
-            cell_passability(Some(&view(14.0, false)), Vehicle::Car, &p),
-            Passability::Blocked { .. }
-        ));
-        // Unknown cells: passable unless the mean alone is too deep.
-        assert_eq!(
-            cell_passability(Some(&view(14.0, true)), Vehicle::Car, &p),
-            Passability::Unknown
-        );
-        assert!(matches!(
-            cell_passability(Some(&view(40.0, true)), Vehicle::Car, &p),
-            Passability::Blocked { .. }
-        ));
+        assert!(blocked(&view(14.0, false), Vehicle::Car));
+        // Unknown cells with evidence are judged by the same rule.
+        assert!(blocked(&view(14.0, true), Vehicle::Car));
+        assert!(blocked(&view(40.0, true), Vehicle::Car));
         assert_eq!(
             cell_passability(None, Vehicle::Car, &p),
             Passability::Unknown
@@ -789,28 +933,330 @@ mod tests {
     }
 
     #[test]
+    fn more_uncertainty_never_unblocks() {
+        // Regression: above 10 cm of sigma the rule switched to the mean
+        // alone, so a 14 cm report at trust 0.08 let a car through while the
+        // same report at trust 0.1 blocked it.
+        // Measurement sigma, growth with time, the unknown flag and the full
+        // sigma are swept together; once blocked, a cell stays blocked.
+        for vehicle in Vehicle::ALL {
+            for mean in [0.0, 3.0, 5.0, 10.0, 14.0, 25.0, 40.0] {
+                for growth in [0.0, 1.0, 3.0, 5.0, 8.0, 30.0] {
+                    let mut was_blocked = false;
+                    for sigma in [0.5, 2.0, 5.0, 9.9, 10.0, 10.1, 15.0, 40.0, 1000.0] {
+                        for unknown in [false, true] {
+                            let mut v = cv(Gaussian::new(mean, sigma + growth), None, unknown);
+                            v.sigma_meas_cm = sigma;
+                            v.growth_cm = growth;
+                            let b = blocked(&v, vehicle);
+                            assert!(
+                                b || !was_blocked,
+                                "{vehicle} at {mean} cm unblocked at sigma {sigma}, growth {growth}"
+                            );
+                            was_blocked |= b;
+                        }
+                    }
+                }
+                let mut was_blocked = false;
+                for growth in [0.0, 0.5, 1.0, 2.0, 5.0, 6.0, 50.0] {
+                    let mut v = cv(Gaussian::new(mean, 3.0), None, false);
+                    v.growth_cm = growth;
+                    let b = blocked(&v, vehicle);
+                    assert!(
+                        b || !was_blocked,
+                        "{vehicle} at {mean} cm unblocked with age"
+                    );
+                    was_blocked |= b;
+                }
+            }
+        }
+        // Velocity: an uncertain fast flow never drops to the slower default.
+        let fast = |s: f64, shown: bool| {
+            let g = Gaussian::new(2.0, s);
+            let mut v = cv(Gaussian::new(12.0, 1.0), Some(g), false);
+            if !shown {
+                v.velocity = None;
+            }
+            v
+        };
+        // 13.5 cm is under the depth limit; 0.135 m x 2.6 m/s is over 0.3.
+        assert!(blocked(&fast(0.4, true), Vehicle::Car));
+        // Too uncertain to show, it still counts at 2 + 1.5 x 0.5 m/s.
+        assert!(blocked(&fast(0.6, false), Vehicle::Car));
+        assert!(blocked(&fast(5.0, false), Vehicle::Car));
+        // A vague report of a dry street does not block a car: 0 + 15 is
+        // not greater than 15.
+        for sigma in [10.0, 20.0, 1000.0] {
+            let v = cv(Gaussian::new(0.0, sigma), None, true);
+            assert_eq!(
+                cell_passability(Some(&v), Vehicle::Car, &RoutePolicy::default()),
+                Passability::Unknown
+            );
+        }
+    }
+
+    #[test]
+    fn a_14_cm_report_blocks_a_car_at_every_trust() {
+        for trust in [1.0, 0.5, 0.1, 0.08, 0.01, 1e-6] {
+            let mut g = grid();
+            let r = g
+                .ingest(&Observation {
+                    lat: 13.0,
+                    lon: 80.2054,
+                    depth_cm: 14.0,
+                    depth_sigma_cm: 3.0,
+                    velocity_mps: None,
+                    velocity_sigma_mps: None,
+                    observed_at: now(),
+                    trust,
+                })
+                .unwrap();
+            let v = g.view(r.cell, now()).unwrap();
+            assert!(blocked(&v, Vehicle::Car), "trust {trust}: {v:?}");
+        }
+    }
+
+    #[test]
+    fn an_old_deep_report_blocks_until_it_expires() {
+        let mut g = grid();
+        flood(&mut g, 13.0, 80.2054, 40.0);
+        let cell = g.cell_at(13.0, 80.2054).unwrap();
+        let at = |h: i64| g.view(cell, now() + chrono::Duration::minutes(h)).unwrap();
+        for minutes in [0, 60, 180, 270, 360, 600, 715] {
+            let v = at(minutes);
+            assert!(blocked(&v, Vehicle::Car), "car at {minutes} min");
+            assert!(blocked(&v, Vehicle::Bus), "bus at {minutes} min");
+        }
+        let v = at(13 * 60);
+        assert!(v.expired);
+        assert_eq!(
+            cell_passability(Some(&v), Vehicle::Car, &RoutePolicy::default()),
+            Passability::Unknown
+        );
+    }
+
+    #[test]
+    fn ten_dry_reports_do_not_clear_a_fresh_deep_one() {
+        let mut g = grid();
+        let base = |lat: f64, lon: f64, depth: f64, minutes: i64| Observation {
+            lat,
+            lon,
+            depth_cm: depth,
+            depth_sigma_cm: 3.0,
+            velocity_mps: None,
+            velocity_sigma_mps: None,
+            observed_at: now() + chrono::Duration::minutes(minutes),
+            trust: 1.0,
+        };
+        let r = g.ingest(&base(13.0, 80.2054, 40.0, 0)).unwrap();
+        for i in 1..=10 {
+            // All within the first 20 minutes, before any can count toward
+            // clearing the conflict.
+            g.ingest(&base(13.0, 80.2054, 0.0, 2 * i)).unwrap();
+        }
+        let v = g
+            .view(r.cell, now() + chrono::Duration::minutes(59))
+            .unwrap();
+        assert!(blocked(&v, Vehicle::Car), "{v:?}");
+        assert!(
+            v.unknown && v.depth.sigma() >= 10.0 && v.conflicts >= 1,
+            "{v:?}"
+        );
+    }
+
+    fn reading(depth: f64, minutes: i64) -> Observation {
+        Observation {
+            lat: 13.0,
+            lon: 80.2054,
+            depth_cm: depth,
+            depth_sigma_cm: 3.0,
+            velocity_mps: None,
+            velocity_sigma_mps: None,
+            observed_at: now() + chrono::Duration::minutes(minutes),
+            trust: 1.0,
+        }
+    }
+
+    fn car_blocked_at(g: &Grid, cell: h3o::CellIndex, minutes: i64) -> bool {
+        let v = g
+            .view(cell, now() + chrono::Duration::minutes(minutes))
+            .unwrap();
+        blocked(&v, Vehicle::Car)
+    }
+
+    const AGES_MIN: [i64; 9] = [1, 10, 60, 90, 180, 360, 600, 700, 719];
+
+    #[test]
+    fn a_3_cm_report_never_blocks_a_car_before_expiry() {
+        // 3 + 1.5 x 3 + min(growth, 5) is at most 12.5 cm.
+        let mut g = grid();
+        let cell = g.ingest(&reading(3.0, 0)).unwrap().cell;
+        for m in [0].into_iter().chain(AGES_MIN) {
+            assert!(!car_blocked_at(&g, cell, m), "blocked at {m} min");
+        }
+    }
+
+    #[test]
+    fn a_10_cm_report_blocks_a_car() {
+        // 10 + 1.5 x 3 = 14.5 at the instant of the report; growth passes
+        // 0.5 cm within the first minute and the cell blocks from then until
+        // it expires.
+        let mut g = grid();
+        let cell = g.ingest(&reading(10.0, 0)).unwrap().cell;
+        for m in AGES_MIN {
+            assert!(car_blocked_at(&g, cell, m), "not blocked at {m} min");
+        }
+        assert!(!car_blocked_at(&g, cell, 13 * 60), "expired at 13 h");
+        // With a sigma of 4 cm it blocks at once: 10 + 6 = 16.
+        let mut g = grid();
+        let mut r = reading(10.0, 0);
+        r.depth_sigma_cm = 4.0;
+        let cell = g.ingest(&r).unwrap().cell;
+        assert!(car_blocked_at(&g, cell, 0));
+    }
+
+    #[test]
+    fn neighbours_block_on_the_neighbour_mean_alone() {
+        let ring_of = |g: &mut Grid, depth: f64| {
+            let r = g.ingest(&reading(depth, 0)).unwrap();
+            r.touched[1..].to_vec()
+        };
+        // 2.2 cm next door does not close the adjacent roads, at any age.
+        let mut g = grid();
+        for n in ring_of(&mut g, 2.2) {
+            for m in [0].into_iter().chain(AGES_MIN) {
+                let v = g.view(n, now() + chrono::Duration::minutes(m)).unwrap();
+                assert!(v.neighbour_only);
+                assert!(!blocked(&v, Vehicle::Car), "{n} at {m} min");
+            }
+        }
+        // 30 cm next door closes them for cars but not buses; 14 cm does not.
+        let mut g = grid();
+        for n in ring_of(&mut g, 30.0) {
+            for m in [0].into_iter().chain(AGES_MIN) {
+                let v = g.view(n, now() + chrono::Duration::minutes(m)).unwrap();
+                assert!(blocked(&v, Vehicle::Car), "{n} at {m} min");
+                assert!(!blocked(&v, Vehicle::Bus), "bus at {m} min");
+            }
+        }
+        let mut g = grid();
+        for n in ring_of(&mut g, 14.0) {
+            assert!(!car_blocked_at(&g, n, 60));
+        }
+    }
+
+    #[test]
+    fn a_conflict_never_unblocks() {
+        // One dry report ten minutes after a 40 cm report: the cell blocks on
+        // the deeper side of the disagreement.
+        let mut g = grid();
+        let cell = g.ingest(&reading(40.0, 0)).unwrap().cell;
+        g.ingest(&reading(0.0, 10)).unwrap();
+        let v = g.view(cell, now() + chrono::Duration::minutes(10)).unwrap();
+        assert_eq!(v.conflicts, 1);
+        assert_eq!(v.conflict_high_mean_cm, Some(40.0));
+        assert!(blocked(&v, Vehicle::Car) && blocked(&v, Vehicle::Bus));
+        for m in [60, 360, 700] {
+            assert!(car_blocked_at(&g, cell, m), "unblocked at {m} min");
+        }
+    }
+
+    #[test]
+    fn five_agreeing_reports_after_half_an_hour_clear_a_conflict() {
+        let mut g = grid();
+        let cell = g.ingest(&reading(40.0, 0)).unwrap().cell;
+        // Ten dry reports in the first ten minutes: still blocked.
+        for m in 1..=10 {
+            g.ingest(&reading(0.0, m)).unwrap();
+        }
+        assert!(car_blocked_at(&g, cell, 10));
+        // Four agreeing reports after the 30 minute mark: still blocked.
+        for m in 31..=34 {
+            g.ingest(&reading(0.0, m)).unwrap();
+        }
+        assert!(car_blocked_at(&g, cell, 34));
+        // A disagreeing report in between restarts the count.
+        let mut g2 = g.clone();
+        g2.ingest(&reading(25.0, 35)).unwrap();
+        g2.ingest(&reading(0.0, 36)).unwrap();
+        assert!(car_blocked_at(&g2, cell, 36));
+        // The fifth agreeing report clears the conflict and the cell.
+        g.ingest(&reading(0.0, 35)).unwrap();
+        let v = g.view(cell, now() + chrono::Duration::minutes(35)).unwrap();
+        assert_eq!(v.conflict_high_mean_cm, None);
+        assert!(!v.unknown, "{v:?}");
+        assert_eq!(
+            cell_passability(Some(&v), Vehicle::Car, &RoutePolicy::default()),
+            Passability::Clear
+        );
+    }
+
+    #[test]
+    fn route_text_names_old_deep_reports_on_unknown_cells() {
+        let g = town();
+        let mut grid = grid();
+        flood(&mut grid, 13.0, 80.2054, 45.0);
+        // Thirteen hours later the report has expired and no longer blocks.
+        let water = grid.water_map(now() + chrono::Duration::hours(13));
+        let r = plan_route(&g, &water, A, B, Vehicle::Car, &RoutePolicy::default()).unwrap();
+        assert!(r.route.passable);
+        assert_eq!(r.route.max_depth_cm_on_route, None);
+        assert_eq!(r.route.max_unknown_depth_cm, Some(45.0));
+        assert!((r.route.max_unknown_depth_age_h.unwrap() - 13.0).abs() < 1e-6);
+        assert_eq!(r.route.old_deep_cells_crossed, 1);
+        assert!(
+            r.route.explanation.contains("out of date")
+                && r.route.explanation.contains("45 cm reported 13 hours ago"),
+            "{}",
+            r.route.explanation
+        );
+        // A bus is told too: 45 cm is over its 30 cm limit.
+        let bus = plan_route(&g, &water, A, B, Vehicle::Bus, &RoutePolicy::default()).unwrap();
+        assert_eq!(bus.route.old_deep_cells_crossed, 1);
+    }
+
+    #[test]
     fn fast_shallow_water_blocks_by_depth_times_velocity() {
         let p = RoutePolicy::default();
-        let v = CellView {
-            cell: h3o::LatLng::new(13.0, 80.2)
-                .unwrap()
-                .to_cell(Resolution::Ten),
-            depth: crate::fusion::Gaussian::new(10.0, 0.5),
-            velocity: Some(crate::fusion::Gaussian::new(3.0, 0.1)),
-            unknown: false,
-            n_readings: 1,
-            n_neighbour: 0,
-            updated_at: now(),
-        };
+        let v = cv(
+            Gaussian::new(10.0, 0.5),
+            Some(Gaussian::new(3.0, 0.1)),
+            false,
+        );
         // 0.1075 m x 3.15 m/s is about 0.34 m2/s, over the 0.3 car limit.
-        assert!(matches!(
-            cell_passability(Some(&v), Vehicle::Car, &p),
-            Passability::Blocked { .. }
-        ));
+        assert!(blocked(&v, Vehicle::Car));
         assert_eq!(
             cell_passability(Some(&v), Vehicle::Bus, &p),
             Passability::Clear
         );
+    }
+
+    #[test]
+    fn same_start_and_end_in_deep_water_is_not_passable() {
+        // Regression: when both ends snapped to one node the route had no
+        // cells, so a car standing in 80 cm of water was told it was passable.
+        let g = town();
+        let mut grid = grid();
+        flood(&mut grid, A.0, A.1, 80.0);
+        let water = grid.water_map(now());
+        let r = plan_route(&g, &water, A, A, Vehicle::Car, &RoutePolicy::default()).unwrap();
+        assert!(!r.route.passable);
+        assert_eq!(r.route.cells_on_route, 1);
+        assert_eq!(r.route.impassable_cells_crossed, 1);
+        assert!(r.route.advisory);
+        assert!(
+            r.route.explanation.contains("same point") && r.route.explanation.contains("80 cm"),
+            "{}",
+            r.route.explanation
+        );
+        // On a dry map the same request is passable and says so plainly.
+        let dry = grid_dry_route(&g);
+        assert!(dry.route.passable && dry.route.unknown_cells_crossed == 1);
+    }
+
+    fn grid_dry_route(g: &RoadGraph) -> RouteResult {
+        let water = grid().water_map(now());
+        plan_route(g, &water, A, A, Vehicle::Car, &RoutePolicy::default()).unwrap()
     }
 
     #[test]

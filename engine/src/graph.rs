@@ -334,7 +334,7 @@ fn segment_cells(
         .unwrap_or(1)
         .clamp(1, 8);
     let chunk = seg_a.len().div_ceil(threads).max(1);
-    let parts: Vec<(Vec<u8>, Vec<u64>)> = std::thread::scope(|s| {
+    let parts: Vec<(Vec<u32>, Vec<u64>)> = std::thread::scope(|s| {
         let handles: Vec<_> = seg_a
             .chunks(chunk)
             .zip(seg_b.chunks(chunk))
@@ -360,8 +360,10 @@ fn segment_cells(
                                 }
                             }
                         }
-                        counts.push(u8::try_from(local.len()).unwrap_or(u8::MAX));
-                        cells.extend(local.iter().take(usize::from(u8::MAX)));
+                        // Every cell is kept: dropping any would hide its water
+                        // from routing.
+                        counts.push(u32::try_from(local.len()).expect("too many cells"));
+                        cells.extend(&local);
                     }
                     (counts, cells)
                 })
@@ -378,7 +380,7 @@ fn segment_cells(
     for (counts, part_cells) in parts {
         let mut acc = *start.last().unwrap_or(&0);
         for c in counts {
-            acc += u32::from(c);
+            acc += c;
             start.push(acc);
         }
         cells.extend(part_cells);
@@ -866,6 +868,26 @@ mod tests {
             assert!(!g.segment_cells(g.edge_segment(e)).is_empty());
         }
         assert!(g.memory_bytes() > 0);
+    }
+
+    #[test]
+    fn long_segments_keep_every_cell() {
+        // Regression: cell counts were stored in a u8, so a segment crossing
+        // more than 255 cells (5 km at resolution 12) silently lost the rest,
+        // and water in them was invisible to routing.
+        let mut b = GraphBuilder::new();
+        let a = b.add_node(13.0, 80.20);
+        let z = b.add_node(13.0, 80.25);
+        b.add_way(vec![a, z], PED | MOTOR, PED | MOTOR);
+        let g = b.build(Resolution::Twelve);
+        let cells = g.segment_cells(0);
+        assert!(cells.len() > 255, "{}", cells.len());
+        let end = u64::from(
+            LatLng::new(13.0, 80.25)
+                .unwrap()
+                .to_cell(Resolution::Twelve),
+        );
+        assert!(cells.contains(&end));
     }
 
     #[test]

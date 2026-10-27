@@ -15,7 +15,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const FORMAT: &str = "neermattam-engine-cells";
-const VERSION: u32 = 1;
+/// Version 3 keeps direct and per-neighbour tracks separately, each with its
+/// measurement variance. Older files are refused and moved aside at start.
+const VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct Snapshot {
@@ -70,7 +72,7 @@ pub fn encode(grid: &Grid, now: DateTime<Utc>) -> Vec<u8> {
         .states()
         .map(|(c, s)| SnapshotCell {
             cell: c.to_string(),
-            state: *s,
+            state: s.clone(),
         })
         .collect();
     cells.sort_unstable_by(|a, b| a.cell.cmp(&b.cell));
@@ -165,6 +167,12 @@ pub fn load(path: &Path, grid: &mut Grid) -> Result<usize, PersistError> {
         if cell.resolution() != grid.resolution() {
             return Err(invalid(format!("cell {} has the wrong resolution", c.cell)));
         }
+        if !c.state.is_valid() {
+            return Err(invalid(format!(
+                "cell {} holds no evidence or a number that is not finite",
+                c.cell
+            )));
+        }
         parsed.push((cell, c.state));
     }
     let n = parsed.len();
@@ -204,8 +212,8 @@ mod tests {
         assert_eq!(save(&g, &path, Utc::now()).unwrap(), 7);
         let mut back = Grid::new(FusionParams::default(), Resolution::Ten);
         assert_eq!(load(&path, &mut back).unwrap(), 7);
-        let mut a: Vec<_> = g.states().map(|(c, s)| (*c, *s)).collect();
-        let mut b: Vec<_> = back.states().map(|(c, s)| (*c, *s)).collect();
+        let mut a: Vec<_> = g.states().map(|(c, s)| (*c, s.clone())).collect();
+        let mut b: Vec<_> = back.states().map(|(c, s)| (*c, s.clone())).collect();
         a.sort_by_key(|x| u64::from(x.0));
         b.sort_by_key(|x| u64::from(x.0));
         assert_eq!(a, b);
@@ -216,6 +224,40 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn a_vanishing_trust_cannot_poison_the_snapshot() {
+        // Regression: trust 1e-310 made the variance infinite, which JSON
+        // writes as null, so the next start refused the snapshot and lost
+        // every cell.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cells.json");
+        let mut g = sample();
+        g.ingest(&Observation {
+            lat: 13.05,
+            lon: 80.25,
+            depth_cm: 10.0,
+            depth_sigma_cm: 3.0,
+            velocity_mps: Some(0.5),
+            velocity_sigma_mps: Some(0.2),
+            observed_at: Utc::now(),
+            trust: 1e-310,
+        })
+        .unwrap();
+        save(&g, &path, Utc::now()).unwrap();
+        let mut back = Grid::new(FusionParams::default(), Resolution::Ten);
+        assert_eq!(load(&path, &mut back).unwrap(), 14);
+        // A hand-edited file with a non-finite or negative variance is refused.
+        let text = fs::read_to_string(&path).unwrap();
+        let broken = text.replacen("\"var\":", "\"var\":-", 1);
+        fs::write(&path, broken).unwrap();
+        let mut g2 = Grid::new(FusionParams::default(), Resolution::Ten);
+        assert!(matches!(
+            load(&path, &mut g2),
+            Err(PersistError::Invalid { .. })
+        ));
+        assert!(g2.is_empty());
     }
 
     #[test]

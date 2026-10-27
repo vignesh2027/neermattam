@@ -2,13 +2,13 @@
 //!
 //! | Variable | Default | Meaning |
 //! |---|---|---|
-//! | `ENGINE_BIND` | `127.0.0.1:8302` | Listen address |
+//! | `ENGINE_BIND` | `127.0.0.1:8302` | Listen address; keep it on the internal network |
 //! | `ENGINE_OSM_PATH` | `../data/osm/chennai-roads.osm.pbf` | Road extract |
 //! | `ENGINE_SNAPSHOT_PATH` | `../data/engine/cells.json` | Cell snapshot; empty disables |
 //! | `ENGINE_SNAPSHOT_INTERVAL_SECS` | `5` | Minimum seconds between snapshots |
 //! | `ENGINE_H3_RESOLUTION` | `10` | H3 resolution (7 to 12) |
 //! | `ENGINE_BBOX` | `80.10,12.85,80.33,13.24` | Service area, minLon,minLat,maxLon,maxLat |
-//! | `ENGINE_HALF_LIFE_HOURS` | `3` | Recession half-life |
+//! | `ENGINE_HALF_LIFE_HOURS` | `off` | Opt-in recession half-life; `off` holds the level |
 //! | `ENGINE_DEPTH_NOISE_CM_PER_SQRT_HOUR` | `6` | Depth process noise |
 //! | `ENGINE_VELOCITY_NOISE_MPS_PER_SQRT_HOUR` | `0.2` | Velocity process noise |
 //! | `ENGINE_NEIGHBOUR_SIGMA_CM` | `8` | Extra sigma for ring cells |
@@ -16,14 +16,18 @@
 //! | `ENGINE_UNKNOWN_SIGMA_CM` | `10` | Depth sigma above which a cell is unknown |
 //! | `ENGINE_UNKNOWN_VELOCITY_SIGMA_MPS` | `0.5` | Velocity sigma above which velocity is unknown |
 //! | `ENGINE_STALE_HOURS` | `6` | Hours without evidence before a cell is unknown |
+//! | `ENGINE_EXPIRE_HOURS` | `12` | Hours after its latest reading that evidence stops counting |
 //! | `ENGINE_FORGET_HOURS` | `48` | Hours without evidence before a cell is dropped |
-//! | `ENGINE_SAFETY_SIGMAS` | `1.5` | k in mean + k sigma |
+//! | `ENGINE_SAFETY_SIGMAS` | `1.5` | k in mean + k min(sigma, cap) |
+//! | `ENGINE_BLOCK_SIGMA_CAP_CM` | `10` | Depth sigma cap in the blocking rule |
+//! | `ENGINE_BLOCK_VELOCITY_SIGMA_CAP_MPS` | `0.5` | Velocity sigma cap in the blocking rule |
+//! | `ENGINE_BLOCK_GROWTH_CAP_CM` | `5` | Cap on growth with time in the blocking rule |
 //! | `ENGINE_UNKNOWN_PENALTY` | `1.5` | Cost multiplier through unknown cells |
 //! | `ENGINE_DEFAULT_VELOCITY_MPS` | `1.0` | Velocity assumed when not measured |
 //! | `ENGINE_PEDESTRIAN_BLOCK_CLASS` | `danger_some` | Lowest class that blocks walkers |
 //! | `ENGINE_DEBRIS_RULE` | `fd2320` | `fd2320`, `fd2321_urban`, `fd2321_woodland`, `fd2321_pasture` |
 //! | `ENGINE_MAX_SNAP_M` | `1500` | Furthest a route end may be from a road |
-//! | `ENGINE_MAX_OBSERVATION_SKEW_HOURS` | `24` | How far `observed_at` may be from now |
+//! | `ENGINE_MAX_OBSERVATION_SKEW_HOURS` | `24` | How old `observed_at` may be; at most 5 minutes ahead is always allowed |
 //! | `ENGINE_BODY_LIMIT_BYTES` | `16384` | Request body limit |
 //! | `ENGINE_REQUEST_TIMEOUT_SECS` | `15` | Timeout for non-streaming requests |
 //! | `ENGINE_MAX_CELLS` | `20000` | Most features one `/v1/cells` call returns |
@@ -67,7 +71,8 @@ pub struct Config {
     pub fusion: FusionParams,
     /// Routing policy.
     pub policy: RoutePolicy,
-    /// How far `observed_at` may be from now, hours.
+    /// How old `observed_at` may be, hours. The future limit is fixed at
+    /// [`crate::api::MAX_FUTURE_SKEW_SECS`].
     pub max_observation_skew_h: f64,
     /// Request body limit, bytes.
     pub body_limit_bytes: usize,
@@ -149,6 +154,17 @@ fn any<T>(_: &T) -> Result<(), String> {
 }
 
 impl Config {
+    /// True when the bind address is loopback or a private (RFC 1918, ULA)
+    /// address. The engine has no authentication and trusts the `trust`
+    /// field, so it must only be reachable from the gateway.
+    #[must_use]
+    pub fn bind_is_internal(&self) -> bool {
+        match self.bind.ip() {
+            std::net::IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+            std::net::IpAddr::V6(ip) => ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00,
+        }
+    }
+
     /// Read from the process environment.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_lookup(|k| std::env::var(k).ok())
@@ -177,7 +193,21 @@ impl Config {
         parse(&get, "ENGINE_BBOX", &mut c.service_bbox, any)?;
 
         let f = &mut c.fusion;
-        parse(&get, "ENGINE_HALF_LIFE_HOURS", &mut f.half_life_h, positive)?;
+        if let Some(raw) = get("ENGINE_HALF_LIFE_HOURS") {
+            let raw = raw.trim();
+            f.half_life_h = if matches!(raw, "" | "off" | "none") {
+                None
+            } else {
+                let mut h = 0.0;
+                parse(
+                    &|_: &str| Some(raw.to_string()),
+                    "ENGINE_HALF_LIFE_HOURS",
+                    &mut h,
+                    positive,
+                )?;
+                Some(h)
+            };
+        }
         parse(
             &get,
             "ENGINE_DEPTH_NOISE_CM_PER_SQRT_HOUR",
@@ -215,6 +245,7 @@ impl Config {
             positive,
         )?;
         parse(&get, "ENGINE_STALE_HOURS", &mut f.stale_after_h, positive)?;
+        parse(&get, "ENGINE_EXPIRE_HOURS", &mut f.expire_after_h, positive)?;
         parse(&get, "ENGINE_FORGET_HOURS", &mut f.forget_after_h, positive)?;
 
         let p = &mut c.policy;
@@ -222,6 +253,24 @@ impl Config {
             &get,
             "ENGINE_SAFETY_SIGMAS",
             &mut p.safety_sigmas,
+            non_negative,
+        )?;
+        parse(
+            &get,
+            "ENGINE_BLOCK_SIGMA_CAP_CM",
+            &mut p.sigma_cap_cm,
+            non_negative,
+        )?;
+        parse(
+            &get,
+            "ENGINE_BLOCK_VELOCITY_SIGMA_CAP_MPS",
+            &mut p.velocity_sigma_cap_mps,
+            non_negative,
+        )?;
+        parse(
+            &get,
+            "ENGINE_BLOCK_GROWTH_CAP_CM",
+            &mut p.growth_cap_cm,
             non_negative,
         )?;
         parse(
@@ -314,6 +363,14 @@ mod tests {
     fn defaults_without_environment() {
         let c = Config::from_lookup(|_| None).unwrap();
         assert_eq!(c.bind.port(), 8302);
+        // The engine is internal: by default it listens on loopback only.
+        assert!(c.bind.ip().is_loopback());
+        assert!(c.bind_is_internal());
+        // No recession unless asked for; evidence expires after 12 hours.
+        assert_eq!(c.fusion.half_life_h, None);
+        assert_eq!(c.fusion.expire_after_h, 12.0);
+        assert_eq!(c.policy.sigma_cap_cm, 10.0);
+        assert_eq!(c.policy.growth_cap_cm, 5.0);
         assert_eq!(c.resolution, Resolution::Ten);
         assert_eq!(c.service_bbox, BBox::CHENNAI);
         assert_eq!(c.policy.safety_sigmas, 1.5);
@@ -330,7 +387,7 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(c.resolution, Resolution::Nine);
-        assert_eq!(c.fusion.half_life_h, 5.0);
+        assert_eq!(c.fusion.half_life_h, Some(5.0));
         assert!(c.snapshot_path.is_none());
         assert_eq!(c.policy.pedestrian_block_class, HazardClass::DangerMost);
         assert!(!c.log_json);
@@ -340,5 +397,16 @@ mod tests {
         assert!(Config::from_lookup(lookup(&[("ENGINE_HALF_LIFE_HOURS", "-1")])).is_err());
         assert!(Config::from_lookup(lookup(&[("ENGINE_UNKNOWN_PENALTY", "0.5")])).is_err());
         assert!(Config::from_lookup(lookup(&[("ENGINE_BIND", "nope")])).is_err());
+        let c = Config::from_lookup(lookup(&[
+            ("ENGINE_HALF_LIFE_HOURS", "off"),
+            ("ENGINE_EXPIRE_HOURS", "8"),
+            ("ENGINE_BLOCK_SIGMA_CAP_CM", "12"),
+            ("ENGINE_BIND", "0.0.0.0:8302"),
+        ]))
+        .unwrap();
+        assert_eq!(c.fusion.half_life_h, None);
+        assert_eq!(c.fusion.expire_after_h, 8.0);
+        assert_eq!(c.policy.sigma_cap_cm, 12.0);
+        assert!(!c.bind_is_internal());
     }
 }
