@@ -17,6 +17,7 @@ Glimmer on Modal) and is a stub for now.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
@@ -350,7 +351,12 @@ class MetaApiAdapter:
             float(usage.get("prompt_tokens", 0)) * MUSE_SPARK_INPUT_USD_PER_M
             + float(usage.get("completion_tokens", 0)) * MUSE_SPARK_OUTPUT_USD_PER_M
         ) / 1e6
-        return parse_scene_json(data, image.width, image.height, cost)
+        try:
+            return parse_scene_json(data, image.width, image.height, cost)
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
+            # Strict schemas should prevent this; a malformed answer is a model
+            # fault (503), not an unhandled 500.
+            raise ModelError("scene model returned an unexpected shape") from exc
 
     async def _stream_responses(self, body: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
         async with (
@@ -385,7 +391,8 @@ class MetaApiAdapter:
             prompt, image_url=sam.image_data_url(image.jpeg), mask_encoding="one_bit"
         )
         result = await self._parse(sam.parse_image_stream, body)
-        masks = sam.collect_masks(result, image.width, image.height)
+        # Decoding full-frame masks takes seconds of pure Python; keep it off the loop.
+        masks = await asyncio.to_thread(sam.collect_masks, result, image.width, image.height)
         return MaskResult(
             {int(m.object_id): m for m in masks if m.frame == 0},
             sam.segmentation_cost_usd("image"),
@@ -412,7 +419,7 @@ class MetaApiAdapter:
         fid = await self.upload_video(video)
         body = sam.request_body(concept, video_file_id=fid, mask_encoding="one_bit")
         result = await self._parse(sam.parse_video_stream, body)
-        masks = sam.collect_masks(result, video.width, video.height)
+        masks = await asyncio.to_thread(sam.collect_masks, result, video.width, video.height)
         return TrackResult(
             sam.tracks_from_masks(masks),
             max(video.n_frames, sam.VIDEO_MIN_FRAMES),

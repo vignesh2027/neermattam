@@ -124,3 +124,11 @@ def test_squash_only_where_verified() -> None:
     assert r.resolve_reference("bus_wheel", vehicle="city_bus").squash_cm == pytest.approx(3.2)
     assert r.resolve_reference("car_wheel", vehicle="maruti_swift").squash_cm == 0.0
     assert r.resolve_reference("car_wheel").squash_cm == 0.0
+
+
+def test_secondary_sources_are_not_marked_verified() -> None:
+    from neermattam_perception.references import CATALOGUE
+
+    for e in CATALOGUE:
+        if "secondary" in e.note:
+            assert not e.verified, e

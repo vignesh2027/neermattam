@@ -14,6 +14,7 @@ Steps:
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from collections.abc import Sequence
@@ -220,7 +221,10 @@ class Pipeline:
                 hint_diameter_cm=hint_diameter_cm,
             )
             rim = seg.masks.get(cand.rim_id) if cand.rim_id is not None else None
-            res = measure_wheel_depth(
+            # CPU-bound for seconds: run it off the event loop so other requests
+            # and the health checks are not stalled behind it.
+            res = await asyncio.to_thread(
+                measure_wheel_depth,
                 wm.mask,
                 water.mask,
                 ref.diameter_cm,
@@ -262,7 +266,9 @@ class Pipeline:
                 reasons.append(why[0])
 
         label = f"depth {depth_cm:.1f} cm, sigma {m.depth_sigma_cm:.1f} cm"
-        overlay = png_b64(render_overlay(key.rgb, m, label=label, second_line=line2))
+        overlay = png_b64(
+            await asyncio.to_thread(render_overlay, key.rgb, m, label=label, second_line=line2)
+        )
         return MeasureResponse(
             usable=True,
             reasons=reasons,

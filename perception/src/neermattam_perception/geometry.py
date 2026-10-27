@@ -933,13 +933,30 @@ def straight_runs(
 # (visible arc in degrees, model sigma as a share of the diameter). Produced by
 # `uv run python -m neermattam_perception.synth_eval --calibrate`.
 MODEL_SIGMA_TABLE: tuple[tuple[float, float], ...] = (
-    (115.0, 0.0734),  # calibration seed 9945, 391 usable cases; n per bin 59
-    (145.0, 0.0734),  # n=88
-    (175.0, 0.0378),  # n=93
-    (205.0, 0.0306),  # n=74
-    (240.0, 0.0168),  # n=52
-    (310.0, 0.0168),  # n=25
+    (115.0, 0.1326),  # calibration seed 9945, 391 usable cases; n per bin 59
+    (145.0, 0.1326),  # n=88
+    (175.0, 0.0766),  # n=93
+    (205.0, 0.0766),  # n=74
+    (240.0, 0.0175),  # n=52
+    (310.0, 0.0175),  # n=25
 )
+
+
+# (visible arc in degrees, signed bias as a share of the diameter), from the same
+# calibration run as MODEL_SIGMA_TABLE.
+MODEL_BIAS_TABLE: tuple[tuple[float, float], ...] = (
+    (115.0, -0.0339),  # calibration seed 9945, 391 usable cases; n per bin 59
+    (145.0, -0.0339),  # n=88
+    (175.0, -0.0136),  # n=93
+    (205.0, -0.0113),  # n=74
+    (240.0, -0.0037),  # n=52
+    (310.0, -0.0033),  # n=25
+)
+
+
+def model_bias(arc_deg: float, table: tuple[tuple[float, float], ...]) -> float:
+    """Signed systematic error (share of the diameter) at ``arc_deg``; never positive."""
+    return min(0.0, model_sigma(arc_deg, table))
 
 
 def model_sigma(arc_deg: float, table: tuple[tuple[float, float], ...]) -> float:
@@ -971,6 +988,10 @@ class GeometryConfig:
     # shape. Calibrated with `synth_eval --calibrate` on seeds disjoint from the
     # evaluation; see docs/GEOMETRY.md.
     model_sigma_table: tuple[tuple[float, float], ...] = MODEL_SIGMA_TABLE
+    # Systematic error, as a signed share of the diameter, against the visible
+    # arc. It is subtracted from the fraction, and it is never positive, so the
+    # correction only ever raises a depth. Calibrated with the sigma table.
+    model_bias_table: tuple[tuple[float, float], ...] = MODEL_BIAS_TABLE
     seed: int = 7
 
 
@@ -1002,6 +1023,9 @@ class DepthMeasurement:
     cm_per_px: float
     arc_points: FloatArray = field(repr=False)
     chord_points: FloatArray = field(repr=False)
+    # Calibrated bias already removed from ``fraction`` (a share of the diameter,
+    # never positive). ``fraction_affine`` is the raw affine value.
+    fraction_bias: float = 0.0
 
     @property
     def waterline_y_px(self) -> float:
@@ -1360,6 +1384,10 @@ def measure_wheel_depth(
         rel = model_sigma(covered, cfg.model_sigma_table)
         d_sigma = math.hypot(d_sigma, rel * diameter_cm)
         fr_sigma = math.hypot(fr_sigma, rel)
+    # Short arcs read low (see docs/GEOMETRY.md, section 4); remove the calibrated
+    # bias. It is never positive, so this can only raise the depth.
+    bias = model_bias(covered, cfg.model_bias_table)
+    frac = min(1.0, frac - bias)
     return DepthMeasurement(
         ellipse=e,
         outline=outline,
@@ -1378,6 +1406,7 @@ def measure_wheel_depth(
         cm_per_px=diameter_cm / (2.0 * e.a),
         arc_points=arc_pts,
         chord_points=chord_pts,
+        fraction_bias=bias,
     )
 
 
@@ -1441,7 +1470,19 @@ def _monte_carlo(
     return float(np.std(fr, ddof=1)), float(np.std(dep, ddof=1))
 
 
-def depth_from_line(m: DepthMeasurement, line: Line, camera: PinholeCamera | None = None) -> float:
-    """Depth (cm) implied by a second, independent waterline on the same fitted wheel."""
+def depth_from_line(
+    m: DepthMeasurement,
+    line: Line,
+    camera: PinholeCamera | None = None,
+    *,
+    apply_bias: bool = True,
+) -> float:
+    """Depth (cm) implied by a second, independent waterline on the same fitted wheel.
+
+    With ``apply_bias`` the same calibrated bias as ``m.depth_cm`` is removed, so
+    the two depths are directly comparable.
+    """
     frac, _ = _fraction(m.ellipse, line, m.waterline.water_normal, camera)
+    if apply_bias:
+        frac = min(1.0, frac - m.fraction_bias)
     return frac * m.diameter_cm

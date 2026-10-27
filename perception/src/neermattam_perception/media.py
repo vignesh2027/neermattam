@@ -83,25 +83,36 @@ def load_image(data: bytes) -> ImageInput:
     """Decode, check limits, apply EXIF orientation, shrink and strip metadata."""
     if len(data) > MAX_IMAGE_BYTES:
         raise MediaRejected(f"image is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB")
+    too_big = f"image is larger than {MAX_SIDE_PX} px or {MAX_PIXELS // 10**6} MP"
     try:
         im = Image.open(io.BytesIO(data))
-    except (UnidentifiedImageError, OSError) as exc:
+    except Image.DecompressionBombError as exc:  # not an OSError
+        raise MediaRejected(too_big) from exc
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as exc:
         raise MediaRejected("image could not be decoded") from exc
-    if im.format not in ("JPEG", "PNG", "WEBP"):
+    # Many phone cameras write JPEGs with a multi-picture extension; Pillow
+    # reports those as MPO. The first frame is the photo.
+    if im.format not in ("JPEG", "MPO", "PNG", "WEBP"):
         raise MediaRejected("image must be JPEG or PNG")
     w, h = im.size
     if max(w, h) > MAX_SIDE_PX or w * h > MAX_PIXELS:
-        raise MediaRejected(f"image is larger than {MAX_SIDE_PX} px or {MAX_PIXELS // 10**6} MP")
+        raise MediaRejected(too_big)
     if min(w, h) < MIN_SIDE_PX:
         raise MediaRejected(f"image is smaller than {MIN_SIDE_PX} px")
-    exif = im.getexif()
-    exif_ifd = dict(exif.get_ifd(_EXIF_IFD)) if exif else {}
-    captured = _captured_at(exif_ifd)
-    focal = exif_ifd.get(_FOCAL_35MM)
-    focal_35 = float(focal) if isinstance(focal, int | float) and 8 <= float(focal) <= 400 else None
+    # Hostile files can fail anywhere in Pillow (oversized PNG text or ICC
+    # chunks raise ValueError, a truncated PNG raises OSError while EXIF is
+    # read, a malformed EXIF block can raise struct.error), so every decoding
+    # step is guarded and turned into a 422, never a 500.
     try:
+        exif = im.getexif()
+        exif_ifd = dict(exif.get_ifd(_EXIF_IFD)) if exif else {}
+        captured = _captured_at(exif_ifd)
+        focal = exif_ifd.get(_FOCAL_35MM)
+        focal_35 = (
+            float(focal) if isinstance(focal, int | float) and 8 <= float(focal) <= 400 else None
+        )
         upright: Image.Image = ImageOps.exif_transpose(im).convert("RGB")
-    except OSError as exc:
+    except Exception as exc:  # see above: any decoding failure is a bad upload
         raise MediaRejected("image could not be decoded") from exc
     return _from_pil(upright, captured, focal_35)
 
@@ -194,4 +205,43 @@ def load_video(data: bytes, media_type: str = "video/mp4", scan_frames: int = 30
     if max(w, h) > MAX_SIDE_PX or min(w, h) < MIN_SIDE_PX:
         raise MediaRejected("video frame size is out of range")
     key = image_from_rgb(best)
-    return VideoInput(data, media_type, fps, n, w, h, best_idx, key)
+    return VideoInput(strip_video_metadata(data), media_type, fps, n, w, h, best_idx, key)
+
+
+# Boxes that can hold location or other personal metadata in MP4 and QuickTime
+# files: user data (``udta``, where ``\xa9xyz`` GPS lives), metadata (``meta``,
+# where Apple's ``com.apple.quicktime.location.ISO6709`` lives) and ``uuid``
+# boxes (XMP). They are turned into ``free`` boxes of the same size, with the
+# payload zeroed, so every chunk offset in the file stays valid.
+_VIDEO_META_BOXES = {b"udta", b"meta", b"uuid"}
+_VIDEO_CONTAINERS = {b"moov", b"trak", b"mdia", b"minf", b"edts"}
+
+
+def strip_video_metadata(data: bytes) -> bytes:
+    """MP4 or MOV bytes with every metadata box blanked out, frames untouched."""
+    buf = bytearray(data)
+
+    def walk(start: int, end: int, depth: int) -> None:
+        pos = start
+        while pos + 8 <= end:
+            size = int.from_bytes(buf[pos : pos + 4], "big")
+            kind = bytes(buf[pos + 4 : pos + 8])
+            header = 8
+            if size == 1:
+                if pos + 16 > end:
+                    return
+                size = int.from_bytes(buf[pos + 8 : pos + 16], "big")
+                header = 16
+            elif size == 0:
+                size = end - pos
+            if size < header or pos + size > end:
+                return  # malformed: leave the rest alone (the decoder accepted it)
+            if kind in _VIDEO_META_BOXES:
+                buf[pos + 4 : pos + 8] = b"free"
+                buf[pos + header : pos + size] = bytes(size - header)
+            elif kind in _VIDEO_CONTAINERS and depth < 8:
+                walk(pos + header, pos + size, depth + 1)
+            pos += size
+
+    walk(0, len(buf), 0)
+    return bytes(buf)

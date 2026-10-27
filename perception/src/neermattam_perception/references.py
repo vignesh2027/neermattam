@@ -170,7 +170,7 @@ CATALOGUE: tuple[WheelEntry, ...] = (
         "front",
         "90/90-12",
         _HONDA_125,
-        True,
+        False,
         note="secondary source (Autocar India)",
     ),
     _w(
@@ -180,7 +180,7 @@ CATALOGUE: tuple[WheelEntry, ...] = (
         "rear",
         "90/100-10",
         _HONDA_125,
-        True,
+        False,
         note="secondary source (Autocar India)",
     ),
     _w("tvs_jupiter", "TVS Jupiter 110", TWO, "front", "90/90-12", _TVS, True),
@@ -237,7 +237,7 @@ CATALOGUE: tuple[WheelEntry, ...] = (
         "any",
         "155/80 R13",
         _WAGONR,
-        True,
+        False,
         note="secondary source (Autocar India)",
     ),
     _w(
@@ -247,7 +247,7 @@ CATALOGUE: tuple[WheelEntry, ...] = (
         "any",
         "165/70 R14",
         _WAGONR,
-        True,
+        False,
         note="secondary source (Autocar India)",
     ),
     _w(
@@ -270,7 +270,7 @@ CATALOGUE: tuple[WheelEntry, ...] = (
         "any",
         "10.00 R20",
         _BUS,
-        True,
+        False,
         measured_cm=106.4,
         note=f"code from a secondary spec page; diameter from a Double Coin sheet ({_BUS_OD}); "
         "static loaded radius about 500 mm on the same sheet; "

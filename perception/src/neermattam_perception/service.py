@@ -14,10 +14,11 @@ Set ``NEERMATTAM_STORE_DIR`` to keep each sanitised upload and its response.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -62,8 +63,77 @@ def _store(store: Path, resp: MeasureResponse, image: ImageInput) -> None:
     (store / f"{resp.measurement_id}.json").write_text(json.dumps(body), encoding="utf-8")
 
 
+# Largest request body accepted: one image, one video and the form fields.
+MAX_BODY_BYTES = MAX_IMAGE_BYTES + MAX_VIDEO_BYTES + (1 << 20)
+
+
+class _BodyTooLarge(Exception):
+    pass
+
+
+class BodyLimit:
+    """ASGI middleware that refuses request bodies over ``limit`` bytes with 413.
+
+    Starlette parses (and spools to disk) the whole multipart body before the
+    endpoint runs, so the per-file limits in the endpoint alone cannot stop a
+    huge upload. This checks ``Content-Length`` up front and counts the bytes of
+    chunked bodies as they arrive.
+    """
+
+    def __init__(self, app: Any, limit: int = MAX_BODY_BYTES) -> None:
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        length = dict(scope.get("headers") or []).get(b"content-length", b"")
+        if length.isdigit() and int(length) > self.limit:
+            await self._reject(send)
+            return
+        seen = 0
+        started = False
+
+        async def limited_receive() -> Any:
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > self.limit:
+                    raise _BodyTooLarge
+            return message
+
+        async def tracked_send(message: Any) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracked_send)
+        except _BodyTooLarge:
+            if not started:
+                await self._reject(send)
+
+    async def _reject(self, send: Any) -> None:
+        body = json.dumps({"detail": "request body is too large"}).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
 def create_app(pipeline: Pipeline, store_dir: str | None = None) -> FastAPI:
     app = FastAPI(title="Neermattam perception", version="0.1.0")
+    app.add_middleware(BodyLimit)
     store = Path(store_dir) if store_dir else None
 
     @app.get("/healthz")
@@ -96,12 +166,14 @@ def create_app(pipeline: Pipeline, store_dir: str | None = None) -> FastAPI:
             if image is not None:
                 if image.content_type and image.content_type not in _IMAGE_TYPES:
                     raise HTTPException(415, "image must be JPEG or PNG")
-                img = load_image(await _read_limited(image, MAX_IMAGE_BYTES, "image"))
+                raw = await _read_limited(image, MAX_IMAGE_BYTES, "image")
+                img = await asyncio.to_thread(load_image, raw)
             if video is not None:
                 ctype = video.content_type or "video/mp4"
                 if ctype not in _VIDEO_TYPES:
                     raise HTTPException(415, "video must be MP4 or MOV")
-                vid = load_video(await _read_limited(video, MAX_VIDEO_BYTES, "video"), ctype)
+                raw = await _read_limited(video, MAX_VIDEO_BYTES, "video")
+                vid = await asyncio.to_thread(load_video, raw, ctype)
         except MediaRejected as exc:
             raise HTTPException(422, str(exc)) from exc
         try:

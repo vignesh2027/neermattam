@@ -35,8 +35,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .geometry import (
+    MODEL_BIAS_TABLE,
     MODEL_SIGMA_TABLE,
     DepthMeasurement,
     GeometryConfig,
@@ -48,12 +50,13 @@ from .references import CATALOGUE
 from .synth import SynthParams, _camera, distance_m, random_params, render
 
 DEFAULT_FOCAL_35MM = 26.0
+FloatArray = NDArray[np.float64]
 METHODS = ("affine", "persp_exif", "persp_26mm", "no_rim")
 METHOD_LABEL = {
-    "affine": "tyre + rim, affine (pipeline default)",
-    "persp_exif": "tyre + rim, perspective with EXIF focal",
-    "persp_26mm": "tyre + rim, perspective with assumed 26 mm",
-    "no_rim": "tyre outline only, affine",
+    "affine": "tyre + rim, affine, bias-corrected (pipeline default)",
+    "persp_exif": "tyre + rim, perspective with EXIF focal, uncorrected",
+    "persp_26mm": "tyre + rim, perspective with assumed 26 mm, uncorrected",
+    "no_rim": "tyre outline only, affine, uncorrected",
 }
 
 
@@ -88,7 +91,10 @@ def run_case(args: tuple[int, int, int] | tuple[int, int, int, bool]) -> CaseRes
         p.diameter_cm,
         0.0,
         GeometryConfig(
-            mc_draws=draws, seed=index, model_sigma_table=() if raw else MODEL_SIGMA_TABLE
+            mc_draws=draws,
+            seed=index,
+            model_sigma_table=() if raw else MODEL_SIGMA_TABLE,
+            model_bias_table=() if raw else MODEL_BIAS_TABLE,
         ),
         rim_mask=case.rim_mask,
     )
@@ -101,7 +107,7 @@ def run_case(args: tuple[int, int, int] | tuple[int, int, int, bool]) -> CaseRes
             case.water_mask,
             p.diameter_cm,
             0.0,
-            GeometryConfig(mc_draws=0, seed=index),
+            GeometryConfig(mc_draws=0, seed=index, model_bias_table=()),
         )
     no_rim = m_plain.depth_cm if isinstance(m_plain, DepthMeasurement) else math.nan
     if not isinstance(m, DepthMeasurement):
@@ -120,8 +126,8 @@ def run_case(args: tuple[int, int, int] | tuple[int, int, int, bool]) -> CaseRes
     line = m.waterline.line
     est = {
         "affine": m.depth_cm,
-        "persp_exif": depth_from_line(m, line, exif),
-        "persp_26mm": depth_from_line(m, line, assumed),
+        "persp_exif": depth_from_line(m, line, exif, apply_bias=False),
+        "persp_26mm": depth_from_line(m, line, assumed, apply_bias=False),
         "no_rim": no_rim,
     }
     diag = {
@@ -265,6 +271,13 @@ def report(results: list[CaseResult], seed: int, draws: int, wall: float) -> str
         lines.append(f"| share with abs error within 1 sigma (ideal 68%) | {within1:.0f}% |")
         lines.append(f"| share with abs error within 2 sigma (ideal 95%) | {within2:.0f}% |")
         lines.append(f"| median abs error / sigma | {float(np.median(z)):.2f} |")
+        signed = np.array([r.est_cm[main] - r.true_cm for r in ok])
+        low = 100.0 * float(np.mean(-signed > 1.5 * sig))
+        high = 100.0 * float(np.mean(signed > 1.5 * sig))
+        lines.append(f"| share with true depth above depth + 1.5 sigma (ideal 6.7%) | {low:.1f}% |")
+        lines.append(
+            f"| share with true depth below depth - 1.5 sigma (ideal 6.7%) | {high:.1f}% |"
+        )
         t = np.array([r.seconds for r in rs])
         lines.append(f"| median geometry time per case | {1000 * float(np.median(t)):.0f} ms |")
         lines.append("")
@@ -272,38 +285,72 @@ def report(results: list[CaseResult], seed: int, draws: int, wall: float) -> str
 
 
 CALIBRATION_BINS = (100.0, 130.0, 160.0, 190.0, 220.0, 260.0, 360.0)
+# Downstream blocks a road at depth + 1.5 sigma, so the share of readings whose
+# true depth lies above that line must not exceed the Gaussian rate.
+BLOCK_K = 1.5
+BLOCK_MISS = 0.0668
+ONE_SIGMA_COVER = 0.68
+
+
+def _smallest_model_sigma(ok: Callable[[float], bool], hi: float = 1.0) -> float:
+    """Smallest model share in [0, hi] for which ``ok`` holds (it is monotone)."""
+    if ok(0.0):
+        return 0.0
+    lo = 0.0
+    for _ in range(40):
+        mid = (lo + hi) / 2.0
+        lo, hi = (lo, mid) if ok(mid) else (mid, hi)
+    return hi
 
 
 def calibrate(cases: int, seed: int, workers: int) -> int:
-    """Model-error table: a share of the diameter for each visible-arc bin.
+    """Model-bias and model-error tables, as shares of the diameter, per visible-arc bin.
 
-    Uses the geometry without a model table, on seeds disjoint from the
-    evaluation. In each bin the target is the 68th percentile of
-    abs(error) / diameter, the half-width a one-sigma band should have; the
-    median Monte Carlo share is removed in quadrature. Errors have heavy tails,
-    so the root mean square would inflate every sigma to cover a few outliers;
-    the percentile targets the stated 68 percent coverage instead. The table is
-    then made non-increasing in arc, since more visible arc never hurts.
+    Uses the geometry with neither table, on seeds disjoint from the evaluation.
+    The errors are one-sided with a heavy low tail: short arcs read low, never
+    high. So in each bin:
+
+    * the bias is the median signed error, clamped to be no more than zero, so
+      that the correction can only raise a depth;
+    * after removing it, the model sigma is the smallest value, combined in
+      quadrature with each case's Monte Carlo sigma, for which both hold:
+      68 percent of abs errors fall within one sigma, and no more than 6.7
+      percent of true depths lie above ``depth + 1.5 sigma`` (the line the
+      engine blocks at). The second condition is what the heavy tail costs.
+
+    Both tables are then made monotone in arc (more visible arc never hurts):
+    the sigma non-increasing, the bias no smaller in magnitude at a shorter arc.
     """
     jobs = [(i, seed, 30, True) for i in range(cases)]
     with ProcessPoolExecutor(max_workers=workers) as ex:
         results = [r for r in ex.map(run_case, jobs, chunksize=4) if r.reason is None]
-    rows: list[tuple[float, float, int]] = []
+    rows: list[tuple[float, float, float, int]] = []
     for lo, hi in itertools.pairwise(CALIBRATION_BINS):
         sel = [r for r in results if lo <= r.diag["arc_covered"] < hi]
         if len(sel) < 5:
             continue
-        rel = np.abs([(r.est_cm["affine"] - r.true_cm) / r.params.diameter_cm for r in sel])
-        mc = float(np.median([r.sigma_cm / r.params.diameter_cm for r in sel]))
-        target = float(np.percentile(rel, 68.0))
-        rows.append(((lo + hi) / 2.0, math.sqrt(max(0.0, target**2 - mc**2)), len(sel)))
-    for i in range(len(rows) - 2, -1, -1):  # non-increasing in arc
-        c, v, n = rows[i]
-        rows[i] = (c, max(v, rows[i + 1][1]), n)
+        rel = np.array([(r.est_cm["affine"] - r.true_cm) / r.params.diameter_cm for r in sel])
+        mc = np.array([r.sigma_cm / r.params.diameter_cm for r in sel])
+        bias = min(0.0, float(np.median(rel)))
+        res = rel - bias
+
+        def covers(m: float, res: FloatArray = res, mc: FloatArray = mc) -> bool:
+            tot = np.sqrt(mc**2 + m**2)
+            one = float(np.mean(np.abs(res) <= tot)) >= ONE_SIGMA_COVER
+            miss = float(np.mean(-res > BLOCK_K * tot)) <= BLOCK_MISS
+            return one and miss
+
+        rows.append(((lo + hi) / 2.0, bias, _smallest_model_sigma(covers), len(sel)))
+    for i in range(len(rows) - 2, -1, -1):  # monotone in arc
+        c, b, v, n = rows[i]
+        rows[i] = (c, min(b, rows[i + 1][1]), max(v, rows[i + 1][2]), n)
     sys.stdout.write(f"calibration seed {seed}, {len(results)} usable cases\n")
     sys.stdout.write("MODEL_SIGMA_TABLE = (\n")
-    for centre, model, n in rows:
+    for centre, _, model, n in rows:
         sys.stdout.write(f"    ({centre:.0f}.0, {model:.4f}),  # n={n}\n")
+    sys.stdout.write(")\nMODEL_BIAS_TABLE = (\n")
+    for centre, bias, _, n in rows:
+        sys.stdout.write(f"    ({centre:.0f}.0, {bias:.4f}),  # n={n}\n")
     sys.stdout.write(")\n")
     return 0
 

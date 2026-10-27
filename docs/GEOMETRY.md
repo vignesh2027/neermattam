@@ -54,7 +54,7 @@ sends the ellipse to the unit circle. Map the waterline's point and direction th
 f = (1 - s) / 2          depth = f x D
 ```
 
-`s = 1` means the water just touches the bottom (`f = 0`); `s = -1` means the wheel is fully under (`f = 1`). The overlay draws the vertical diameter from `s n` to `+n` mapped back into the image.
+`s = 1` means the water just touches the bottom (`f = 0`); `s = -1` means the wheel is fully under (`f = 1`). Water above the hub needs no special case: the centre then lies on the water side of the line, `s` is negative and `f` is above one half. The overlay draws the vertical diameter from `s n` to `+n` mapped back into the image.
 
 ### 2.4 The exact perspective version
 
@@ -66,7 +66,7 @@ n = +/- sqrt((l1 - l2) / (l1 - l3)) e1 + sqrt((l2 - l3) / (l1 - l3)) e3
 
 For each, rotate the camera virtually until that plane faces it (the homography `K R K^-1`). The ellipse becomes a circle and the construction of section 2.3 becomes exact. We keep the solution whose implied vertical, the in-plane direction perpendicular to the waterline and pointing away from the water, best matches "up" in the photo, since wheels stand upright and phones are held roughly level. `geometry.projective_fraction` implements this, and a unit test checks it is exact on a projected circle where the affine answer is off by more than 1 percent of the diameter.
 
-The focal length comes from EXIF `FocalLengthIn35mmFilm` when present (35 mm equivalents match the 43.27 mm film diagonal, so `f_px = f35 x diagonal_px / 43.27`). On the synthetic set the correction did not beat the affine model once mask noise and fitting error were present (see the results), so the pipeline leaves it off by default (`PipelineConfig.perspective = "off"`).
+The focal length comes from EXIF `FocalLengthIn35mmFilm` when present (35 mm equivalents match the 43.27 mm film diagonal, so `f_px = f35 x diagonal_px / 43.27`). On the synthetic set the correction did not beat the affine model once mask noise and fitting error were present (see the results), so the pipeline leaves it off by default (`PipelineConfig.perspective = "off"`). Note that the affine error has a sign: a camera held above the water sees the top of the wheel slightly closer, and so slightly larger, than the bottom, which shrinks the apparent submerged share. With exact ellipses and exact waterlines the affine depth read 0.6 cm low on average over 312 scenes of a development seed (31337). The bias term of section 4 absorbs it along with the fitting bias.
 
 ### 2.5 A real tyre is a short cylinder, not a disc
 
@@ -113,7 +113,11 @@ Seen at an angle, a tyre shows its tread, and its outline is the convex hull of 
 
 1. **Monte Carlo over the measurement.** Each of 100 draws (in the service) bootstraps the outline points with pixel-quantisation jitter and refits the outline; bootstraps the waterline points and refits the line; shifts the line by a level error equal to the observed ripple (ripples are spatially correlated along the chord, so they do not average out); and draws a diameter from `N(D, sigma_D)`.
 2. **Model ambiguity.** The fit is started from several tread hypotheses. All fits within 15 percent of the best cost are kept, and the spread of the depths they imply enters as a uniform range.
-3. **Model error.** Resampling the same masks cannot reveal fit bias on short arcs, residual perspective or tyre shape. A table of model sigma against visible arc, as a share of the diameter, is calibrated on synthetic scenes with seeds disjoint from the evaluation (`synth_eval --calibrate`), targeting the 68th percentile of the absolute error so that one sigma means what it says. It is made non-increasing in arc. The calibration table lives in `geometry.MODEL_SIGMA_TABLE`.
+3. **Model error.** Resampling the same masks cannot reveal fit bias on short arcs, residual perspective or tyre shape. The errors are one-sided: on short arcs the fit sometimes locks onto the tread and far sidewall and returns a near sidewall that is too small and sits too high, so the depth reads low, sometimes by 20 to 40 cm, and almost never reads high by much. Two tables against visible arc, as shares of the diameter, are calibrated on synthetic scenes with a seed disjoint from the evaluation (`synth_eval --calibrate`):
+   * `geometry.MODEL_BIAS_TABLE`: the median signed error per arc bin. It is subtracted from the fraction. It is clamped to be no more than zero, so the correction can only raise a depth.
+   * `geometry.MODEL_SIGMA_TABLE`: after the bias is removed, the smallest model sigma that, combined with each case's Monte Carlo sigma, puts 68 percent of absolute errors within one sigma and leaves no more than 6.7 percent of true depths above `depth + 1.5 sigma`, the line at which the engine blocks a road. The second condition is the binding one; it is what the heavy low tail costs in sigma.
+
+   Both are monotone in arc (more visible arc never hurts).
 
 The `confidence` field is a 0 to 1 ranking score built from the scene model's image-quality score, the relative sigma and the agreement of the two waterlines. It is not a probability.
 
@@ -161,34 +165,34 @@ Masks are rasterised by pixel coverage (4x supersampling), since filling polygon
 **Results.** Generated by the command shown in the first line; the true diameter is used, so diameter uncertainty adds `f x sigma_D` on top.
 
 <!-- synth-eval:begin -->
-Generated by `uv run python -m neermattam_perception.synth_eval --cases 500 --seed 2026` (40 Monte Carlo draws per case, 417 s wall time).
+Generated by `uv run python -m neermattam_perception.synth_eval --cases 500 --seed 2026` (40 Monte Carlo draws per case, 298 s wall time).
 
 **All cases, by depth method** (errors over usable cases only)
 
 | Subset | Cases | Usable | MAE cm | Median cm | P90 cm | Bias cm | MAE / diameter |
 |---|---|---|---|---|---|---|---|
-| tyre + rim, affine (pipeline default) | 500 | 78% | 3.78 | 1.41 | 9.35 | -3.28 | 6.0% |
-| tyre + rim, perspective with EXIF focal | 500 | 78% | 4.00 | 1.48 | 9.84 | -3.19 | 6.4% |
-| tyre + rim, perspective with assumed 26 mm | 500 | 78% | 4.01 | 1.60 | 9.04 | -3.20 | 6.4% |
-| tyre outline only, affine | 392 | 98% | 7.21 | 4.81 | 15.70 | -7.19 | 11.5% |
+| tyre + rim, affine, bias-corrected (pipeline default) | 500 | 78% | 3.34 | 1.25 | 7.68 | -2.05 | 5.3% |
+| tyre + rim, perspective with EXIF focal, uncorrected | 500 | 78% | 4.00 | 1.48 | 9.84 | -3.19 | 6.4% |
+| tyre + rim, perspective with assumed 26 mm, uncorrected | 500 | 78% | 4.01 | 1.60 | 9.04 | -3.20 | 6.4% |
+| tyre outline only, affine, uncorrected | 392 | 98% | 7.21 | 4.81 | 15.70 | -7.19 | 11.5% |
 
-**Breakdown for tyre + rim, affine (pipeline default)**
+**Breakdown for tyre + rim, affine, bias-corrected (pipeline default)**
 
 | Subset | Cases | Usable | MAE cm | Median cm | P90 cm | Bias cm | MAE / diameter |
 |---|---|---|---|---|---|---|---|
-| depth 5 to 25% of diameter | 128 | 90% | 0.98 | 0.53 | 1.85 | -0.38 | 1.6% |
-| depth 25 to 50% | 164 | 85% | 3.06 | 1.61 | 7.81 | -2.83 | 4.8% |
-| depth 50 to 65% | 114 | 74% | 5.03 | 3.04 | 11.28 | -4.38 | 8.3% |
-| depth 65 to 80% | 94 | 56% | 9.79 | 4.65 | 31.74 | -8.99 | 15.1% |
-| ellipse ratio below 0.7 | 245 | 71% | 4.85 | 2.17 | 10.27 | -4.47 | 7.7% |
-| ellipse ratio 0.7 to 0.85 | 156 | 84% | 3.57 | 1.26 | 9.12 | -2.98 | 5.6% |
-| ellipse ratio 0.85 and up | 99 | 88% | 1.96 | 0.93 | 5.14 | -1.32 | 3.2% |
-| camera 1.5 to 3 m away | 172 | 80% | 3.16 | 1.38 | 7.18 | -2.69 | 5.3% |
-| camera 3 to 6 m away | 328 | 77% | 4.12 | 1.47 | 10.11 | -3.59 | 6.4% |
-| tyre width under 15% of diameter | 249 | 80% | 3.51 | 1.58 | 9.12 | -3.05 | 5.8% |
-| tyre width 15 to 30% | 251 | 76% | 4.07 | 1.26 | 9.80 | -3.51 | 6.2% |
-| water visible behind the wheel | 246 | 81% | 4.52 | 1.43 | 10.10 | -3.88 | 7.1% |
-| top of wheel hidden by bodywork | 92 | 49% | 5.86 | 1.84 | 16.30 | -5.82 | 8.8% |
+| depth 5 to 25% of diameter | 128 | 90% | 1.11 | 0.68 | 2.24 | +0.30 | 1.8% |
+| depth 25 to 50% | 164 | 85% | 2.48 | 1.14 | 6.65 | -1.74 | 3.9% |
+| depth 50 to 65% | 114 | 74% | 4.35 | 2.69 | 9.71 | -2.66 | 7.2% |
+| depth 65 to 80% | 94 | 56% | 8.80 | 3.18 | 29.65 | -7.02 | 13.5% |
+| ellipse ratio below 0.7 | 245 | 71% | 4.15 | 1.78 | 8.92 | -3.17 | 6.5% |
+| ellipse ratio 0.7 to 0.85 | 156 | 84% | 3.15 | 1.02 | 7.36 | -1.83 | 5.0% |
+| ellipse ratio 0.85 and up | 99 | 88% | 1.99 | 0.87 | 5.60 | -0.16 | 3.2% |
+| camera 1.5 to 3 m away | 172 | 80% | 2.71 | 0.99 | 5.63 | -1.50 | 4.5% |
+| camera 3 to 6 m away | 328 | 77% | 3.67 | 1.45 | 8.93 | -2.35 | 5.7% |
+| tyre width under 15% of diameter | 249 | 80% | 3.03 | 1.49 | 7.70 | -1.88 | 5.0% |
+| tyre width 15 to 30% | 251 | 76% | 3.65 | 1.18 | 7.59 | -2.23 | 5.6% |
+| water visible behind the wheel | 246 | 81% | 4.13 | 1.72 | 8.75 | -2.52 | 6.5% |
+| top of wheel hidden by bodywork | 92 | 49% | 5.05 | 1.72 | 14.61 | -3.96 | 7.6% |
 
 **Cases declined, by reason**
 
@@ -206,21 +210,22 @@ Generated by `uv run python -m neermattam_perception.synth_eval --cases 500 --se
 
 | Minimum visible arc | Usable | MAE cm | Median cm | P90 cm | MAE / diameter |
 |---|---|---|---|---|---|
-| 100 degrees | 78% | 3.78 | 1.41 | 9.35 | 6.0% |
-| 140 degrees | 59% | 3.48 | 1.20 | 9.06 | 5.4% |
-| 180 degrees | 35% | 1.79 | 0.78 | 4.86 | 3.0% |
-| 220 degrees | 14% | 0.70 | 0.47 | 1.42 | 1.2% |
+| 100 degrees | 78% | 3.34 | 1.25 | 7.68 | 5.3% |
+| 140 degrees | 59% | 3.13 | 1.02 | 7.68 | 4.8% |
+| 180 degrees | 35% | 1.64 | 0.71 | 4.28 | 2.7% |
+| 220 degrees | 14% | 0.74 | 0.45 | 1.62 | 1.2% |
 
 **Uncertainty calibration** (depth_sigma_cm: Monte Carlo plus the calibrated model term, on seeds disjoint from the calibration)
 
 | Measure | Value |
 |---|---|
-| median depth_sigma_cm | 2.84 |
-| share with abs error within 1 sigma (ideal 68%) | 68% |
-| share with abs error within 2 sigma (ideal 95%) | 85% |
-| median abs error / sigma | 0.58 |
-| median geometry time per case | 3702 ms |
-
+| median depth_sigma_cm | 5.35 |
+| share with abs error within 1 sigma (ideal 68%) | 85% |
+| share with abs error within 2 sigma (ideal 95%) | 95% |
+| median abs error / sigma | 0.26 |
+| share with true depth above depth + 1.5 sigma (ideal 6.7%) | 7.9% |
+| share with true depth below depth - 1.5 sigma (ideal 6.7%) | 0.0% |
+| median geometry time per case | 2730 ms |
 <!-- synth-eval:end -->
 
 **Reading the results.**
@@ -228,7 +233,9 @@ Generated by `uv run python -m neermattam_perception.synth_eval --cases 500 --se
 * "Usable" is the share of all 500 cases measured; the rest were declined with a reason, which is the intended behaviour when too little wheel shows. The outline-only row is scored on the cases the main method measured.
 * The rim matters: without it, errors roughly double, because the near sidewall is hard to pin down from the tyre outline alone.
 * Accuracy falls with depth, since less arc is visible. The visible-arc table shows the trade-off between declining more photos and accuracy; the service keeps 100 degrees and lets the sigma grow instead.
-* The bias is negative: on short arcs with noisy edges, the fitted ellipse tends to come out too large, so depths read low. The calibrated sigma covers it at the one-sigma level, but the tails are heavier than a normal distribution (see the two-sigma share), so a single deep reading should be treated with care and fused with others.
+* Before the bias correction the method read low on average, mostly because of a tail of short-arc cases where the fit settles on a near sidewall that is too small and too high (section 4). The median correction removes the typical offset; the tail is not removed but is now covered by the sigma at the 1.5 sigma blocking line. The errors stay one-sided, so the two-sided coverage rows overstate the risk on the high side and the low-side row is the one that matters for routing.
+* Only the main method is bias-corrected; the perspective and outline-only rows are raw, for comparison with each other.
+* The tables were fitted on seed 9945 and checked on seed 4242, which neither the calibration nor this table used (500 cases, 387 usable, 40 draws). Before the change that seed read 2.69 cm low on average (median 0.93 cm low, MAE 3.17 cm) and 17.1 percent of true depths lay above `depth + 1.5 sigma`; after it, 1.55 cm low on average (median 0.13 cm low, MAE 2.80 cm) and 5.7 percent, with the median sigma going from 2.58 to 5.08 cm. The wider sigma is the honest price of the heavy low tail.
 * The perspective correction did not help on these noisy masks, so it stays off by default.
 
 ## 8. Sources
