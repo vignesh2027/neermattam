@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"neermattam/gateway/internal/i18n"
 	"neermattam/gateway/internal/places"
 	"neermattam/gateway/internal/ratelimit"
 	"neermattam/gateway/internal/report"
@@ -20,16 +21,23 @@ import (
 	"neermattam/gateway/internal/web"
 )
 
-func (a *App) page(r *http.Request, title, active string, needsMap bool) *web.Page {
-	return &web.Page{
-		Request:   r,
-		PublicURL: a.Cfg.PublicURL,
-		Title:     title,
-		Active:    active,
-		Nonce:     nonceFrom(r.Context()),
-		NeedsMap:  needsMap,
-		Footer:    active == "report" || active == "about",
-		Demo:      a.Cfg.Demo,
+func (a *App) page(r *http.Request, active string, needsMap bool) *web.Page {
+	lang := langFrom(r.Context())
+	info, _ := i18n.Get(lang)
+	p := &web.Page{
+		Request:     r,
+		PublicURL:   a.Cfg.PublicURL,
+		Title:       i18n.T(lang, "title."+active),
+		Active:      active,
+		Nonce:       nonceFrom(r.Context()),
+		NeedsMap:    needsMap,
+		Footer:      active == "report" || active == "about" || active == "home",
+		Demo:        a.Cfg.Demo,
+		Lang:        lang,
+		LangNative:  info.Native,
+		LangFont:    info.Font,
+		LangFontURL: fontURL(info.Font),
+		Path:        r.URL.Path,
 		Limits: web.Limits{
 			ImageMB:      int(a.Cfg.MaxImageBytes >> 20),
 			VideoMB:      int(a.Cfg.MaxVideoBytes >> 20),
@@ -37,6 +45,12 @@ func (a *App) page(r *http.Request, title, active string, needsMap bool) *web.Pa
 			VideoSeconds: int(a.Cfg.MaxVideoSeconds),
 		},
 	}
+	for _, l := range i18n.Languages {
+		q := r.URL.Query()
+		q.Set("lang", l.Code)
+		p.LangLinks = append(p.LangLinks, web.LangLink{Code: l.Code, Name: l.Name, Native: l.Native, Href: r.URL.Path + "?" + q.Encode(), Current: l.Code == lang})
+	}
+	return p
 }
 
 func (a *App) render(w http.ResponseWriter, status int, name string, p *web.Page) {
@@ -45,11 +59,11 @@ func (a *App) render(w http.ResponseWriter, status int, name string, p *web.Page
 	}
 }
 
-// mapPage is GET /. Stats are filled server-side when the engine answers
+// mapPage is GET /map. Stats are filled server-side when the engine answers
 // quickly, so the page reads correctly before any script runs.
 func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
-	p := a.page(r, "Neermattam, live flood depth for Chennai", "map", true)
-	p.Stats = web.MapStats{Cells: "0", Deep: "0", Max: "None"}
+	p := a.page(r, "map", true)
+	p.Stats = web.MapStats{Cells: "0", Deep: "0", Max: i18n.T(p.Lang, "js.none")}
 	ctx, cancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
 	defer cancel()
 	if e, err := a.cellsFor(ctx, a.Cfg.ServiceArea); err == nil {
@@ -85,7 +99,7 @@ func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) reportPage(w http.ResponseWriter, r *http.Request) {
-	p := a.page(r, "Report water, Neermattam", "report", true)
+	p := a.page(r, "report", true)
 	p.LiveTrace = &web.TraceView{Live: true}
 	if at := r.URL.Query().Get("at"); at != "" {
 		if lat, lon, ok := strings.Cut(at, ","); ok {
@@ -106,21 +120,21 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 	streaming := strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 	fail := func(re *report.Error) {
 		if streaming {
-			html, _ := a.Renderer.Fragment("result_card", web.ErrorView(re.Message))
+			html, _ := a.Renderer.Fragment(langFrom(r.Context()), "result_card", web.ErrorView(langFrom(r.Context()), re))
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(re.Status)
 			writeEvent(w, "error", map[string]any{"code": re.Code, "error": re.Message, "html": html})
 			return
 		}
-		p := a.page(r, "Report water, Neermattam", "report", true)
+		p := a.page(r, "report", true)
 		p.LiveTrace = &web.TraceView{Live: true}
-		p.Report.Error = re.Message
+		p.Report.Error = web.ErrorText(p.Lang, re)
 		a.render(w, re.Status, "report", p)
 	}
 	if ok, wait := a.reportLimit.Allow(clientKey(r, a.Cfg.TrustProxy)); !ok {
 		a.Metrics.RateLimited.Inc("report")
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.999)))
-		fail(&report.Error{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: fmt.Sprintf("You have sent several reports in a short time. Please wait %d seconds and try again.", int(wait.Seconds()+0.999))})
+		fail(&report.Error{Status: http.StatusTooManyRequests, Code: "rate_limited", Key: "rate_limited", Args: []any{int(wait.Seconds() + 0.999)}, Message: fmt.Sprintf("You have sent several reports in a short time. Please wait %d seconds and try again.", int(wait.Seconds()+0.999))})
 		return
 	}
 	sub, perr := a.parseSubmission(w, r, "web")
@@ -135,17 +149,17 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !streaming {
-		p := a.page(r, "Report water, Neermattam", "report", true)
+		p := a.page(r, "report", true)
 		p.LiveTrace = &web.TraceView{Live: true}
 		p.Report.Lat, p.Report.Lon = strconv.FormatFloat(sub.Lat, 'f', 6, 64), strconv.FormatFloat(sub.Lon, 'f', 6, 64)
 		out, err := a.Pipeline.Run(r.Context(), sub, nil)
 		if err != nil {
 			re := asReportError(err)
-			p.Result = web.ErrorView(re.Message)
+			p.Result = web.ErrorView(p.Lang, re)
 			a.render(w, re.Status, "report", p)
 			return
 		}
-		p.Result = web.NewResultView(out)
+		p.Result = web.NewResultView(out, p.Lang)
 		p.Trace = p.Result.Trace
 		a.render(w, http.StatusOK, "report", p)
 		return
@@ -156,6 +170,7 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 	// pipeline stage, one "step" event per agent step as perception makes
 	// it, and a final "done" with the result card and the full trace, all
 	// rendered here.
+	lang := langFrom(r.Context())
 	rc := http.NewResponseController(w)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
@@ -172,10 +187,10 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 	steps := 0
 	out, err := a.Pipeline.Run(r.Context(), sub, func(ev report.Event) {
 		if ev.Stage == report.StageStep && ev.Step != nil {
-			st := web.NewTraceStep(steps, *ev.Step)
+			st := web.NewTraceStep(lang, steps, *ev.Step)
 			st.DelayMs = 0
 			steps++
-			html, ferr := a.Renderer.Fragment("trace_step", st)
+			html, ferr := a.Renderer.Fragment(lang, "trace_step", st)
 			if ferr != nil {
 				a.Log.Error("trace step render failed", "error", ferr.Error())
 				return
@@ -190,14 +205,14 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 	event := "done"
 	if err != nil {
 		re := asReportError(err)
-		view = web.ErrorView(re.Message)
+		view = web.ErrorView(lang, re)
 		event = "error"
 		final["code"], final["error"] = re.Code, re.Message
 	} else {
-		view = web.NewResultView(out)
+		view = web.NewResultView(out, lang)
 		final["status"] = out.Status
 	}
-	html, rerr := a.Renderer.Fragment("result_card", view)
+	html, rerr := a.Renderer.Fragment(lang, "result_card", view)
 	if rerr != nil {
 		a.Log.Error("result render failed", "error", rerr.Error())
 	}
@@ -205,7 +220,7 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 	if view.Trace != nil {
 		// Steps already shown live are not animated again.
 		view.Trace.Reveal = steps == 0
-		if th, terr := a.Renderer.Fragment("trace_panel", view.Trace); terr == nil {
+		if th, terr := a.Renderer.Fragment(lang, "trace_panel", view.Trace); terr == nil {
 			final["trace_html"] = th
 		}
 	}
@@ -257,7 +272,7 @@ func (a *App) planRoute(ctx context.Context, r *http.Request) (*web.RouteView, i
 		}
 		return nil, http.StatusServiceUnavailable, fmt.Errorf("the route service is not reachable right now; try again shortly")
 	}
-	v, err := web.NewRouteView(raw, q.Vehicle, a.Origins.HasSimulated())
+	v, err := web.NewRouteView(raw, q.Vehicle, a.Origins.HasSimulated(), langFrom(r.Context()))
 	if err != nil {
 		return nil, http.StatusBadGateway, fmt.Errorf("the route could not be read")
 	}
@@ -266,7 +281,7 @@ func (a *App) planRoute(ctx context.Context, r *http.Request) (*web.RouteView, i
 
 // routePage is GET /route; with from, to and vehicle it also plans.
 func (a *App) routePage(w http.ResponseWriter, r *http.Request) {
-	p := a.page(r, "Water-aware routes, Neermattam", "route", true)
+	p := a.page(r, "route", true)
 	p.Route = a.routeForm(r)
 	status := http.StatusOK
 	q := r.URL.Query()
@@ -296,7 +311,7 @@ func (a *App) routePlan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, code, map[string]string{"error": capitalise(err.Error()) + "."})
 		return
 	}
-	html, err := a.Renderer.Fragment("route_summary", v)
+	html, err := a.Renderer.Fragment(langFrom(r.Context()), "route_summary", v)
 	if err != nil {
 		a.Log.Error("route summary render failed", "error", err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "The summary could not be rendered."})
@@ -306,7 +321,29 @@ func (a *App) routePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) aboutPage(w http.ResponseWriter, r *http.Request) {
-	a.render(w, http.StatusOK, "about", a.page(r, "About Neermattam", "about", false))
+	p := a.page(r, "about", false)
+	p.Home = &web.HomeView{Facts: &a.Facts}
+	a.render(w, http.StatusOK, "about", p)
+}
+
+// homePage is GET /: the landing page. Old links to /?at=lat,lon, such as
+// those in WhatsApp replies, go to the map.
+func (a *App) homePage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("at") != "" {
+		http.Redirect(w, r, "/map?"+r.URL.RawQuery, http.StatusFound)
+		return
+	}
+	p := a.page(r, "home", false)
+	h := &web.HomeView{Facts: &a.Facts, Trace: web.NewHomeTrace(p.Lang, a.Facts.Trace)}
+	ctx, cancel := context.WithTimeout(r.Context(), 1200*time.Millisecond)
+	defer cancel()
+	if e, err := a.cellsFor(ctx, a.Cfg.ServiceArea); err == nil {
+		h.Preview = e.Preview()
+	} else {
+		h.Preview = web.NewPreview(nil)
+	}
+	p.Home = h
+	a.render(w, http.StatusOK, "home", p)
 }
 
 func capitalise(s string) string {
@@ -314,4 +351,15 @@ func capitalise(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// fontURL is the Google Fonts stylesheet for one family. The family comes
+// from the fixed language table, never from the request, so the URL is
+// trusted; html/template would otherwise escape the + separators to %2b,
+// which Google Fonts rejects with a 400.
+func fontURL(family string) template.URL {
+	if family == "" {
+		return ""
+	}
+	return template.URL("https://fonts.googleapis.com/css2?family=" + strings.ReplaceAll(family, " ", "+") + ":wght@400;500;600;700&display=optional")
 }

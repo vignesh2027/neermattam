@@ -1,57 +1,72 @@
 {{define "layout"}}<!doctype html>
-<html lang="en">
+<html lang="{{.Lang}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{.Title}}</title>
-<meta name="description" content="Neermattam measures floodwater depth on Chennai streets from one photo of a wheel, fuses reports into a live map, and routes each vehicle around water it cannot cross.">
+<meta name="description" content="{{t "meta.description"}}">
 <meta name="theme-color" content="#F4F9FF">
-<link rel="icon" href="/static/brand/favicon.ico" sizes="16x16 32x32 48x48">
-<link rel="icon" href="/static/brand/favicon-32.png" type="image/png" sizes="32x32">
-<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png" sizes="180x180">
+<link rel="icon" href="{{asset "brand/favicon.ico"}}" sizes="16x16 32x32 48x48">
+<link rel="icon" href="{{asset "brand/favicon-32.png"}}" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="{{asset "brand/apple-touch-icon.png"}}" sizes="180x180">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Neermattam">
 <meta property="og:title" content="{{.Title}}">
-<meta property="og:description" content="Street-level flood depth for Chennai, from one photo. Live depth map and water-aware routes. Advisory only.">
+<meta property="og:description" content="{{t "meta.og_description"}}">
 <meta property="og:image" content="{{.PublicURL}}/static/brand/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The Neermattam logo, a blue wave N with a water drop, and the line: Street-level flood depth for Chennai, from one photo">
+<meta property="og:image:alt" content="{{t "meta.og_alt"}}">
+<meta property="og:locale" content="{{.Lang}}_IN">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="{{.PublicURL}}/static/brand/og-card.png">
-<link rel="preload" href="/static/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/static/app.css?v={{.CSSVersion}}">
-{{if .NeedsMap}}<link rel="stylesheet" href="/static/vendor/maplibre-gl-5.6.0/maplibre-gl.css">
-<script src="/static/vendor/maplibre-gl-5.6.0/maplibre-gl.js" defer></script>{{end}}
+{{range .LangLinks}}<link rel="alternate" hreflang="{{.Code}}" href="{{$.PublicURL}}{{.Href}}">
+{{end}}<link rel="preload" href="{{asset "fonts/inter-latin-wght-normal.woff2"}}" as="font" type="font/woff2" crossorigin>
+{{if .LangFont}}<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="{{.LangFontURL}}">{{end}}
+<link rel="stylesheet" href="{{asset "app.css"}}">
+{{if .NeedsMap}}<link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
+<link rel="stylesheet" href="{{asset "vendor/maplibre-gl-5.6.0/maplibre-gl.css"}}">
+<script src="{{asset "vendor/maplibre-gl-5.6.0/maplibre-gl.js"}}" defer></script>{{end}}
 </head>
-<body class="page-{{.Active}}">
-<a class="skip-link" href="#main">Skip to content</a>
+<body class="page-{{.Active}} lang-{{.Lang}}">
+<a class="skip-link" href="#main">{{t "a11y.skip"}}</a>
 <header class="site-header">
-  <a class="brand" href="/" aria-label="Neermattam, live map">
+  <a class="brand" href="/" aria-label="{{t "brand.aria"}}">
     {{template "mark"}}
-    <span class="brand-name"><strong>Neermattam</strong><span lang="ta">நீர்மட்டம் · water level</span></span>
+    <span class="brand-name"><strong>Neermattam</strong><span><span lang="ta">நீர்மட்டம்</span> · {{t "brand.water_level"}}</span></span>
   </a>
-  <nav class="nav" aria-label="Main">
-    <a href="/" {{if eq .Active "map"}}aria-current="page"{{end}}><span class="lg-only">Live map</span><span class="sm-only">Map</span></a>
-    <a href="/report" {{if eq .Active "report"}}aria-current="page"{{end}}>Report</a>
-    <a href="/route" {{if eq .Active "route"}}aria-current="page"{{end}}>Route</a>
-    <a href="/about" {{if eq .Active "about"}}aria-current="page"{{end}}>About</a>
+  <nav class="nav" aria-label="{{t "nav.aria"}}">
+    <a href="/map" {{if eq .Active "map"}}aria-current="page"{{end}}><span class="lg-only">{{t "nav.map"}}</span><span class="sm-only">{{t "nav.map_short"}}</span></a>
+    <a href="/report" {{if eq .Active "report"}}aria-current="page"{{end}}>{{t "nav.report"}}</a>
+    <a href="/route" {{if eq .Active "route"}}aria-current="page"{{end}}>{{t "nav.route"}}</a>
+    <a href="/about" {{if eq .Active "about"}}aria-current="page"{{end}}>{{t "nav.about"}}</a>
   </nav>
-  {{if ne .Active "report"}}<a class="btn btn-primary btn-sm header-cta" href="/report">{{template "icon-camera"}}Report water</a>{{end}}
+  <details class="lang-menu">
+    <summary aria-label="{{t "lang.choose"}}">{{template "icon-globe"}}<span class="lang-current">{{.LangNative}}</span></summary>
+    <ul role="list">
+      {{range .LangLinks}}<li><a href="{{.Href}}" lang="{{.Code}}" hreflang="{{.Code}}" {{if .Current}}aria-current="true"{{end}}>{{.Native}}<small>{{.Name}}</small></a></li>
+      {{end}}
+    </ul>
+  </details>
+  {{if ne .Active "report"}}<a class="btn btn-primary btn-sm header-cta" href="/report">{{template "icon-camera"}}{{t "cta.report_water"}}</a>{{end}}
 </header>
 <main id="main" tabindex="-1">
 {{template "content" .}}
 </main>
 {{if .Footer}}<footer class="site-footer"><div class="inner">
-  <span>Neermattam. Advisory only: check local news and official alerts before you travel.</span>
-  <span>Map data © OpenStreetMap contributors (ODbL). Tiles by OpenFreeMap. Rainfall from Open-Meteo.</span>
+  <span>{{t "footer.advisory"}}</span>
+  <span>{{t "footer.credits"}}</span>
 </div></footer>{{end}}
-{{if .NeedsMap}}{{template "mapcore" .}}{{end}}
+{{if .NeedsMap}}<script type="application/json" id="i18n">{{.ClientText}}</script>
+{{template "mapcore" .}}{{end}}
 {{block "scripts" .}}{{end}}
 </body>
 </html>{{end}}
 
-{{define "mark"}}<img class="brand-mark" src="/static/brand/mark-64.png" srcset="/static/brand/mark-64.png 1x, /static/brand/mark-128.png 2x" width="40" height="40" alt="" decoding="async">{{end}}
+{{define "mark"}}<img class="brand-mark" src="{{asset "brand/mark-64.png"}}" srcset="{{asset "brand/mark-64.png"}} 1x, {{asset "brand/mark-128.png"}} 2x" width="40" height="40" alt="" decoding="async">{{end}}
+{{define "icon-globe"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/></svg>{{end}}
 
 {{define "icon-camera"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>{{end}}
 {{define "icon-alert"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>{{end}}
@@ -64,3 +79,4 @@
 {{define "icon-eye"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>{{end}}
 {{define "icon-mic"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>{{end}}
 {{define "icon-route"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h7.5a3.5 3.5 0 0 0 0-7h-7a3.5 3.5 0 0 1 0-7H16"/></svg>{{end}}
+{{define "vehicle-icon"}}{{if eq . "pedestrian"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m9 21 2.5-6.5L14 17v4"/><path d="M8 11.5 10.5 8h3l2 4 2.5 1"/><path d="m11.5 14.5.5-6.5"/></svg>{{else if eq . "two_wheeler"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="16.5" r="3"/><circle cx="18.5" cy="16.5" r="3"/><path d="M8.5 16.5h6l2-6h-3"/><path d="M14 6h2.5l2 10.5"/><path d="M5.5 16.5 9 11h4"/></svg>{{else if eq . "auto"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16V9a4 4 0 0 1 4-4h6l5 6v5"/><path d="M4 16h2m5 0h6"/><circle cx="8.5" cy="16.5" r="2"/><circle cx="19" cy="17" r="2"/><path d="M14 5v6h5"/></svg>{{else if eq . "car"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15v-3l2-5h14l2 5v3"/><path d="M3 15h18v2H3z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/><path d="M5.5 11h13"/></svg>{{else}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="14" rx="2"/><path d="M4 10h16"/><path d="M8 3v7m8-7v7"/><circle cx="8" cy="19" r="1.6"/><circle cx="16" cy="19" r="1.6"/></svg>{{end}}{{end}}

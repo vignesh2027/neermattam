@@ -6,8 +6,8 @@ import (
 	"html/template"
 	"math"
 	"strings"
-	"time"
 
+	"neermattam/gateway/internal/i18n"
 	"neermattam/gateway/internal/report"
 	"neermattam/gateway/internal/upstream"
 	"neermattam/gateway/internal/verify"
@@ -98,23 +98,16 @@ type VoiceView struct {
 	Transcript, Language, Place, DepthWords, Basis, Model string
 }
 
-var ruleNames = map[string]string{
-	"confidence_floor":      "Confidence",
-	"photo_freshness":       "Freshness",
-	"source":                "Source",
-	"neighbour_agreement":   "Nearby cells",
-	"rainfall_plausibility": "Rainfall",
-}
-
-// NewResultView builds the card from a pipeline outcome.
-func NewResultView(o *report.Outcome) *ResultView {
+// NewResultView builds the card from a pipeline outcome, in a language.
+func NewResultView(o *report.Outcome, lang string) *ResultView {
+	tr := func(key string, args ...any) string { return i18n.T(lang, key, args...) }
 	v := &ResultView{
 		Status:   o.Status,
-		Place:    capitalise(o.Place),
-		When:     o.ReceivedAt.In(ist).Format("3:04 pm, 2 Jan"),
-		Advisory: o.Advisory,
+		Place:    Place(lang, o.Place),
+		When:     When(lang, o.ReceivedAt),
+		Advisory: tr("advisory.long"),
 		Source:   o.Source,
-		MapLink:  fmt.Sprintf("/?at=%.5f,%.5f", o.Lat, o.Lon),
+		MapLink:  fmt.Sprintf("/map?at=%.5f,%.5f", o.Lat, o.Lon),
 	}
 	m := o.Measurement
 	if strings.HasPrefix(o.OverlayURL, "/api/overlay/") {
@@ -125,64 +118,72 @@ func NewResultView(o *report.Outcome) *ResultView {
 		v.Depth = fmt.Sprintf("%.0f", *o.DepthCm)
 		v.Sigma = fmt.Sprintf("%.1f", *o.DepthSigmaCm)
 		v.DepthColor = DepthColor(*o.DepthCm)
-		v.Gauge = newGauge(*o.DepthCm, *o.DepthSigmaCm)
+		v.Gauge = newGauge(lang, *o.DepthCm, *o.DepthSigmaCm)
 	}
-	describeMethod(v, o)
+	describeMethod(v, o, lang)
 	switch o.Status {
 	case report.StatusFused:
-		v.Title = "Added to the live map"
+		v.Title = tr("result.title_fused")
 	case report.StatusUnusable:
-		v.Title = "We could not measure this one"
-		v.Message = o.Summary
+		v.Title = tr("result.title_unusable")
+		if o.Source == "voice" {
+			v.Message = tr("result.voice_no_depth")
+		} else {
+			v.Message = tr("result.photo_unusable")
+		}
 		if m != nil {
-			v.Reasons = m.Reasons
+			v.Reasons = m.Reasons // perception's own words
 		}
 	case report.StatusRejected:
-		v.Title = "Measured, but not added to the map"
+		v.Title = tr("result.title_rejected")
 		if m != nil && m.MethodIs(upstream.MethodModelEstimate) || o.Source == "voice" {
-			v.Title = "Estimated, but not added to the map"
+			v.Title = tr("result.title_rejected_estimate")
 		}
 	}
 	if m != nil {
 		if r := m.Reference; r != nil {
-			val := referenceName(r.Kind)
-			note := r.Source
+			val := tr("ref." + r.Kind)
 			if r.DiameterCm != nil {
 				val += fmt.Sprintf(", %.1f cm", *r.DiameterCm)
 				if r.DiameterSigmaCm != nil {
 					val += fmt.Sprintf(" ± %.1f", *r.DiameterSigmaCm)
 				}
 			}
-			v.Facts = append(v.Facts, Fact{Label: "Ruler used", Value: val, Note: note})
+			v.Facts = append(v.Facts, Fact{Label: tr("fact.ruler"), Value: val, Note: r.Source})
 		}
 		if w := m.Waterline; w != nil {
 			note := ""
 			if w.AgreementCm != nil {
-				note = fmt.Sprintf("Two waterline estimates agree within %.1f cm", *w.AgreementCm)
+				note = tr("fact.waterline_agree", fmt.Sprintf("%.1f", *w.AgreementCm))
 			}
-			v.Facts = append(v.Facts, Fact{Label: "Waterline", Value: methodName(w.Method), Note: note})
+			v.Facts = append(v.Facts, Fact{Label: tr("fact.waterline"), Value: methodName(lang, w.Method), Note: note})
 		}
 		if m.Usable || m.Confidence > 0 {
-			v.Facts = append(v.Facts, Fact{Label: "Model confidence", Value: fmt.Sprintf("%.2f", m.Confidence), Meter: pct(m.Confidence)})
+			v.Facts = append(v.Facts, Fact{Label: tr("fact.confidence"), Value: fmt.Sprintf("%.2f", m.Confidence), Meter: pct(m.Confidence)})
 		}
 		if m.VelocityMps != nil {
 			val := fmt.Sprintf("%.2f m/s", *m.VelocityMps)
 			if m.VelocitySigmaMps != nil {
 				val = fmt.Sprintf("%.2f ± %.2f m/s", *m.VelocityMps, *m.VelocitySigmaMps)
 			}
-			v.Facts = append(v.Facts, Fact{Label: "Surface speed", Value: val, Note: "From tracking the water between frames"})
+			v.Facts = append(v.Facts, Fact{Label: tr("fact.speed"), Value: val, Note: tr("fact.speed_note")})
 		}
-		v.ModelsLine = modelsLine(m)
+		v.ModelsLine = modelsLine(lang, m)
 	}
 	if t := o.Transcript; t != nil {
-		vv := &VoiceView{Transcript: t.Text, Language: languageName(t.Language), Place: t.PlaceText, DepthWords: t.DepthWords, Model: t.Model}
+		vv := &VoiceView{Transcript: t.Text, Language: languageName(lang, t.Language), Place: t.PlaceText, DepthWords: t.DepthWords, Model: t.Model}
 		if o.Voice != nil {
-			vv.Basis = "Read as " + o.Voice.Basis + "."
+			if strings.HasPrefix(o.Voice.Basis, "the voice model") {
+				vv.Basis = tr("voice.basis_model")
+			} else {
+				vv.Basis = tr("voice.basis_words")
+			}
 		}
+		vv.Basis = strings.TrimSpace(vv.Basis + " " + tr("voice.pin_note"))
 		v.Voice = vv
 	}
 	if m != nil && len(m.AgentTrace) > 0 {
-		v.Trace = NewTraceView(m.AgentTrace, false)
+		v.Trace = NewTraceView(lang, m.AgentTrace, false)
 	}
 	if vr := o.Verification; vr != nil {
 		v.Trust = fmt.Sprintf("%.2f", vr.Trust)
@@ -192,17 +193,13 @@ func NewResultView(o *report.Outcome) *ResultView {
 			if r.Outcome == verify.Lower {
 				factor = fmt.Sprintf("× %.2f", r.Factor)
 			}
-			name := ruleNames[r.Rule]
-			if name == "" {
-				name = humanize(r.Rule)
-			}
-			v.Rules = append(v.Rules, RuleView{Name: name, Outcome: string(r.Outcome), Reason: capitalise(r.Reason), Factor: factor})
+			v.Rules = append(v.Rules, RuleView{Name: tr("rule." + r.Rule), Outcome: string(r.Outcome), Reason: ReasonText(lang, r), Factor: factor})
 		}
 	}
 	if c := o.Cell; c != nil {
 		v.Cell = &CellView{
 			Depth: fmt.Sprintf("%.0f", c.DepthCm), Sigma: fmt.Sprintf("%.1f", c.DepthSigmaCm), Upper: fmt.Sprintf("%.0f", c.DepthUpperCm),
-			Hazard: HazardLabel(c.Hazard.Class), HazardChip: HazardChip(c.Hazard.Class), Readings: c.NReadings, Unknown: c.Unknown,
+			Hazard: HazardLabel(lang, c.Hazard.Class), HazardChip: HazardChip(c.Hazard.Class), Readings: c.NReadings, Unknown: c.Unknown,
 			Simulated: o.CellHasSimulated,
 		}
 	}
@@ -210,56 +207,47 @@ func NewResultView(o *report.Outcome) *ResultView {
 }
 
 // ErrorView is the card for a report that could not be processed.
-func ErrorView(msg string) *ResultView {
-	return &ResultView{Status: "error", Title: "This report was not processed", Message: msg, Advisory: report.Advisory}
-}
-
-func referenceName(k string) string {
-	switch k {
-	case "two_wheeler_wheel":
-		return "Two-wheeler wheel"
-	case "auto_wheel":
-		return "Auto-rickshaw wheel"
-	}
-	return humanize(k)
+func ErrorView(lang string, e *report.Error) *ResultView {
+	return &ResultView{Status: "error", Title: i18n.T(lang, "result.title_error"), Message: ErrorText(lang, e), Advisory: i18n.T(lang, "advisory.long")}
 }
 
 // describeMethod sets the method badge, the plain-words note for a model
 // estimate, and both readings when perception gave both.
-func describeMethod(v *ResultView, o *report.Outcome) {
+func describeMethod(v *ResultView, o *report.Outcome, lang string) {
+	tr := func(key string, args ...any) string { return i18n.T(lang, key, args...) }
 	m := o.Measurement
 	if m == nil || m.Method == nil {
 		return
 	}
 	est := m.ModelEstimate
-	estModel := "scene model"
+	estModel := tr("result.scene_model")
 	if est != nil && est.Model != "" {
 		estModel = est.Model
 	}
 	switch *m.Method {
 	case upstream.MethodModelEstimate:
 		v.Method = "estimate"
-		v.MethodLabel = "Model estimate"
-		note := fmt.Sprintf("No wheel in this photo could be measured, so this depth is the scene model's own visual estimate (%s), not a measurement.", estModel)
+		v.MethodLabel = tr("result.model_estimate")
+		note := tr("result.estimate_note", estModel)
 		if est != nil && est.Basis != "" {
-			note += " It based it on: " + strings.TrimSuffix(est.Basis, ".") + "."
+			note += " " + tr("result.estimate_basis", strings.TrimSuffix(est.Basis, "."))
 		}
-		note += " The band is wide on purpose, and the map counts it for less than a measured photo."
+		note += " " + tr("result.estimate_wide")
 		v.EstimateNote = note
 	case upstream.MethodWheelGeometry:
 		v.Method = "geometry"
 		kind := "wheel"
 		if m.Reference != nil {
-			kind = strings.ToLower(strings.TrimSuffix(referenceName(m.Reference.Kind), " wheel")) + " wheel"
+			kind = m.Reference.Kind
 		}
-		v.MethodLabel = "Measured from a " + kind
+		v.MethodLabel = tr("result.measured_from", strings.ToLower(tr("ref."+kind)))
 		if est != nil && m.DepthCm != nil && m.DepthSigmaCm != nil {
 			v.Readings = []ReadingRow{
-				{Label: "Measured from the " + kind, Value: fmt.Sprintf("%.0f ± %.1f cm", *m.DepthCm, *m.DepthSigmaCm), Note: "Used for the map", Primary: true},
-				{Label: "Visual estimate by " + estModel, Value: fmt.Sprintf("%.0f ± %.0f cm", est.DepthCm, est.DepthSigmaCm), Note: capitalise(strings.TrimSuffix(est.Basis, "."))},
+				{Label: tr("result.reading_measured", strings.ToLower(tr("ref."+kind))), Value: fmt.Sprintf("%.0f ± %.1f cm", *m.DepthCm, *m.DepthSigmaCm), Note: tr("result.reading_used"), Primary: true},
+				{Label: tr("result.reading_estimate", estModel), Value: fmt.Sprintf("%.0f ± %.0f cm", est.DepthCm, est.DepthSigmaCm), Note: capitalise(strings.TrimSuffix(est.Basis, "."))},
 			}
 			if math.Abs(*m.DepthCm-est.DepthCm) > 2*math.Hypot(*m.DepthSigmaCm, est.DepthSigmaCm) {
-				v.Readings[1].Note += ". The two disagree by more than twice their combined uncertainty, so confidence was lowered"
+				v.Readings[1].Note += ". " + tr("result.readings_disagree")
 			}
 			addEstimateBand(&v.Gauge, est.DepthCm, est.DepthSigmaCm)
 		}
@@ -276,29 +264,27 @@ func addEstimateBand(g *Gauge, depth, sigma float64) {
 	g.EstWidth = fmt.Sprintf("%.1f%%", (hi-lo)/maxCm*100)
 }
 
-func languageName(code string) string {
+func languageName(lang, code string) string {
 	switch strings.ToLower(code) {
-	case "ta":
-		return "Tamil"
-	case "en":
-		return "English"
+	case "ta", "en", "hi", "te", "kn", "ml", "bn", "mr":
+		return i18n.T(lang, "langname."+strings.ToLower(code))
 	case "ta+en", "en+ta":
-		return "Tamil and English"
+		return i18n.T(lang, "langname.ta_en")
 	}
 	return code
 }
 
-func methodName(m string) string {
+func methodName(lang, m string) string {
 	switch m {
 	case "sam_mask_intersection":
-		return "Where the wheel and water masks meet"
+		return i18n.T(lang, "fact.waterline_masks")
 	case "":
-		return "Not reported"
+		return i18n.T(lang, "fact.not_reported")
 	}
 	return humanize(m)
 }
 
-func modelsLine(m *upstream.Measurement) string {
+func modelsLine(lang string, m *upstream.Measurement) string {
 	var parts []string
 	for _, k := range []string{"scene", "masks"} {
 		if name, ok := m.Models[k]; ok {
@@ -308,24 +294,25 @@ func modelsLine(m *upstream.Measurement) string {
 	var times []string
 	for _, k := range []string{"scene", "masks", "geometry"} {
 		if ms, ok := m.TimingsMs[k]; ok {
+			label := i18n.T(lang, "timing."+k)
 			if ms >= 1000 {
-				times = append(times, fmt.Sprintf("%s %.1f s", k, ms/1000))
+				times = append(times, fmt.Sprintf("%s %.1f s", label, ms/1000))
 			} else {
-				times = append(times, fmt.Sprintf("%s %.0f ms", k, ms))
+				times = append(times, fmt.Sprintf("%s %.0f ms", label, ms))
 			}
 		}
 	}
-	line := strings.Join(parts, " and ")
+	line := strings.Join(parts, ", ")
 	if len(times) > 0 {
-		line += ". Timings: " + strings.Join(times, ", ")
+		line += ". " + i18n.T(lang, "result.timings", strings.Join(times, ", "))
 	}
 	if m.MeasurementID != "" {
-		line += ". Measurement " + m.MeasurementID
+		line += ". " + m.MeasurementID
 	}
 	return line
 }
 
-func newGauge(depth, sigma float64) Gauge {
+func newGauge(lang string, depth, sigma float64) Gauge {
 	maxCm := 100.0
 	if hi := depth + 2*sigma; hi > 90 {
 		maxCm = math.Ceil(hi/50) * 50
@@ -340,8 +327,8 @@ func newGauge(depth, sigma float64) Gauge {
 	}
 	// Vehicle limits from docs/ENGINE.md.
 	g.Ticks = []Tick{
-		{Pct: fmt.Sprintf("%.1f%%", 15/maxCm*100), Label: "Car, auto and two-wheeler limit, 15 cm", Row2: true},
-		{Pct: fmt.Sprintf("%.1f%%", 30/maxCm*100), Label: "Bus limit, 30 cm"},
+		{Pct: fmt.Sprintf("%.1f%%", 15/maxCm*100), Label: i18n.T(lang, "gauge.car_limit"), Row2: true},
+		{Pct: fmt.Sprintf("%.1f%%", 30/maxCm*100), Label: i18n.T(lang, "gauge.bus_limit")},
 	}
 	return g
 }
@@ -363,18 +350,12 @@ func DepthColor(cm float64) string {
 }
 
 // HazardLabel names a Defra hazard class.
-func HazardLabel(c string) string {
+func HazardLabel(lang, c string) string {
 	switch c {
-	case "low":
-		return "Caution"
-	case "danger_some":
-		return "Danger for some"
-	case "danger_most":
-		return "Danger for most"
-	case "danger_all":
-		return "Danger for all"
+	case "low", "danger_some", "danger_most", "danger_all":
+		return i18n.T(lang, "hazard."+c)
 	default:
-		return "Unknown"
+		return i18n.T(lang, "hazard.unknown")
 	}
 }
 
@@ -405,24 +386,8 @@ func capitalise(s string) string {
 	if s == "" {
 		return s
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
-}
-
-var ist = time.FixedZone("IST", 5*3600+30*60)
-
-// Ago formats a past time for people.
-func Ago(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%d min ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%.0f h ago", d.Hours())
-	default:
-		return t.In(ist).Format("2 Jan")
-	}
+	r := []rune(s)
+	return strings.ToUpper(string(r[:1])) + string(r[1:])
 }
 
 // RouteStat is one number in the route summary.
@@ -461,17 +426,11 @@ type routeProps struct {
 	SafetySigmas        float64  `json:"safety_sigmas"`
 }
 
-// VehicleNames are the UI names for engine vehicle ids.
-var VehicleNames = map[string]string{
-	"pedestrian":  "Walking",
-	"two_wheeler": "Two-wheeler",
-	"auto":        "Auto",
-	"car":         "Car",
-	"bus":         "Bus",
-}
-
-// NewRouteView builds the summary from the engine's route Feature.
-func NewRouteView(raw []byte, vehicle string, simulated bool) (*RouteView, error) {
+// NewRouteView builds the summary from the engine's route Feature. The
+// engine writes its explanation in English; other languages get a summary
+// built from the same numbers.
+func NewRouteView(raw []byte, vehicle string, simulated bool, lang string) (*RouteView, error) {
+	tr := func(key string, args ...any) string { return i18n.T(lang, key, args...) }
 	var f struct {
 		Properties routeProps `json:"properties"`
 		Baseline   struct {
@@ -483,38 +442,53 @@ func NewRouteView(raw []byte, vehicle string, simulated bool) (*RouteView, error
 	}
 	p, b := f.Properties, f.Baseline.Properties
 	v := &RouteView{
-		Vehicle: vehicle, VehicleName: VehicleNames[vehicle], Kind: p.RouteKind, Passable: p.Passable,
+		Vehicle: vehicle, VehicleName: tr("vehicle." + vehicle), Kind: p.RouteKind, Passable: p.Passable,
 		Simulated: simulated, Explanation: p.Explanation,
 	}
 	extra := p.DistanceM - b.DistanceM
-	distNote := "Same as the shortest route"
+	distNote := tr("route.same_as_shortest")
 	if extra > 1 {
-		distNote = fmt.Sprintf("%s longer than the shortest route", meters(extra))
+		distNote = tr("route.longer_by", km(extra))
 	}
 	v.Stats = append(v.Stats,
-		RouteStat{Label: "Distance", Value: km(p.DistanceM), Note: distNote},
-		RouteStat{Label: "Time, rough", Value: fmt.Sprintf("%.0f min", math.Max(1, p.EtaMin)), Note: fmt.Sprintf("Shortest route %.0f min", math.Max(1, b.EtaMin))},
+		RouteStat{Label: tr("route.stat_distance"), Value: km(p.DistanceM), Note: distNote},
+		RouteStat{Label: tr("route.stat_time"), Value: fmt.Sprintf("%.0f min", math.Max(1, p.EtaMin)), Note: tr("route.shortest_time", fmt.Sprintf("%.0f", math.Max(1, b.EtaMin)))},
 	)
 	if p.MaxDepthCm != nil {
-		note := "Deepest known cell on the route"
 		val := fmt.Sprintf("%.0f cm", *p.MaxDepthCm)
 		if p.MaxDepthSigmaCm != nil {
 			val = fmt.Sprintf("%.0f ± %.0f cm", *p.MaxDepthCm, *p.MaxDepthSigmaCm)
 		}
-		v.Stats = append(v.Stats, RouteStat{Label: "Max depth on route", Value: val, Note: note, Warn: !p.Passable})
+		v.Stats = append(v.Stats, RouteStat{Label: tr("route.stat_max_depth"), Value: val, Note: tr("route.deepest_known"), Warn: !p.Passable})
 	} else {
-		v.Stats = append(v.Stats, RouteStat{Label: "Max depth on route", Value: "None known", Note: "No cell on it has a confident depth"})
+		v.Stats = append(v.Stats, RouteStat{Label: tr("route.stat_max_depth"), Value: tr("route.none_known"), Note: tr("route.no_confident")})
+	}
+	pass := tr("route.pass_yes")
+	if !p.Passable {
+		pass = tr("route.pass_no")
 	}
 	v.Stats = append(v.Stats,
-		RouteStat{Label: "Flooded cells avoided", Value: fmt.Sprintf("%d", p.CellsAvoided), Note: fmt.Sprintf("Shortest route crosses %d impassable", b.Impassable)},
-		RouteStat{Label: "Unknown cells crossed", Value: fmt.Sprintf("%d of %d", p.UnknownCellsCrossed, p.CellsOnRoute), Note: "No recent report, so not known to be dry"},
-		RouteStat{Label: "Impassable cells on route", Value: fmt.Sprintf("%d", p.Impassable), Warn: p.Impassable > 0, Note: passNote(p.Passable)},
+		RouteStat{Label: tr("route.stat_avoided"), Value: fmt.Sprintf("%d", p.CellsAvoided), Note: tr("route.baseline_crosses", b.Impassable)},
+		RouteStat{Label: tr("route.stat_unknown"), Value: tr("route.n_of_m", p.UnknownCellsCrossed, p.CellsOnRoute), Note: tr("route.unknown_meaning")},
+		RouteStat{Label: tr("route.stat_impassable"), Value: fmt.Sprintf("%d", p.Impassable), Warn: p.Impassable > 0, Note: pass},
 	)
 	switch {
 	case p.DepthLimitCm != nil:
-		v.Limit = fmt.Sprintf("Blocks water that may be deeper than %.0f cm for a %s, judged on the mean plus %.1f standard deviations.", *p.DepthLimitCm, strings.ToLower(v.VehicleName), p.SafetySigmas)
+		v.Limit = tr("route.limit_depth", fmt.Sprintf("%.0f", *p.DepthLimitCm), v.VehicleName, fmt.Sprintf("%.1f", p.SafetySigmas))
 	case p.PedestrianBlock != nil:
-		v.Limit = fmt.Sprintf("Walkers are routed around cells rated %s or worse.", strings.ToLower(HazardLabel(*p.PedestrianBlock)))
+		v.Limit = tr("route.limit_walk", HazardLabel(lang, *p.PedestrianBlock))
+	}
+	if lang != i18n.Default {
+		// The engine's explanation is English prose; say the same facts.
+		switch {
+		case p.RouteKind == "least_bad":
+			v.Explanation = tr("route.explain_least_bad", p.Impassable)
+		case p.CellsAvoided > 0:
+			v.Explanation = tr("route.explain_avoids", p.CellsAvoided)
+		default:
+			v.Explanation = tr("route.explain_clear")
+		}
+		v.Explanation += " " + tr("route.explain_unknown", p.UnknownCellsCrossed, p.CellsOnRoute) + " " + tr("advisory.long")
 	}
 	// Re-encode so the JSON is safe inside a script element.
 	var anyJSON any
@@ -529,21 +503,7 @@ func NewRouteView(raw []byte, vehicle string, simulated bool) (*RouteView, error
 	return v, nil
 }
 
-func passNote(ok bool) string {
-	if ok {
-		return "A dry route under this vehicle's limit exists"
-	}
-	return "No dry route exists; this is the least bad"
-}
-
 func km(m float64) string {
-	if m < 1000 {
-		return fmt.Sprintf("%.0f m", m)
-	}
-	return fmt.Sprintf("%.1f km", m/1000)
-}
-
-func meters(m float64) string {
 	if m < 1000 {
 		return fmt.Sprintf("%.0f m", m)
 	}

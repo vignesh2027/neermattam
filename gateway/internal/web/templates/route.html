@@ -1,56 +1,56 @@
 {{define "content"}}
 <div class="route-layout">
   <section class="route-panel" aria-labelledby="route-title">
-    <p class="eyebrow">Route</p>
-    <h1 id="route-title">Route around the water</h1>
-    <p class="lead">Each vehicle has a depth it should not cross. Neermattam finds the shortest way that stays under it, and shows the plain shortest route for comparison.</p>
+    <p class="eyebrow">{{t "route.eyebrow"}}</p>
+    <h1 id="route-title">{{t "route.title"}}</h1>
+    <p class="lead">{{t "route.lead"}}</p>
 
     <form id="route-form" method="get" action="/route">
       <div class="endpoints">
         <div class="endpoint">
           <span class="pin pin-a" aria-hidden="true"><span>A</span></span>
           <div class="endpoint-fields">
-            <div class="field"><label for="from-preset">From</label>
+            <div class="field"><label for="from-preset">{{t "route.from"}}</label>
               <select class="input" id="from-preset" data-target="from">
-                <option value="">Point on the map</option>
+                <option value="">{{t "route.point_on_map"}}</option>
                 {{range .Route.Presets}}<option value="{{.Coord}}" {{if eq .Coord $.Route.From}}selected{{end}}>{{.Name}}</option>{{end}}
               </select>
             </div>
-            <div class="field"><label for="from">Coordinates</label><input class="input" id="from" name="from" value="{{.Route.From}}" placeholder="lat,lon" inputmode="decimal" autocomplete="off" required></div>
+            <div class="field"><label for="from">{{t "route.coords"}}</label><input class="input" id="from" name="from" value="{{.Route.From}}" placeholder="lat,lon" inputmode="decimal" autocomplete="off" required></div>
           </div>
         </div>
         <div class="endpoint">
           <span class="pin pin-b" aria-hidden="true"><span>B</span></span>
           <div class="endpoint-fields">
-            <div class="field"><label for="to-preset">To</label>
+            <div class="field"><label for="to-preset">{{t "route.to"}}</label>
               <select class="input" id="to-preset" data-target="to">
-                <option value="">Point on the map</option>
+                <option value="">{{t "route.point_on_map"}}</option>
                 {{range .Route.Presets}}<option value="{{.Coord}}" {{if eq .Coord $.Route.To}}selected{{end}}>{{.Name}}</option>{{end}}
               </select>
             </div>
-            <div class="field"><label for="to">Coordinates</label><input class="input" id="to" name="to" value="{{.Route.To}}" placeholder="lat,lon" inputmode="decimal" autocomplete="off" required></div>
+            <div class="field"><label for="to">{{t "route.coords"}}</label><input class="input" id="to" name="to" value="{{.Route.To}}" placeholder="lat,lon" inputmode="decimal" autocomplete="off" required></div>
           </div>
         </div>
         <div class="tapmode">
-          <span>A map tap sets</span>
-          <span class="seg" role="radiogroup" aria-label="A map tap sets">
-            <label><input type="radio" name="tap" value="from" checked>From</label>
-            <label><input type="radio" name="tap" value="to">To</label>
+          <span>{{t "route.tap_sets"}}</span>
+          <span class="seg" role="radiogroup" aria-label="{{t "route.tap_sets"}}">
+            <label><input type="radio" name="tap" value="from" checked>{{t "route.from"}}</label>
+            <label><input type="radio" name="tap" value="to">{{t "route.to"}}</label>
           </span>
         </div>
       </div>
 
       <fieldset style="border:0;padding:0;margin:18px 0 0">
-        <legend class="label">Vehicle</legend>
+        <legend class="label">{{t "route.vehicle"}}</legend>
         <div class="vehicles">
           {{range .Route.Vehicles}}
-          <label class="vehicle"><input type="radio" name="vehicle" value="{{.ID}}" {{if eq .ID $.Route.Vehicle}}checked{{end}}><span>{{template "vehicle-icon" .ID}}{{.Name}}</span></label>
+          <label class="vehicle"><input type="radio" name="vehicle" value="{{.ID}}" {{if eq .ID $.Route.Vehicle}}checked{{end}}><span>{{template "vehicle-icon" .ID}}{{t (printf "vehicle.%s" .ID)}}</span></label>
           {{end}}
         </div>
       </fieldset>
 
       <div class="row" style="margin-top:18px">
-        <button class="btn btn-primary" type="submit" id="go" style="flex:1">{{template "icon-route"}}Find a water-aware route</button>
+        <button class="btn btn-primary" type="submit" id="go" style="flex:1">{{template "icon-route"}}{{t "route.find"}}</button>
       </div>
       <p class="form-error" id="route-error" role="alert">{{.Route.Error}}</p>
     </form>
@@ -59,8 +59,8 @@
   </section>
 
   <div class="route-map-wrap">
-    <div id="route-map" class="route-map" role="region" aria-label="Route map. Tap to set the start or the end."></div>
-    <div class="route-busy glass chip" id="route-busy" style="padding:8px 14px" role="status"><span class="live-dot" aria-hidden="true"></span>Finding a route</div>
+    <div id="route-map" class="route-map" role="region" aria-label="{{t "route.map_aria"}}"></div>
+    <div class="route-busy glass chip" id="route-busy" style="padding:8px 14px" role="status"><span class="live-dot" aria-hidden="true"></span>{{t "route.finding"}}</div>
   </div>
 </div>
 {{end}}
@@ -68,25 +68,25 @@
 {{define "route_summary"}}
 <div class="card panel" style="padding:18px">
   <div class="rs-kind">
-    {{if eq .Kind "least_bad"}}<span class="chip chip-danger">No dry route for a {{.VehicleName}}</span>{{else}}<span class="chip chip-ok">Water-aware route for a {{.VehicleName}}</span>{{end}}
-    <span class="chip chip-grey">Advisory</span>
-    {{if .Simulated}}<span class="chip chip-violet">Simulated scenario</span>{{end}}
+    {{if eq .Kind "least_bad"}}<span class="chip chip-danger">{{t "route.no_dry"}} · {{.VehicleName}}</span>{{else}}<span class="chip chip-ok">{{t "route.water_aware"}} · {{.VehicleName}}</span>{{end}}
+    <span class="chip chip-grey">{{t "route.advisory"}}</span>
+    {{if .Simulated}}<span class="chip chip-violet">{{t "sim.title_plain"}}</span>{{end}}
   </div>
   <div class="rs-lines">
-    <div><span class="line-swatch" aria-hidden="true"></span>Recommended route, avoiding water</div>
-    <div><span class="line-swatch base" aria-hidden="true"></span>Shortest route, ignoring water</div>
+    <div><span class="line-swatch" aria-hidden="true"></span>{{t "route.line_recommended"}}</div>
+    <div><span class="line-swatch base" aria-hidden="true"></span>{{t "route.line_shortest"}}</div>
   </div>
   <div class="rs-stats">
     {{range .Stats}}<div class="rs-stat{{if .Warn}} warn{{end}}"><span>{{.Label}}</span><b>{{.Value}}</b>{{if .Note}}<small>{{.Note}}</small>{{end}}</div>{{end}}
   </div>
   <p class="rs-explain">{{.Explanation}}</p>
-  {{if .Limit}}<p class="small muted" style="margin-top:10px">{{.Limit}} Unknown cells are allowed but cost extra, never treated as dry.</p>{{end}}
-  {{if .Simulated}}<p class="small" style="margin-top:10px;color:var(--violet)">This route is planned against the simulated demo scenario, not real water.</p>{{end}}
+  {{if .Limit}}<p class="small muted" style="margin-top:10px">{{.Limit}} {{t "route.unknown_note"}}</p>{{end}}
+  {{if .Simulated}}<p class="small" style="margin-top:10px;color:var(--violet)">{{t "route.sim_note"}}</p>{{end}}
 </div>
 <script type="application/json" id="route-data">{{.GeoJSON}}</script>
 {{end}}
 
-{{define "vehicle-icon"}}{{if eq . "pedestrian"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m9 21 2.5-6.5L14 17v4"/><path d="M8 11.5 10.5 8h3l2 4 2.5 1"/><path d="m11.5 14.5.5-6.5"/></svg>{{else if eq . "two_wheeler"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="16.5" r="3"/><circle cx="18.5" cy="16.5" r="3"/><path d="M8.5 16.5h6l2-6h-3"/><path d="M14 6h2.5l2 10.5"/><path d="M5.5 16.5 9 11h4"/></svg>{{else if eq . "auto"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16V9a4 4 0 0 1 4-4h6l5 6v5"/><path d="M4 16h2m5 0h6"/><circle cx="8.5" cy="16.5" r="2"/><circle cx="19" cy="17" r="2"/><path d="M14 5v6h5"/></svg>{{else if eq . "car"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15v-3l2-5h14l2 5v3"/><path d="M3 15h18v2H3z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/><path d="M5.5 11h13"/></svg>{{else}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="14" rx="2"/><path d="M4 10h16"/><path d="M8 3v7m8-7v7"/><circle cx="8" cy="19" r="1.6"/><circle cx="16" cy="19" r="1.6"/></svg>{{end}}{{end}}
+
 
 {{define "scripts"}}<script nonce="{{.Nonce}}">
 document.addEventListener("DOMContentLoaded", function () {
@@ -155,7 +155,7 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 
   function plan() {
-    if (!parse(from.value) || !parse(to.value)) { errBox.textContent = "Choose a start and an end: pick a place or tap the map."; return; }
+    if (!parse(from.value) || !parse(to.value)) { errBox.textContent = NM.tr("js.route_need_ends"); return; }
     errBox.textContent = ""; busy.classList.add("on");
     var params = new URLSearchParams(new FormData(form));
     params.delete("tap");
@@ -163,12 +163,12 @@ document.addEventListener("DOMContentLoaded", function () {
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         busy.classList.remove("on");
-        if (!res.ok) { errBox.textContent = res.j.error || "No route could be found."; return; }
+        if (!res.ok) { errBox.textContent = res.j.error || NM.tr("js.route_none"); return; }
         summary.innerHTML = res.j.summary_html;
         history.replaceState(null, "", "/route?" + params.toString());
         draw();
       })
-      .catch(function () { busy.classList.remove("on"); errBox.textContent = "The route service is not reachable. Try again shortly."; });
+      .catch(function () { busy.classList.remove("on"); errBox.textContent = NM.tr("js.route_down"); });
   }
   form.addEventListener("submit", function (e) { e.preventDefault(); plan(); });
   document.querySelectorAll("input[name=vehicle]").forEach(function (r) { r.addEventListener("change", function () { if (parse(from.value) && parse(to.value)) plan(); }); });

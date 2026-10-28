@@ -1,71 +1,72 @@
 {{define "content"}}
 <div class="page">
   <section class="hero">
-    <img class="about-logo" src="/static/brand/logo-full.png" width="720" height="545" alt="Neermattam: a blue wave shaped like the letter N with a water drop, above the word Neermattam">
-    <p class="eyebrow">About Neermattam</p>
-    <h1>Forecasts say where Chennai will flood. Neermattam measures <em>how deep it is on your street.</em></h1>
-    <p>From one photo of a tyre, Neermattam estimates the depth of the water and how fast it moves, fuses every report into a live map with honest uncertainty, and routes your scooter, auto, car, bus or your own two feet around water you should not cross.</p>
+    <img class="about-logo" src="{{asset "brand/logo-full.png"}}" width="720" height="545" alt="{{t "logo.alt"}}">
+    <p class="eyebrow">{{t "about.eyebrow"}}</p>
+    <h1>{{t "hero.line1"}} <em>{{t "hero.line2"}}</em></h1>
+    <p>{{t "about.lead"}}</p>
   </section>
 
   <div class="how">
-    <article class="card"><span class="n">1</span><h3>Photograph a wheel</h3><p>A scooter, auto or car wheel has a known size. Standing in water, it becomes a ruler. Send a photo or a short video from the web or WhatsApp.</p></article>
-    <article class="card"><span class="n">2</span><h3>Measure with Meta models</h3><p>Muse Spark Open reads the scene and picks the reference. SAM masks the wheel and the water. Geometry turns the hidden part of the wheel into a depth with a plus or minus.</p></article>
-    <article class="card"><span class="n">3</span><h3>Fuse, rate and route</h3><p>Each report updates a hex cell about 66 m across with a Kalman filter that ages old water. Cells are rated with the Defra hazard formula and routes avoid what each vehicle cannot cross.</p></article>
+    <article class="card"><span class="n">1</span><h3>{{t "about.how1_title"}}</h3><p>{{t "about.how1"}}</p></article>
+    <article class="card"><span class="n">2</span><h3>{{t "about.how2_title"}}</h3><p>{{t "about.how2"}}</p></article>
+    <article class="card"><span class="n">3</span><h3>{{t "about.how3_title"}}</h3><p>{{t "about.how3"}}</p></article>
   </div>
 
   <div class="prose">
-    <h2>What the map shows</h2>
-    <p>Every cell shows its mean depth and the standard deviation behind it. A cell with too little recent evidence is <b>unknown</b> and drawn with grey hatching. A street nobody has reported on is not shaded at all, and it is never treated as safe.</p>
-    <p>Hazard follows the UK Defra and Environment Agency method (FD2320 and FD2321, with the 2008 supplementary note):</p>
+    <h2>{{t "about.map_title"}}</h2>
+    <p>{{th "about.map_p1.html"}}</p>
+    <p>{{t "about.hazard_p"}}</p>
     <p class="formula">HR = d × (v + 0.5) + DF</p>
-    <p>where d is depth in metres, v is velocity in metres per second and DF is the debris factor. When velocity has not been measured the engine assumes 1.0 m/s and says so.</p>
+    <p>{{t "about.hazard_terms"}}</p>
 
-    <h3>Vehicle limits</h3>
-    <p>A vehicle may cross a cell only when the mean depth plus 1.5 standard deviations is within its limit.</p>
+    <h3>{{t "about.limits_title"}}</h3>
+    <p>{{t "about.limits_p"}}</p>
     <div class="table-wrap"><table>
-      <thead><tr><th>Vehicle</th><th>Depth limit</th><th>Depth times velocity</th><th>Basis</th></tr></thead>
+      <thead><tr><th>{{t "about.th_vehicle"}}</th><th>{{t "about.th_depth"}}</th><th>{{t "about.th_dv"}}</th><th>{{t "about.th_basis"}}</th></tr></thead>
       <tbody>
-        <tr><td>Car</td><td class="num">15 cm</td><td class="num">0.30 m²/s</td><td>US National Weather Service guidance; Australian Rainfall and Runoff small vehicle limit</td></tr>
-        <tr><td>Auto</td><td class="num">15 cm</td><td class="num">0.30 m²/s</td><td>No auto-rickshaw source found; treated like a small car. Unverified.</td></tr>
-        <tr><td>Two-wheeler</td><td class="num">15 cm</td><td class="num">0.30 m²/s</td><td>No two-wheeler source found; car figure used as a floor. Unverified.</td></tr>
-        <tr><td>Bus</td><td class="num">30 cm</td><td class="num">0.60 m²/s</td><td>No bus source found. Unverified.</td></tr>
-        <tr><td>Walking</td><td colspan="2">Blocked at “danger for some” and above</td><td>A router cannot know whether the walker is a child or elderly.</td></tr>
+        <tr><td>{{t "vehicle.car"}}</td><td class="num">15 cm</td><td class="num">0.30 m²/s</td><td>{{t "about.basis_car"}}</td></tr>
+        <tr><td>{{t "vehicle.auto"}}</td><td class="num">15 cm</td><td class="num">0.30 m²/s</td><td>{{t "about.basis_auto"}}</td></tr>
+        <tr><td>{{t "vehicle.two_wheeler"}}</td><td class="num">15 cm</td><td class="num">0.30 m²/s</td><td>{{t "about.basis_two_wheeler"}}</td></tr>
+        <tr><td>{{t "vehicle.bus"}}</td><td class="num">30 cm</td><td class="num">0.60 m²/s</td><td>{{t "about.basis_bus"}}</td></tr>
+        <tr><td>{{t "vehicle.pedestrian"}}</td><td colspan="2">{{t "about.walk_rule"}}</td><td>{{t "about.basis_walk"}}</td></tr>
       </tbody>
     </table></div>
 
-    <h3>How a report is checked</h3>
+    <h3>{{t "about.checks_title"}}</h3>
     <ul>
-      <li><b>Confidence.</b> A measurement the model itself is unsure of is not fused.</li>
-      <li><b>Freshness.</b> The photo's capture time is read from its EXIF data when present. Older photos count for less and are fused at the time they were taken.</li>
-      <li><b>Nearby cells.</b> A report that disagrees strongly with recent real reports nearby counts for less, but is not thrown away: water can change fast.</li>
-      <li><b>Rainfall.</b> Deep water after almost no modelled rain counts for less. It is not rejected, because reservoir releases, burst mains and tides also flood streets.</li>
-      <li><b>Duplicates.</b> The same photo, or a near copy of it, is never counted twice.</li>
+      <li>{{th "about.check_confidence.html"}}</li>
+      <li>{{th "about.check_fresh.html"}}</li>
+      <li>{{th "about.check_nearby.html"}}</li>
+      <li>{{th "about.check_rain.html"}}</li>
+      <li>{{th "about.check_dup.html"}}</li>
     </ul>
 
-    <h2>Credits</h2>
+    <h2>{{t "about.credits_title"}}</h2>
   </div>
   <div class="credits">
-    <article class="card"><h3>Muse Spark Open</h3><p>Meta's open-weight reasoning model, served by Baseten. Reads the scene, points at the reference objects, checks every mask the agent proposes, and understands voice notes.</p></article>
-    <article class="card"><h3>SAM 2.1</h3><p>Meta's open-weight Segment Anything model. Outlines the wheel and the water from the boxes and points Muse Spark Open gives it, and tracks floating debris in video for speed. SAM 3.1 drops in when its weights are available to us.</p></article>
-    <article class="card"><h3>Voice reports</h3><p>Muse Spark Open listens to voice notes and pulls out the place and the depth words, in Tamil, English and other Indian languages.</p></article>
-    <article class="card"><h3>OpenStreetMap</h3><p>Road network and base map data © OpenStreetMap contributors, available under the Open Database Licence (ODbL).</p></article>
-    <article class="card"><h3>OpenFreeMap and OpenMapTiles</h3><p>Free vector tiles and the Positron style, rendered with MapLibre GL JS (BSD licence).</p></article>
-    <article class="card"><h3>Open-Meteo</h3><p>Modelled hourly rainfall for report checks, used under CC BY 4.0 with caching to respect its fair use terms.</p></article>
+    <article class="card"><h3>Muse Spark Open</h3><p>{{t "credit.muse"}}</p></article>
+    <article class="card"><h3>SAM 2.1</h3><p>{{t "credit.sam"}}</p></article>
+    <article class="card"><h3>{{t "credit.voice_title"}}</h3><p>{{t "credit.voice"}}</p></article>
+    <article class="card"><h3>OpenStreetMap</h3><p>{{t "credit.osm"}}</p></article>
+    <article class="card"><h3>OpenFreeMap · OpenMapTiles</h3><p>{{t "credit.ofm"}}</p></article>
+    <article class="card"><h3>Open-Meteo</h3><p>{{t "credit.meteo"}}</p></article>
   </div>
 
   <div class="prose">
-    <h2>Limitations</h2>
+    <h2>{{t "about.limitations_title"}}</h2>
     <ul>
-      <li>Every route and every depth is advisory. Check local news and official alerts, and turn back if the water looks deeper than expected.</li>
-      <li>Depth comes from a reference object. Without a visible wheel, kerb or person, a photo cannot be measured, and the app says so instead of guessing.</li>
-      <li>The vehicle limits for autos, two-wheelers and buses are not from an Indian source; none was found during the build.</li>
-      <li>Fusion settings, such as how fast water is assumed to recede, are engineering assumptions, not fitted to Chennai data.</li>
-      <li>Rainfall is modelled, not measured at a gauge, and covers an area about 5 km across.</li>
-      <li>Accuracy figures will be published only from the evaluation scripts in the repository, which anyone can rerun.</li>
+      <li>{{t "about.lim1"}}</li>
+      <li>{{t "about.lim2"}}</li>
+      {{with .Home}}{{with .Facts}}<li>{{t "about.lim3" .Real.Photos .Real.Geometry}}</li>{{end}}{{end}}
+      <li>{{t "about.lim4"}}</li>
+      <li>{{t "about.lim5"}}</li>
+      <li>{{t "about.lim6"}}</li>
+      <li>{{t "about.lim7"}}</li>
     </ul>
     {{if .Demo}}
-    <h2>About the simulated scenario</h2>
-    <p>This instance runs with a simulated flood so the map is alive before real reports arrive. It places water at low points that flooded during Cyclone Michaung in December 2023: Velachery, Pallikaranai, T. Nagar and the Mambalam subways. The depths are invented. Simulated cells are labelled in the map, the popups and the routes, and a real report is outlined so it stands apart.</p>
+    <h2>{{t "about.sim_title"}}</h2>
+    <p>{{t "about.sim_p"}}</p>
     {{end}}
   </div>
 </div>

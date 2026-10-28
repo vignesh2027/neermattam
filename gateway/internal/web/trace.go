@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"neermattam/gateway/internal/i18n"
 	"neermattam/gateway/internal/upstream"
 )
 
@@ -39,20 +40,14 @@ type TraceView struct {
 	TargetsSeen int
 }
 
-var stepLabels = map[string]string{
-	"scene":    "Read the scene",
-	"segment":  "Segment",
-	"verify":   "Verify",
-	"confirm":  "Confirm",
-	"refine":   "Refine",
-	"giveup":   "Give up",
-	"geometry": "Geometry",
-	"estimate": "Estimate",
+var stepKinds = map[string]bool{
+	"scene": true, "segment": true, "verify": true, "confirm": true,
+	"refine": true, "giveup": true, "geometry": true, "estimate": true,
 }
 
 // NewTraceStep classifies one step. A verify whose decision is a refinement
 // or a give-up is shown as that, because that is what the agent did.
-func NewTraceStep(i int, s upstream.AgentStep) TraceStepView {
+func NewTraceStep(lang string, i int, s upstream.AgentStep) TraceStepView {
 	v := TraceStepView{
 		Index: i + 1, Target: s.Target, Model: s.Model, Input: s.Input, Output: s.Output,
 		Latency: latency(s.LatencyMs), Slow: s.LatencyMs >= 10_000, DelayMs: min(i*70, 1400),
@@ -63,48 +58,49 @@ func NewTraceStep(i int, s upstream.AgentStep) TraceStepView {
 	switch {
 	case strings.HasPrefix(low, "give up"):
 		v.Tone = "stop"
-		v.Decision = "Give up"
+		v.Decision = i18n.T(lang, "decision.giveup")
 		v.Detail = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(dec[len("give up"):], ":"), " "))
 		if kind == "verify" || kind == "confirm" {
 			kind = "giveup"
 		}
 	case strings.HasPrefix(low, "refine"):
 		v.Tone = "refine"
-		v.Decision = "Refine"
+		v.Decision = i18n.T(lang, "decision.refine")
 		v.Detail = strings.TrimSpace(dec[len("refine"):])
 		if kind == "verify" || kind == "confirm" {
 			kind = "refine"
 		}
 	case strings.HasPrefix(low, "accept"):
 		v.Tone = "ok"
-		v.Decision = "Accept"
+		v.Decision = i18n.T(lang, "decision.accept")
 		v.Detail = strings.Trim(strings.TrimSpace(dec[len("accept"):]), "()")
 	default:
 		v.Tone = "neutral"
 		v.Decision = capitalise(dec)
 		if dec != "" && (kind == "scene" || kind == "segment") {
-			v.Decision = "Next: " + dec
+			v.Decision = i18n.T(lang, "decision.next", dec)
 		}
 	}
-	if _, ok := stepLabels[kind]; !ok {
+	if !stepKinds[kind] {
 		kind = "other"
 	}
 	v.Kind = kind
-	v.Label = stepLabels[kind]
-	if v.Label == "" {
+	if kind == "other" {
 		v.Label = capitalise(s.Step)
+	} else {
+		v.Label = i18n.T(lang, "step."+kind)
 	}
 	return v
 }
 
 // NewTraceView builds the panel for a complete trace.
-func NewTraceView(steps []upstream.AgentStep, live bool) *TraceView {
+func NewTraceView(lang string, steps []upstream.AgentStep, live bool) *TraceView {
 	t := &TraceView{Live: live, Reveal: true, Count: len(steps)}
 	models := map[string]bool{}
 	targets := map[string]bool{}
 	total := 0
 	for i, s := range steps {
-		v := NewTraceStep(i, s)
+		v := NewTraceStep(lang, i, s)
 		switch v.Tone {
 		case "refine":
 			t.Refines++
@@ -134,7 +130,7 @@ func NewTraceView(steps []upstream.AgentStep, live bool) *TraceView {
 func latency(ms int) string {
 	switch {
 	case ms <= 0:
-		return "under 1 ms"
+		return "0 ms"
 	case ms < 1000:
 		return fmt.Sprintf("%d ms", ms)
 	case ms < 60_000:

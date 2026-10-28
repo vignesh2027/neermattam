@@ -6,18 +6,17 @@ package web
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/sha256"
 	"embed"
 	"encoding/base64"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
-	"io/fs"
 	"net/http"
 	"strings"
 	"time"
 
+	"neermattam/gateway/internal/i18n"
 	"neermattam/gateway/internal/live"
 	"neermattam/gateway/internal/places"
 )
@@ -31,15 +30,23 @@ var staticFS embed.FS
 // Page is the data every page template receives.
 type Page struct {
 	// Request is the request being answered (for content negotiation).
-	Request    *http.Request
-	Title      string
-	Active     string
-	Nonce      string
-	CSSVersion string
-	PublicURL  string
-	NeedsMap   bool
-	Footer     bool
-	Demo       bool
+	Request   *http.Request
+	Title     string
+	Active    string
+	Nonce     string
+	PublicURL string
+
+	// Language.
+	Lang        string
+	LangNative  string
+	LangFont    string       // Google Fonts family for Indic scripts, empty for English
+	LangFontURL template.URL // Google Fonts stylesheet for the script, built from i18n.Languages
+	LangLinks   []LangLink
+	Path        string
+	ClientText  template.JS // interface text for the inline glue, as JSON
+	NeedsMap    bool
+	Footer      bool
+	Demo        bool
 
 	Stats     MapStats
 	CellsJSON template.JS // initial cells, inlined so the map paints without a second request
@@ -51,6 +58,13 @@ type Page struct {
 	Trace     *TraceView
 	LiveTrace *TraceView
 	Route     RouteForm
+	Home      *HomeView
+}
+
+// LangLink is one entry of the language menu.
+type LangLink struct {
+	Code, Name, Native, Href string
+	Current                  bool
 }
 
 // MapStats are the counters shown before the live data loads.
@@ -92,56 +106,90 @@ var Vehicles = []VehicleOption{
 	{"bus", "Bus"},
 }
 
-// Renderer holds the parsed templates.
+// Renderer holds the parsed templates, one set per language, so every
+// template can call {{t "nav.about"}} for the right language.
 type Renderer struct {
-	pages      map[string]*template.Template
-	partials   *template.Template
-	cssVersion string
+	assets   *Assets
+	pages    map[string]map[string]*template.Template
+	partials map[string]*template.Template
+	client   map[string]template.JS
 }
 
-var funcs = template.FuncMap{
-	"depthColor": DepthColor,
-	"ago":        Ago,
-	"capitalise": capitalise,
+// Page templates.
+var pageNames = []string{"home", "map", "report", "route", "about"}
+
+func langFuncs(a *Assets, lang string) template.FuncMap {
+	f := template.FuncMap{
+		"depthColor": DepthColor,
+		"capitalise": capitalise,
+		"asset":      a.URL,
+		"ago":        func(t time.Time) string { return Ago(lang, t) },
+		"place":      func(p string) string { return Place(lang, p) },
+	}
+	for k, v := range i18n.Funcs(lang) {
+		f[k] = v
+	}
+	return f
 }
 
-// NewRenderer parses every template once at start-up.
+// NewRenderer parses every template for every language once at start-up.
 func NewRenderer() (*Renderer, error) {
-	base, err := template.New("base").Funcs(funcs).ParseFS(templateFS,
-		"templates/layout.html", "templates/mapcore.html", "templates/result.html", "templates/trace.html")
+	a, err := LoadAssets()
 	if err != nil {
 		return nil, err
 	}
-	r := &Renderer{pages: map[string]*template.Template{}, partials: base}
-	for _, name := range []string{"map", "report", "route", "about"} {
-		t, err := base.Clone()
+	r := &Renderer{assets: a, pages: map[string]map[string]*template.Template{}, partials: map[string]*template.Template{}, client: map[string]template.JS{}}
+	for _, l := range i18n.Languages {
+		base, err := template.New("base").Funcs(langFuncs(a, l.Code)).ParseFS(templateFS,
+			"templates/layout.html", "templates/mapcore.html", "templates/result.html", "templates/trace.html")
 		if err != nil {
 			return nil, err
 		}
-		if _, err := t.ParseFS(templateFS, "templates/"+name+".html"); err != nil {
-			return nil, fmt.Errorf("template %s: %w", name, err)
+		r.pages[l.Code] = map[string]*template.Template{}
+		for _, name := range pageNames {
+			t, err := base.Clone()
+			if err != nil {
+				return nil, err
+			}
+			if _, err := t.ParseFS(templateFS, "templates/"+name+".html"); err != nil {
+				return nil, fmt.Errorf("template %s: %w", name, err)
+			}
+			r.pages[l.Code][name] = t
 		}
-		r.pages[name] = t
+		// The route summary partial lives in route.html; the route set has
+		// every partial.
+		r.partials[l.Code] = r.pages[l.Code]["route"]
+		r.client[l.Code] = clientText(l.Code)
 	}
-	// The route summary partial is defined in route.html.
-	r.partials = r.pages["route"]
-	css, err := staticFS.ReadFile("static/app.css")
-	if err != nil {
-		return nil, err
-	}
-	sum := sha256.Sum256(css)
-	r.cssVersion = hex.EncodeToString(sum[:6])
 	return r, nil
+}
+
+// Assets returns the fingerprinted static files.
+func (r *Renderer) Assets() *Assets { return r.assets }
+
+// clientText is the interface text the inline glue needs, as JSON.
+func clientText(lang string) template.JS {
+	m := map[string]string{}
+	for k := range i18n.Catalogs["en"] {
+		if strings.HasPrefix(k, "js.") || strings.HasPrefix(k, "hazard.") || k == "sim.title_plain" {
+			m[k] = i18n.T(lang, k)
+		}
+	}
+	b, _ := json.Marshal(m)
+	return template.JS(b) //nolint:gosec // json.Marshal escapes <, > and &
 }
 
 // Render writes a full page. Rendering goes to a buffer first so a
 // template error becomes a clean 500 rather than half a page.
 func (rd *Renderer) Render(w http.ResponseWriter, r *http.Request, status int, name string, p *Page) error {
-	t, ok := rd.pages[name]
+	if _, ok := rd.pages[p.Lang]; !ok {
+		p.Lang = i18n.Default
+	}
+	t, ok := rd.pages[p.Lang][name]
 	if !ok {
 		return fmt.Errorf("no page %q", name)
 	}
-	p.CSSVersion = rd.cssVersion
+	p.ClientText = rd.client[p.Lang]
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "layout", p); err != nil {
 		http.Error(w, "page could not be rendered", http.StatusInternalServerError)
@@ -149,10 +197,13 @@ func (rd *Renderer) Render(w http.ResponseWriter, r *http.Request, status int, n
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	// The language comes from ?lang=, the cookie or Accept-Language.
+	AddVary(w.Header(), "Cookie")
+	AddVary(w.Header(), "Accept-Language")
 	gz := r != nil && AcceptsGzip(r) && buf.Len() > 1024
+	AddVary(w.Header(), "Accept-Encoding")
 	if gz {
 		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Set("Vary", "Accept-Encoding")
 	}
 	w.WriteHeader(status)
 	if gz {
@@ -163,32 +214,17 @@ func (rd *Renderer) Render(w http.ResponseWriter, r *http.Request, status int, n
 	return err
 }
 
-// Fragment renders a named partial to a string.
-func (r *Renderer) Fragment(name string, data any) (string, error) {
+// Fragment renders a named partial to a string in a language.
+func (r *Renderer) Fragment(lang, name string, data any) (string, error) {
+	t, ok := r.partials[lang]
+	if !ok {
+		t = r.partials[i18n.Default]
+	}
 	var buf bytes.Buffer
-	if err := r.partials.ExecuteTemplate(&buf, name, data); err != nil {
+	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
 		return "", err
 	}
 	return buf.String(), nil
-}
-
-// Static serves the embedded static directory with long-lived caching: the
-// vendor path carries the MapLibre version and app.css is requested with a
-// content hash, so a changed file always has a new URL.
-func Static() http.Handler {
-	sub, err := fs.Sub(staticFS, "static")
-	if err != nil {
-		panic(err)
-	}
-	files := &gzipStatic{fsys: sub, next: http.FileServerFS(sub), cache: map[string][]byte{}}
-	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/") || r.URL.Path == "" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		files.ServeHTTP(w, r)
-	}))
 }
 
 // StaticFile returns an embedded static file, for tests.
@@ -212,12 +248,12 @@ func CSP(nonce string) string {
 	return strings.Join([]string{
 		"default-src 'self'",
 		"script-src 'self' 'nonce-" + nonce + "'",
-		"style-src 'self' 'unsafe-inline'",
+		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
 		"img-src 'self' data: blob: https://tiles.openfreemap.org",
 		"connect-src 'self' https://tiles.openfreemap.org",
 		"worker-src 'self' blob:",
 		"child-src blob:",
-		"font-src 'self'",
+		"font-src 'self' https://fonts.gstatic.com",
 		"media-src 'self' blob:",
 		"frame-ancestors 'none'",
 		"base-uri 'self'",

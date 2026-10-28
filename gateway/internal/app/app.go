@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"neermattam/gateway/internal/config"
+	"neermattam/gateway/internal/facts"
 	"neermattam/gateway/internal/live"
 	"neermattam/gateway/internal/metrics"
 	"neermattam/gateway/internal/overlay"
@@ -36,6 +37,7 @@ type App struct {
 	Renderer   *web.Renderer
 	WhatsApp   *whatsapp.Handler
 	Overlays   *overlay.Store
+	Facts      facts.Facts
 
 	reportLimit *ratelimit.Limiter
 	apiLimit    *ratelimit.Limiter
@@ -85,6 +87,7 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 			log.Info("provenance loaded", "cells", n, "real_reports", len(a.Origins.Records()), "path", path)
 		}
 	}
+	a.Facts, _ = facts.Load(cfg.RepoRoot)
 	a.Hub = live.NewHub(cfg.MaxSSEClients, a.Origins, log, m)
 	// The ticker shows real reports from before a restart.
 	recs := a.Origins.Records()
@@ -142,7 +145,8 @@ func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	page := func(h http.HandlerFunc) http.Handler { return h }
 
-	mux.Handle("GET /{$}", page(a.mapPage))
+	mux.Handle("GET /{$}", page(a.homePage))
+	mux.Handle("GET /map", page(a.mapPage))
 	mux.Handle("GET /report", page(a.reportPage))
 	mux.Handle("POST /report", http.HandlerFunc(a.reportForm))
 	mux.Handle("GET /route", page(a.routePage))
@@ -171,7 +175,7 @@ func (a *App) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /readyz", a.readyz)
 	mux.Handle("GET /metrics", a.Metrics.Registry.Handler())
-	mux.Handle("GET /static/", web.Static())
+	mux.Handle("GET /static/", a.Renderer.Assets().Handler())
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/static/brand/favicon.ico", http.StatusMovedPermanently)
 	})
@@ -185,7 +189,7 @@ func (a *App) Handler() http.Handler {
 
 	// secure runs before observe so the request observe sees is the one the
 	// mux annotates with its matched pattern.
-	return a.recoverer(a.secure(a.observe(mux)))
+	return a.recoverer(a.secure(a.withLang(a.observe(mux))))
 }
 
 func (a *App) provenancePath() string {

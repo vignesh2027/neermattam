@@ -1,0 +1,97 @@
+{
+  "routing": {
+    "trip": "Velachery station to Guindy, 3.5 km",
+    "dry_ms": "0.28 ms",
+    "readings_200_ms": "1.3 ms",
+    "readings_2000_ms": "29 ms",
+    "machine": "8 GB M1 MacBook Air",
+    "source": "docs/ENGINE.md"
+  },
+  "depth": {
+    "cases": "500",
+    "usable": "78%",
+    "mae_cm": "3.34",
+    "median_cm": "1.25",
+    "within_1_sigma": "85%",
+    "source": "docs/GEOMETRY.md"
+  },
+  "real": {
+    "photos": 6,
+    "wheel_geometry": 0,
+    "model_estimate": 6,
+    "date": "2026-10-27",
+    "source": "eval/RESULTS_REAL.md"
+  },
+  "trace": {
+    "photo": "India - Chennai - Monsoon - 02",
+    "credit": "McKay Savage, CC BY 2.0, via Wikimedia Commons",
+    "date": "2026-10-27",
+    "steps": [
+      {
+        "step": "scene",
+        "target": "photo",
+        "model": "muse-spark-open",
+        "input": "photo 2048x1536 px",
+        "output": "water visible; references: two_wheeler_wheel, two_wheeler_wheel; own estimate 23 cm",
+        "decision": "segment and verify 2 wheels and the water",
+        "latency_ms": 15161
+      },
+      {
+        "step": "segment",
+        "target": "water",
+        "model": "sam-2.1-hiera-small",
+        "input": "box [246,799,964,1445] px + points [[588, 1083]]",
+        "output": "mask 325606 px (10% of photo)",
+        "decision": "verify",
+        "latency_ms": 2250
+      },
+      {
+        "step": "verify",
+        "target": "water",
+        "model": "muse-spark-open",
+        "input": "photo with the proposed region tinted",
+        "output": "is_water=true, coverage partial; Magenta is water but misses the flooded area directly around the motorcycles standing in it.",
+        "decision": "refine with box [717,922,1188,1352] px + point [922, 1152]",
+        "latency_ms": 22107
+      },
+      {
+        "step": "verify",
+        "target": "water",
+        "model": "muse-spark-open",
+        "input": "photo with the proposed region tinted",
+        "output": "is_water=true, coverage good; Magenta region lies on the brown floodwater surface immediately beside the submerged motorcycle and covers open water.",
+        "decision": "accept",
+        "latency_ms": 22357
+      },
+      {
+        "step": "verify",
+        "target": "two wheeler wheel 1",
+        "model": "muse-spark-open",
+        "input": "crop [638,422,2038,1536] px with the outline drawn",
+        "output": "is_target=false, outline wrong, view side, edge visible 0.65, waterline visible; Magenta traces only a small bottom fragment at the waterline instead of the tyre's outer edge above water, missing the main visible arc.",
+        "decision": "refine with box [1205,856,1506,1057] px + points [1359,862], [1212,962]",
+        "latency_ms": 21994
+      },
+      {
+        "step": "verify",
+        "target": "two wheeler wheel 1",
+        "model": "muse-spark-open",
+        "input": "crop [1022,686,1721,1385] px with the outline drawn",
+        "output": "is_target=false, outline partial, view side, edge visible 0.75, waterline visible; Magenta follows tyre but also encloses exhaust pipe and swingarm/chain area giving wrong depth measurement.",
+        "decision": "give up",
+        "latency_ms": 9601
+      },
+      {
+        "step": "estimate",
+        "target": "photo",
+        "model": "muse-spark-open",
+        "input": "no measurable wheel",
+        "output": "23 cm, sigma 20 cm",
+        "decision": "report model estimate",
+        "latency_ms": 0
+      }
+    ],
+    "total_steps": 18,
+    "source": "eval/out/x2.json"
+  }
+}

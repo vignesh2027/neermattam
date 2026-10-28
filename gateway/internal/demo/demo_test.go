@@ -33,3 +33,18 @@ func TestPlanIsLabelledAndInsideTheServiceArea(t *testing.T) {
 		}
 	}
 }
+
+func TestReadingIDsDifferBetweenRuns(t *testing.T) {
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	a, b := (&Seeder{}).Plan(now), (&Seeder{}).Plan(now)
+	if len(a) == 0 || len(a) != len(b) {
+		t.Fatalf("plans of %d and %d readings", len(a), len(b))
+	}
+	if a[0].ReadingID == b[0].ReadingID {
+		t.Fatal("two runs produced the same reading id; a restarted gateway would be deduplicated by the engine")
+	}
+	// The scenario itself is the same every run.
+	if a[0].DepthCm != b[0].DepthCm || a[0].Lat != b[0].Lat {
+		t.Fatal("the scenario changed between runs")
+	}
+}

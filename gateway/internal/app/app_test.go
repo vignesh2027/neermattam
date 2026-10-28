@@ -7,15 +7,18 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"image"
 	_ "image/jpeg"
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"neermattam/gateway/internal/i18n"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +36,7 @@ const cellJSON = `{"type":"Feature","id":"8a618c4e2d47fff","geometry":{"type":"P
 type fakeEngine struct {
 	srv        *httptest.Server
 	cellsCalls atomic.Int32
+	cellsDelay atomic.Int64 // nanoseconds the cells query takes
 	mu         sync.Mutex
 	readings   []map[string]any
 	events     chan string
@@ -44,6 +48,7 @@ func newFakeEngine(t *testing.T) *fakeEngine {
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{"status":"ready"}`)) })
 	mux.HandleFunc("GET /v1/cells", func(w http.ResponseWriter, r *http.Request) {
 		e.cellsCalls.Add(1)
+		time.Sleep(time.Duration(e.cellsDelay.Load()))
 		if r.URL.Query().Get("bbox") == "" {
 			http.Error(w, `{"error":"bbox is required"}`, 400)
 			return
@@ -528,10 +533,11 @@ func TestPagesRender(t *testing.T) {
 	h := newHarness(t, map[string]string{"DEMO": "1"}, true)
 	h.app.Origins.Mark("8a618c4e2d47fff", true)
 	pages := map[string][]string{
-		"/":       {"Chennai flood depth, live", "Simulated scenario", "Report water here", "Advisory only", "maplibre-gl-5.6.0/maplibre-gl.js"},
+		"/":       {"Forecasts say where Chennai will flood.", "Open the live map", "Built on Meta", "Muse Spark Open", "Who it is for", "Honest numbers", "Advisory, always", "pv-cells", "Watch the models check each other"},
+		"/map":    {"Chennai flood depth, live", "Simulated scenario", "Report water here", "Advisory only", "maplibre-gl-5.6.0/maplibre-gl"},
 		"/report": {"Measure the water from one photo", "Use my location", "12 MB", "30 seconds"},
 		"/route":  {"Route around the water", "Velachery station", "Chennai Central", "Two-wheeler"},
-		"/route?from=12.9791,80.2209&to=13.0067,80.2206&vehicle=car": {"Water-aware route for a Car", "4.2 km", "37 of 37", "Simulated scenario", `id="route-data"`},
+		"/route?from=12.9791,80.2209&to=13.0067,80.2206&vehicle=car": {"Water-aware route · Car", "4.2 km", "37 of 37", "Simulated scenario", `id="route-data"`},
 		"/about": {"Muse Spark Open", "SAM 3.1", "Voice reports", "ODbL", "OpenFreeMap", "Limitations"},
 	}
 	for path, wants := range pages {
@@ -730,7 +736,7 @@ func TestWhatsAppWebhookRejectsBadSignature(t *testing.T) {
 
 func TestStaticIsGzippedAndCached(t *testing.T) {
 	h := newHarness(t, nil, true)
-	req, _ := http.NewRequest("GET", h.srv.URL+"/static/vendor/maplibre-gl-5.6.0/maplibre-gl.js", nil)
+	req, _ := http.NewRequest("GET", h.srv.URL+h.app.Renderer.Assets().URL("vendor/maplibre-gl-5.6.0/maplibre-gl.js"), nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	tr := &http.Transport{DisableCompression: true}
 	resp, err := tr.RoundTrip(req)
@@ -815,7 +821,7 @@ func TestCellsAreCompactWithETagAndInlinedInThePage(t *testing.T) {
 	if r2.StatusCode != http.StatusNotModified {
 		t.Fatalf("revalidation: %d", r2.StatusCode)
 	}
-	page, _ := http.Get(h.srv.URL + "/")
+	page, _ := http.Get(h.srv.URL + "/map")
 	html, _ := io.ReadAll(page.Body)
 	if !strings.Contains(string(html), `id="cells-data"`) || !strings.Contains(string(html), `"8a618c4e2d47fff"`) {
 		t.Fatal("the map page should carry the initial cells")
@@ -849,5 +855,89 @@ func TestRealReportsKeepTheirLabelAcrossARestart(t *testing.T) {
 	feed := h2.app.Hub.Feed()
 	if len(feed) == 0 || feed[0].Simulated || feed[0].DepthCm != 23.4 {
 		t.Fatalf("the real report should be back in the ticker: %+v", feed)
+	}
+}
+
+func TestPagesRenderInEveryLanguage(t *testing.T) {
+	h := newHarness(t, map[string]string{"DEMO": "1"}, true)
+	paths := []string{"/", "/map", "/report", "/route", "/route?from=12.9791,80.2209&to=13.0067,80.2206&vehicle=car", "/about"}
+	for _, l := range i18n.Languages {
+		for _, path := range paths {
+			sep := "?"
+			if strings.Contains(path, "?") {
+				sep = "&"
+			}
+			resp, err := http.Get(h.srv.URL + path + sep + "lang=" + l.Code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			body := string(b)
+			if resp.StatusCode != 200 {
+				t.Errorf("%s %s: %d", l.Code, path, resp.StatusCode)
+			}
+			if !strings.Contains(body, `<html lang="`+l.Code+`"`) {
+				t.Errorf("%s %s: html lang not set", l.Code, path)
+			}
+			if strings.Contains(body, "ZgotmplZ") || strings.Contains(body, "%!") {
+				t.Errorf("%s %s: a value was rejected or a placeholder mismatched", l.Code, path)
+			}
+			if strings.ContainsAny(body, "—→←") {
+				t.Errorf("%s %s: em dash or arrow", l.Code, path)
+			}
+			// Google Fonts rejects an escaped "+" (%2b) with a 400.
+			if l.Font != "" {
+				want := "https://fonts.googleapis.com/css2?family=" + strings.ReplaceAll(l.Font, " ", "+") + ":wght@400;500;600;700&display=optional"
+				m := regexp.MustCompile(`<link rel="stylesheet" href="(https://fonts\.googleapis\.com/[^"]+)"`).FindStringSubmatch(body)
+				if m == nil || html.UnescapeString(m[1]) != want {
+					t.Errorf("%s %s: font stylesheet link missing or escaped, want %s", l.Code, path, want)
+				}
+			} else if strings.Contains(body, "fonts.googleapis.com/css2") {
+				t.Errorf("%s %s: loads a web font it does not need", l.Code, path)
+			}
+			if !strings.Contains(resp.Header.Get("Set-Cookie"), "nm_lang="+l.Code) {
+				t.Errorf("%s %s: ?lang= is not remembered", l.Code, path)
+			}
+		}
+	}
+}
+
+func TestConcurrentCellMissesShareOneQuery(t *testing.T) {
+	h := newHarness(t, nil, true)
+	h.engine.cellsDelay.Store(int64(150 * time.Millisecond))
+	var wg sync.WaitGroup
+	entries := make([]*cellsEntry, 30)
+	for i := range entries {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			e, err := h.app.cellsFor(context.Background(), h.app.Cfg.ServiceArea)
+			if err != nil {
+				t.Error(err)
+			}
+			entries[i] = e
+		}(i)
+	}
+	wg.Wait()
+	if n := h.engine.cellsCalls.Load(); n != 1 {
+		t.Fatalf("30 concurrent misses made %d engine queries, want 1", n)
+	}
+	for _, e := range entries {
+		if e != entries[0] {
+			t.Fatal("callers got different entries")
+		}
+	}
+	if p := entries[0].Preview(); p.W == 0 {
+		t.Fatal("no preview")
+	}
+	// A caller that gives up does not cancel the fetch for the others.
+	h.app.cells = newCellsCache(time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	go h.app.cellsFor(ctx, h.app.Cfg.ServiceArea)
+	time.Sleep(5 * time.Millisecond)
+	if _, err := h.app.cellsFor(context.Background(), h.app.Cfg.ServiceArea); err != nil {
+		t.Fatalf("second caller failed after the first gave up: %v", err)
 	}
 }

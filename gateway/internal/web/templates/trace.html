@@ -4,7 +4,7 @@
     <div class="thead">
       <span class="tlabel">{{.Label}}</span>
       <span class="ttarget">{{.Target}}</span>
-      <span class="tlat{{if .Slow}} slow{{end}}" title="Wall time of this step">{{.Latency}}</span>
+      <span class="tlat{{if .Slow}} slow{{end}}" title="{{t "trace.wall_time"}}">{{.Latency}}</span>
     </div>
     <p class="tout">{{.Output}}</p>
     <div class="tfoot">
@@ -12,24 +12,24 @@
       {{if .Detail}}<span class="tdetail">{{.Detail}}</span>{{end}}
       <span class="tmodel">{{.Model}}</span>
     </div>
-    {{if .Input}}<p class="tin"><span>Input</span> {{.Input}}</p>{{end}}
+    {{if .Input}}<p class="tin"><span>{{t "trace.input"}}</span> {{.Input}}</p>{{end}}
   </div>
 </li>{{end}}
 
 {{define "trace_panel"}}<section class="card trace{{if .Live}} is-live{{end}}" aria-labelledby="trace-title">
   <header class="trace-head">
     <div>
-      <p class="eyebrow trace-eyebrow">{{if .Live}}<span class="live-dot" aria-hidden="true"></span>Agent at work{{else}}Agent trace{{end}}</p>
-      <h2 id="trace-title">How the models reached this answer</h2>
-      <p class="trace-lead">Every model call perception made, in order: the scene reading, each mask, each check of a mask by the scene model, and the geometry.</p>
+      <p class="eyebrow trace-eyebrow">{{if .Live}}<span class="live-dot" aria-hidden="true"></span>{{t "trace.live"}}{{else}}{{t "trace.title"}}{{end}}</p>
+      <h2 id="trace-title">{{t "trace.heading"}}</h2>
+      <p class="trace-lead">{{t "trace.lead"}}</p>
     </div>
   </header>
   <div class="trace-stats" aria-live="off">
-    <span class="tstat"><b class="num" data-count="steps">{{.Count}}</b> steps</span>
-    <span class="tstat ok"><b class="num" data-count="ok">{{.Accepts}}</b> accepted</span>
-    <span class="tstat refine"><b class="num" data-count="refine">{{.Refines}}</b> refined</span>
-    <span class="tstat stop"><b class="num" data-count="stop">{{.GiveUps}}</b> given up</span>
-    {{if not .Live}}<span class="tstat"><b class="num">{{.TotalTime}}</b> of model time, summed</span>{{end}}
+    <span class="tstat">{{th "trace.steps.html" .Count}}</span>
+    <span class="tstat ok">{{th "trace.accepted.html" .Accepts}}</span>
+    <span class="tstat refine">{{th "trace.refined.html" .Refines}}</span>
+    <span class="tstat stop">{{th "trace.givenup.html" .GiveUps}}</span>
+    {{if not .Live}}<span class="tstat">{{th "trace.summed.html" .TotalTime}}</span>{{end}}
   </div>
   {{if .ModelsUsed}}<p class="trace-models">{{range .ModelsUsed}}<span class="chip chip-violet">{{.}}</span>{{end}}</p>{{end}}
   <ol class="timeline{{if .Reveal}} reveal{{end}}" id="trace-list" aria-live="polite">

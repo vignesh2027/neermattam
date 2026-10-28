@@ -102,6 +102,11 @@ type Config struct {
 	// provenance). Empty disables persistence.
 	DataDir string
 
+	// RepoRoot is a repository checkout whose docs the landing page reads
+	// its numbers from; when they are missing the copy embedded at build
+	// time is used.
+	RepoRoot string
+
 	ServiceArea BBox
 
 	MaxImageBytes   int64
@@ -151,6 +156,7 @@ func fromLookup(lookup func(string) (string, bool)) (Config, error) {
 		PerceptionTimeout: r.dur("PERCEPTION_TIMEOUT", 240*time.Second),
 		ReplyDeadline:     r.dur("REPLY_DEADLINE", 270*time.Second),
 		DataDir:           r.str("GATEWAY_DATA_DIR", "../data/gateway"),
+		RepoRoot:          r.str("REPO_ROOT", ".."),
 		WeatherTimeout:    r.dur("WEATHER_TIMEOUT", 4*time.Second),
 
 		MaxImageBytes:   r.int64("MAX_IMAGE_BYTES", 12<<20),

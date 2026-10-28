@@ -36,16 +36,16 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 	r.Body = http.MaxBytesReader(w, r.Body, maxFile+(2<<20))
 	ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if ct != "multipart/form-data" {
-		return sub, &report.Error{Status: http.StatusBadRequest, Code: "not_multipart", Message: "Send the report as multipart/form-data with a file and lat and lon fields."}
+		return sub, &report.Error{Status: http.StatusBadRequest, Code: "not_multipart", Key: "not_multipart", Message: "Send the report as multipart/form-data with a file and lat and lon fields."}
 	}
 	mr, err := r.MultipartReader()
 	if err != nil {
-		return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_multipart", Message: "The upload could not be read."}
+		return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_multipart", Key: "bad_multipart", Message: "The upload could not be read."}
 	}
 	var latS, lonS string
 	for parts := 0; ; parts++ {
 		if parts > 12 {
-			return sub, &report.Error{Status: http.StatusBadRequest, Code: "too_many_parts", Message: "The form has too many parts."}
+			return sub, &report.Error{Status: http.StatusBadRequest, Code: "too_many_parts", Key: "too_many_parts", Message: "The form has too many parts."}
 		}
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -62,7 +62,7 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 				return sub, tooLargeOr(err, "The file could not be read.")
 			}
 			if int64(len(data)) > maxFile {
-				return sub, &report.Error{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Message: fmt.Sprintf("Files can be up to %d MB.", maxFile>>20)}
+				return sub, &report.Error{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Key: "too_large_file", Args: []any{maxFile >> 20}, Message: fmt.Sprintf("Files can be up to %d MB.", maxFile>>20)}
 			}
 			if len(data) > 0 {
 				sub.Files = append(sub.Files, report.File{Field: name, Filename: part.FileName(), Data: data})
@@ -85,7 +85,7 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 		case "hint_reference":
 			if v != "" {
 				if !hintReferences[v] {
-					return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_hint", Message: "hint_reference must be two_wheeler_wheel, car_wheel, auto_wheel, kerb or person."}
+					return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_hint", Key: "bad_hint_ref", Message: "hint_reference must be two_wheeler_wheel, car_wheel, auto_wheel, kerb or person."}
 				}
 				sub.HintReference = v
 			}
@@ -93,7 +93,7 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 			if v != "" {
 				d, err := strconv.ParseFloat(v, 64)
 				if err != nil || d < 10 || d > 150 {
-					return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_hint", Message: "The wheel diameter must be a number of centimetres between 10 and 150."}
+					return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_hint", Key: "bad_hint_diameter", Message: "The wheel diameter must be a number of centimetres between 10 and 150."}
 				}
 				sub.HintDiameterCm = &d
 			}
@@ -103,7 +103,7 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 		lat, err1 := strconv.ParseFloat(strings.TrimSpace(latS), 64)
 		lon, err2 := strconv.ParseFloat(strings.TrimSpace(lonS), 64)
 		if err1 != nil || err2 != nil || math.IsNaN(lat) || math.IsNaN(lon) {
-			return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_location", Message: "Latitude and longitude must be decimal numbers, such as 12.9791 and 80.2209."}
+			return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_location", Key: "bad_location", Message: "Latitude and longitude must be decimal numbers, such as 12.9791 and 80.2209."}
 		}
 		sub.Lat, sub.Lon, sub.HasLocation = lat, lon, true
 	}
@@ -113,9 +113,9 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 func tooLargeOr(err error, msg string) *report.Error {
 	var mbe *http.MaxBytesError
 	if errors.As(err, &mbe) {
-		return &report.Error{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Message: "The upload is larger than the limit."}
+		return &report.Error{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Key: "too_large_upload", Message: "The upload is larger than the limit."}
 	}
-	return &report.Error{Status: http.StatusBadRequest, Code: "bad_multipart", Message: msg}
+	return &report.Error{Status: http.StatusBadRequest, Code: "bad_multipart", Key: "bad_multipart", Message: msg}
 }
 
 func asReportError(err error) *report.Error {
@@ -124,9 +124,9 @@ func asReportError(err error) *report.Error {
 		return re
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return &report.Error{Status: http.StatusServiceUnavailable, Code: "timeout", Message: "The report took too long to process. Please try again."}
+		return &report.Error{Status: http.StatusServiceUnavailable, Code: "timeout", Key: "timeout", Message: "The report took too long to process. Please try again."}
 	}
-	return &report.Error{Status: http.StatusInternalServerError, Code: "internal", Message: "Something went wrong while processing the report."}
+	return &report.Error{Status: http.StatusInternalServerError, Code: "internal", Key: "internal", Message: "Something went wrong while processing the report."}
 }
 
 // apiReport is POST /api/report (CONTRACTS.md section 3).
@@ -167,9 +167,10 @@ func (a *App) apiOverlay(w http.ResponseWriter, r *http.Request) {
 // gzip form and an ETag, so a burst of page loads costs the engine one
 // query and a browser that already has the data gets a 304.
 type cellsCache struct {
-	ttl time.Duration
-	mu  sync.Mutex
-	m   map[string]*cellsEntry
+	ttl      time.Duration
+	mu       sync.Mutex
+	m        map[string]*cellsEntry
+	inflight map[string]*cellsCall
 }
 
 type cellsEntry struct {
@@ -177,10 +178,35 @@ type cellsEntry struct {
 	gz   []byte
 	etag string
 	at   time.Time
+
+	previewOnce sync.Once
+	preview     web.PreviewView
+}
+
+// cellsCall is one engine fetch that concurrent misses for the same key
+// share, so fifty viewers arriving as the entry expires cost one query and
+// one compression, not fifty.
+type cellsCall struct {
+	done chan struct{}
+	e    *cellsEntry
+	err  error
 }
 
 func newCellsCache(ttl time.Duration) *cellsCache {
-	return &cellsCache{ttl: ttl, m: map[string]*cellsEntry{}}
+	return &cellsCache{ttl: ttl, m: map[string]*cellsEntry{}, inflight: map[string]*cellsCall{}}
+}
+
+// Preview is the landing page's schematic of these cells, built once per
+// snapshot.
+func (e *cellsEntry) Preview() web.PreviewView {
+	e.previewOnce.Do(func() {
+		cells, err := upstream.DecodeCells(e.body)
+		if err != nil {
+			cells = nil
+		}
+		e.preview = web.NewPreview(cells)
+	})
+	return e.preview
 }
 
 func (c *cellsCache) get(key string) (*cellsEntry, bool) {
@@ -217,7 +243,37 @@ func (a *App) cellsFor(ctx context.Context, bbox config.BBox) (*cellsEntry, erro
 		a.Metrics.CellsCache.Inc("hit")
 		return e, nil
 	}
+	a.cells.mu.Lock()
+	if c, ok := a.cells.inflight[key]; ok {
+		a.cells.mu.Unlock()
+		a.Metrics.CellsCache.Inc("shared")
+		select {
+		case <-c.done:
+			return c.e, c.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	c := &cellsCall{done: make(chan struct{})}
+	a.cells.inflight[key] = c
+	a.cells.mu.Unlock()
 	a.Metrics.CellsCache.Inc("miss")
+
+	// The shared fetch must not die with the first caller's request.
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	c.e, c.err = a.fetchCells(fctx, key)
+	if c.err == nil {
+		a.cells.put(key, c.e)
+	}
+	a.cells.mu.Lock()
+	delete(a.cells.inflight, key)
+	a.cells.mu.Unlock()
+	close(c.done)
+	return c.e, c.err
+}
+
+func (a *App) fetchCells(ctx context.Context, key string) (*cellsEntry, error) {
 	raw, err := a.Engine.Cells(ctx, key)
 	if err != nil {
 		return nil, err
@@ -227,9 +283,7 @@ func (a *App) cellsFor(ctx context.Context, bbox config.BBox) (*cellsEntry, erro
 		return nil, err
 	}
 	sum := sha256.Sum256(body)
-	e := &cellsEntry{body: body, gz: web.CompressBest(body), etag: `"` + hex.EncodeToString(sum[:12]) + `"`, at: time.Now()}
-	a.cells.put(key, e)
-	return e, nil
+	return &cellsEntry{body: body, gz: web.CompressBest(body), etag: `"` + hex.EncodeToString(sum[:12]) + `"`, at: time.Now()}, nil
 }
 
 // apiCells is GET /api/cells?bbox=minLon,minLat,maxLon,maxLat. Without a

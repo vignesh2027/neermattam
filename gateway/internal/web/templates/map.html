@@ -1,68 +1,68 @@
 {{define "content"}}
-<section class="map-page" aria-label="Live flood depth map of Chennai">
-  <div id="map" class="map-full" role="region" aria-label="Map. Click a hex cell for its depth, uncertainty, hazard and reports."></div>
+<section class="map-page" aria-label="{{t "map.aria"}}">
+  <div id="map" class="map-full" role="region" aria-label="{{t "map.region_aria"}}"></div>
   {{if .CellsJSON}}<script type="application/json" id="cells-data" data-etag="{{.CellsETag}}">{{.CellsJSON}}</script>{{end}}
 
   <div class="overlay glass status-card">
-    <h1><span class="live-dot" id="live-dot" aria-hidden="true"></span>Chennai flood depth, live</h1>
-    <p class="sub">Measured from street photos, fused into 66 m hex cells. Click a cell for details.</p>
+    <h1><span class="live-dot" id="live-dot" aria-hidden="true"></span>{{t "map.title"}}</h1>
+    <p class="sub">{{t "map.sub"}}</p>
     <div class="stats" aria-live="polite">
-      <div class="stat"><b id="st-cells">{{.Stats.Cells}}</b><span>cells<span class="lg-only"> with evidence</span></span></div>
-      <div class="stat"><b id="st-deep">{{.Stats.Deep}}</b><span>over 30 cm</span></div>
-      <div class="stat"><b id="st-max">{{.Stats.Max}}</b><span>deepest<span class="lg-only"> mean</span></span></div>
+      <div class="stat"><b id="st-cells">{{.Stats.Cells}}</b><span><span class="lg-only">{{t "map.stat_cells"}}</span><span class="sm-only">{{t "map.stat_cells_short"}}</span></span></div>
+      <div class="stat"><b id="st-deep">{{.Stats.Deep}}</b><span>{{t "map.stat_deep"}}</span></div>
+      <div class="stat"><b id="st-max">{{.Stats.Max}}</b><span><span class="lg-only">{{t "map.stat_max"}}</span><span class="sm-only">{{t "map.stat_max_short"}}</span></span></div>
     </div>
     {{if .Demo}}
     <div class="sim-banner" role="note">
       {{template "icon-flask"}}
-      <span><strong>Simulated scenario.</strong> <span class="lg-only">Water at the 2023 Michaung low points is invented for this demo. Real reports are outlined and labelled.</span><span class="sm-only">Depths are invented for this demo.</span></span>
+      <span><strong>{{t "sim.title"}}</strong> <span class="lg-only">{{t "sim.long"}}</span><span class="sm-only">{{t "sim.short"}}</span></span>
     </div>
     {{end}}
   </div>
 
   <details class="overlay glass legend" id="legend" open>
-    <summary>Legend {{template "icon-chev"}}</summary>
+    <summary>{{t "legend.title"}} {{template "icon-chev"}}</summary>
     <div class="legend-body">
       <fieldset class="legend-toggle" style="border:0;margin:0 0 10px;padding:3px">
-        <legend class="visually-hidden">Colour cells by</legend>
-        <label><input type="radio" name="colour" value="depth" checked><span>Depth</span></label>
-        <label><input type="radio" name="colour" value="hazard"><span>Hazard</span></label>
+        <legend class="visually-hidden">{{t "legend.colour_by"}}</legend>
+        <label><input type="radio" name="colour" value="depth" checked><span>{{t "legend.depth"}}</span></label>
+        <label><input type="radio" name="colour" value="hazard"><span>{{t "legend.hazard"}}</span></label>
       </fieldset>
       <div class="ramp" id="scale-depth">
         <div class="ramp-bar" aria-hidden="true"><i style="background:#BAE6FD"></i><i style="background:#38BDF8"></i><i style="background:#2563EB"></i><i style="background:#4C1D95"></i><i style="background:#9F1239"></i></div>
         <div class="ramp-labels"><span>0</span><span>15</span><span>30</span><span>50</span><span>80+ cm</span></div>
-        <p class="visually-hidden">Depth bands: under 15 cm, 15 to 30, 30 to 50, 50 to 80, and over 80 centimetres.</p>
-        <p class="ramp-note">Above 15 cm is over the car, auto and two-wheeler limit; above 30 cm is over the bus limit.</p>
+        <p class="visually-hidden">{{t "legend.bands_a11y"}}</p>
+        <p class="ramp-note">{{t "legend.depth_note"}}</p>
       </div>
       <div class="ramp" id="scale-hazard" hidden>
         <div class="ramp-bar four" aria-hidden="true"><i style="background:#BAE6FD"></i><i style="background:#38BDF8"></i><i style="background:#4C1D95"></i><i style="background:#9F1239"></i></div>
-        <div class="ramp-labels four"><span>Caution</span><span>Some</span><span>Most</span><span>All</span></div>
-        <p class="ramp-note">Danger for some (children, the elderly), for most, or for all including the emergency services. HR = d × (v + 0.5) + DF, after UK Defra.</p>
+        <div class="ramp-labels four"><span>{{t "legend.h_caution"}}</span><span>{{t "legend.h_some"}}</span><span>{{t "legend.h_most"}}</span><span>{{t "legend.h_all"}}</span></div>
+        <p class="ramp-note">{{t "legend.hazard_note"}} HR = d × (v + 0.5) + DF.</p>
       </div>
       <ul class="keys">
-        <li><span class="sw sw-hatch" aria-hidden="true"></span>Unknown: reported, too uncertain</li>
-        <li><span class="sw sw-none" aria-hidden="true"></span>No reports: never assumed safe</li>
-        {{if .Demo}}<li><span class="sw sw-real" aria-hidden="true"></span>Real report, outlined</li>{{end}}
+        <li><span class="sw sw-hatch" aria-hidden="true"></span>{{t "legend.unknown"}}</li>
+        <li><span class="sw sw-none" aria-hidden="true"></span>{{t "legend.no_reports"}}</li>
+        {{if .Demo}}<li><span class="sw sw-real" aria-hidden="true"></span>{{t "legend.real"}}</li>{{end}}
       </ul>
     </div>
   </details>
 
   <aside class="overlay glass feed" aria-labelledby="feed-title">
-    <h2 id="feed-title">Latest reports <span class="chip chip-grey" id="feed-state">Live</span></h2>
+    <h2 id="feed-title">{{t "feed.title"}} <span class="chip chip-grey" id="feed-state">{{t "js.live"}}</span></h2>
     <ol id="feed" aria-live="polite">
       {{range .Feed}}
       <li class="{{if .Simulated}}is-sim{{else}}is-real{{end}}">
         <span class="depth-badge {{if lt .DepthCm 15.0}}light{{end}}" style="background:{{depthColor .DepthCm}}">{{printf "%.0f" .DepthCm}}</span>
-        <span class="meta"><b>{{capitalise .Place}}</b><span>{{if .Simulated}}Simulated · {{else}}Real {{.Source}} report · {{end}}± {{printf "%.0f" .DepthSigmaCm}} cm · <time data-at="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{ago .At}}</time></span></span>
+        <span class="meta"><b>{{place .Place}}</b><span>{{if .Simulated}}{{t "js.simulated"}}{{else}}{{t (printf "js.real_%s" .Source)}}{{end}} · ± {{printf "%.0f" .DepthSigmaCm}} cm · <time data-at="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{ago .At}}</time></span></span>
       </li>
       {{else}}
-      <li class="empty" id="feed-empty" style="display:block;border:0;background:none;padding:0">No reports yet. Reports appear here the moment they are fused.</li>
+      <li class="empty" id="feed-empty" style="display:block;border:0;background:none;padding:0">{{t "feed.empty"}}</li>
       {{end}}
     </ol>
   </aside>
 
   <div class="overlay map-actions">
-    <p class="advisory-pill" role="note">{{template "icon-alert"}}Advisory only. Check local news and official alerts.</p>
-    <a class="btn btn-primary btn-lg" href="/report" id="report-here">{{template "icon-camera"}}Report water here</a>
+    <p class="advisory-pill" role="note">{{template "icon-alert"}}{{t "advisory.short"}}</p>
+    <a class="btn btn-primary btn-lg" href="/report" id="report-here">{{template "icon-camera"}}{{t "map.report_here"}}</a>
   </div>
 </section>
 {{end}}
@@ -98,11 +98,11 @@ document.addEventListener("DOMContentLoaded", function () {
         var max = known.reduce(function (a, f) { return Math.max(a, f.properties.depth_cm); }, 0);
         document.getElementById("st-cells").textContent = list.length.toLocaleString();
         document.getElementById("st-deep").textContent = deep.toLocaleString();
-        document.getElementById("st-max").textContent = known.length ? Math.round(max) + " cm" : "None";
+        document.getElementById("st-max").textContent = known.length ? Math.round(max) + " cm" : NM.tr("js.none");
       },
       onStatus: function (s) {
         dot.setAttribute("data-state", s);
-        feedState.textContent = s === "up" ? "Live" : "Reconnecting";
+        feedState.textContent = NM.tr(s === "up" ? "js.live" : "js.reconnecting");
       },
       onReport: addFeed
     });
@@ -141,8 +141,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var badge = NM.el("span", "depth-badge" + (item.depth_cm < 15 ? " light" : ""), Math.round(item.depth_cm));
     badge.style.background = NM.depthColor(item.depth_cm);
     var meta = NM.el("span", "meta");
-    meta.appendChild(NM.el("b", null, item.place.charAt(0).toUpperCase() + item.place.slice(1)));
-    var sub = NM.el("span", null, (item.simulated ? "Simulated" : "Real " + item.source + " report") + " · ± " + Math.round(item.depth_sigma_cm) + " cm · ");
+    meta.appendChild(NM.el("b", null, NM.place(item.place)));
+    var sub = NM.el("span", null, NM.tr(item.simulated ? "js.simulated" : "js.real_" + item.source) + " · ± " + Math.round(item.depth_sigma_cm) + " cm · ");
     var t = NM.el("time", null, NM.ago(item.at)); t.setAttribute("data-at", item.at);
     sub.appendChild(t); meta.appendChild(sub);
     li.appendChild(badge); li.appendChild(meta);

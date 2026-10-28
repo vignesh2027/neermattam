@@ -342,7 +342,7 @@ func ReplyText(o *report.Outcome, publicURL string) string {
 	}
 	b.WriteString(" " + report.Advisory)
 	if publicURL != "" && o.Status == report.StatusFused {
-		fmt.Fprintf(&b, " Live map: %s/?at=%.5f,%.5f", publicURL, o.Lat, o.Lon)
+		fmt.Fprintf(&b, " Live map: %s/map?at=%.5f,%.5f", publicURL, o.Lat, o.Lon)
 	}
 	return b.String()
 }

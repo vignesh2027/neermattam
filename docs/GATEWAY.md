@@ -1,14 +1,15 @@
 # Neermattam gateway
 
-The gateway is the Go service at `gateway/` (port 8080) and the only service the public can reach. It serves the four pages, takes reports from the web and WhatsApp, checks them, hands them to perception and the engine, and fans the engine's live cell stream out to browsers. It is written with the standard library only: `net/http` with method patterns, `log/slog`, `html/template` and `embed`. There are no third-party Go modules.
+The gateway is the Go service at `gateway/` (port 8080) and the only service the public can reach. It serves the five pages in eight languages, takes reports from the web and WhatsApp, checks them, hands them to perception and the engine, and fans the engine's live cell stream out to browsers. It is written with the standard library only: `net/http` with method patterns, `log/slog`, `html/template` and `embed`. There are no third-party Go modules.
 
-![Live map](img/gateway-map.png)
+![Landing page](img/gateway-home.png)
 
 ## Pages
 
 | Path | What it is |
 |---|---|
-| `/` | The live map. Hex cells from `/api/cells`, updated over `/api/stream`. Legend for depth bands and hazard classes, a popup per cell (depth plus or minus sigma, upper estimate, velocity, hazard, reports, age, origin), a live report ticker, and the advisory note. |
+| `/` | The landing page: the hero line, a live preview of the map, how it works in four steps, a recorded agent trace, the two Meta models, who it is for, honest numbers read from the project's documents, and the safety note. See [Landing page](#landing-page). `/?at=...` (the old map link format) redirects to `/map`. |
+| `/map` | The live map. Hex cells from `/api/cells`, updated over `/api/stream`. Legend for depth bands and hazard classes, a popup per cell (depth plus or minus sigma, upper estimate, velocity, hazard, reports, age, origin), a live report ticker, and the advisory note. |
 | `/report` | Upload a photo, a short video or a voice note, with a location from a map tap, the device or typed coordinates. Shows the real pipeline stages as they happen and ends with the result card. |
 | `/route` | Pick start and end on the map or from presets (Velachery station, Guindy, T. Nagar, Tambaram, Chennai Central) and a vehicle. Draws the water-aware route and the shortest route in two styles, with the engine's summary and explanation. |
 | `/about` | How it works, the hazard formula and vehicle limits, checks, credits and limitations. |
@@ -19,6 +20,7 @@ Base map: OpenFreeMap's Positron style, recoloured toward the palette at load ti
 
 | Desktop | Mobile |
 |---|---|
+| ![Live map](img/gateway-map.png) | ![Live map on a phone](img/gateway-map-mobile.png) |
 | ![Agent trace arriving live](img/gateway-report-trace-live.png) | ![Agent trace on a phone](img/gateway-report-trace-live-mobile.png) |
 | ![A model estimate](img/gateway-report-result.png) | ![A model estimate on a phone](img/gateway-report-result-mobile.png) |
 | ![A Tamil voice note](img/gateway-report-voice.png) | ![An English voice note on a phone](img/gateway-report-voice-mobile.png) |
@@ -30,6 +32,83 @@ Where the report screenshots come from, because it matters:
 - `gateway-report-real-rejected.png` and `gateway-report-waiting.png` are a live run of the real perception service on the Commons photo "India - Chennai - Monsoon - 04" by McKay Savage (CC BY 2.0). Perception found no measurable wheel and returned a model estimate; the gateway refused it because the photo was taken in 2008.
 - `gateway-report-trace*.png` and `gateway-report-result*.png` replay a recorded live perception response, `eval/out/x2.json` (Muse Spark Open and SAM 2.1 on "India - Chennai - Monsoon - 02" by McKay Savage, CC BY 2.0), through a small server that sends its 18 steps over `/v1/measure/stream`, since that endpoint was still being built. Every step, output and latency is the recorded one; only the pacing between steps is the replay's. Its `captured_at` was set to null so the 2008 photo is not refused as stale.
 - `gateway-report-result-geometry.png` uses a fixture perception server on a synthetic scene (`perception/src/neermattam_perception/synth.py`), because no real photo has yet produced a wheel measurement (see `eval/RESULTS_REAL.md`). Its overlay says "TEST FIXTURE" and its models are named `fixture-scene` and `fixture-masks`. It shows the interface for a measurement with a model estimate beside it, not a measurement.
+
+## Landing page
+
+`/` is rendered on the server like every other page. Its only script is about 30 lines of inline glue that recolours the preview from `/api/stream`; with script off the page is complete, just not live.
+
+- **Hero.** The logo, the line "Forecasts say where Chennai will flood. Neermattam measures how deep it is on your street.", a short lead, "Open the live map" and "Report water", and the advisory line.
+- **Live preview.** An SVG schematic of south and central Chennai (Velachery, Pallikaranai, Madipakkam, Guindy, Saidapet, T. Nagar) drawn from the same 2-second cells cache as `/api/cells`, with unknown cells hatched and locality labels from `internal/places`. At this scale a 66 m cell is about 3 pixels wide, so each depth band is one `<path>` of relative hexagon outlines rather than one element per cell: 1,325 demo cells take 57 KB of markup instead of 178 KB. Cells that change while the page is open are drawn on top by the glue. The preview is built once per cells snapshot and shared between requests. It links to `/map`.
+- **How it works**, four steps: photograph a wheel, the models read it, checked and fused, routed around the water.
+- **Agent trace.** Seven cards from a real recorded run, `eval/out/x2.json` (Muse Spark Open and SAM 2.1 on "India - Chennai - Monsoon - 02" by McKay Savage, CC BY 2.0), with the step count of the whole run, each step's target, output, decision, model, input and recorded latency, and the photo credit and run date. The model outputs are shown in the models' own words (English) in every language.
+- **Built on Meta's open models**: Muse Spark Open (reasoning, served by Baseten) and SAM 2.1 (segmentation), the two that actually run. SAM 3.1 is named only as what the configuration will switch to when its weights are available.
+- **Who it is for**: commuters, delivery riders, auto drivers, families, city control rooms.
+- **Honest numbers**, each with its source file named on the card:
+
+| Card | Read from | Today |
+|---|---|---|
+| Routing time on a dry map, Velachery station to Guindy, 3.5 km, plus the times with 200 and 2,000 reports and the machine | `docs/ENGINE.md`, the criterion table | 0.28 ms, 1.3 ms, 29 ms, an 8 GB M1 MacBook Air |
+| Mean depth error on synthetic scenes, median error, share measurable, share within the stated sigma | `docs/GEOMETRY.md`, the synth-eval block | 3.34 cm on 500 scenes, median 1.25 cm, 78 percent measurable, 85 percent within 1 sigma |
+| Real flood photos measured from a wheel | `eval/RESULTS_REAL.md`, the real-eval block | 0 of 6; all 6 got a labelled model estimate |
+
+  The synthetic card says synthetic scenes test the geometry and are not field accuracy; the real-photo card is drawn in the danger colour and says field accuracy needs photos with measured depths.
+- **Safety note**, then the footer with the data credits (OpenStreetMap ODbL, OpenFreeMap, Open-Meteo, the two Meta models).
+
+**Where the numbers come from.** Package `internal/facts` extracts them with regular expressions from the three documents and the recorded run. `go generate ./internal/facts` (which runs `cmd/factgen`) writes them to `internal/facts/facts.json`, which is embedded, because the deployed image copies only `gateway/`. At start the gateway reads the live documents under `REPO_ROOT` (default `..`) when they are there and falls back to the embedded copy otherwise. `TestEmbeddedFactsMatchTheDocs` fails when the documents change and `facts.json` was not regenerated, so a number on the page cannot drift from its source. No figure on the page is typed into a template.
+
+| Desktop | Mobile |
+|---|---|
+| ![Landing, English](img/gateway-home.png) | ![Landing on a phone, English](img/gateway-home-mobile.png) |
+| ![Landing, Tamil](img/gateway-home-ta.png) | ![Landing on a phone, Tamil](img/gateway-home-ta-mobile.png) |
+| ![Landing, Hindi](img/gateway-home-hi.png) | ![Landing on a phone, Hindi](img/gateway-home-hi-mobile.png) |
+
+The whole English page is in `img/gateway-home-full.png`.
+
+## Languages
+
+Every page, every message the server renders (result cards, verification reasons, errors, the trace, route summaries, durations, months) and the text the inline glue shows are available in English, Tamil, Hindi, Telugu, Kannada, Malayalam, Bengali and Marathi.
+
+- **Catalogues** are Go maps in `internal/i18n/messages_<code>.go`, 467 keys each, with English as the reference and the fallback for any missing key. Messages use `fmt` verbs, and `%[2]s` style indexes where a language puts the arguments in another order. Keys ending in `.html` carry a little trusted markup (bold numbers with `data-count` hooks for the live trace); every other message is escaped. Numbers and units stay as numerals (`34 cm`, `0.28 ms`). Place names, model names and model output are not translated.
+- **Choice of language**: `?lang=` first (remembered in a one-year `nm_lang` cookie, `SameSite=Lax`, `HttpOnly`), then that cookie, then `Accept-Language` with its q-values, then English. The header has a language menu, a plain `<details>` list of links that keep the current path and query, so it works without script. HTML responses carry `Vary: Cookie, Accept-Language, Accept-Encoding`; static files and the JSON API vary only on encoding.
+- **Templates** are parsed once per language at start with the language bound into the `t` and `th` functions, so rendering does no lookups by language. Text for the glue (popups, ticker, ages, errors) is rendered into a `<script type="application/json" id="i18n">` block and read with `NM.tr`.
+- **Server-made text** carries a key and arguments as well as its English sentence: verification reasons (`verify.RuleResult.Key`), pipeline errors (`report.Error.Key`), durations and ages. The English page uses the original sentences; other languages build theirs from the catalogue. The engine's route explanation is in English, so for other languages the route summary is rebuilt from the route's own numbers.
+- **Fonts.** The system font stack plus Inter for Latin, and Noto Sans Tamil, Devanagari (Hindi and Marathi), Telugu, Kannada, Malayalam or Bengali from Google Fonts, the only external stylesheet, loaded only on pages in that language with `display=optional`. A first visit on a slow link keeps the system font rather than swapping fonts under the reader; later visits use Noto from the cache. The URL is built in Go from the fixed language table, because `html/template` would otherwise escape the `+` in `Noto+Sans+Tamil` to `%2b`, which Google Fonts refuses with a 400. Long-word scripts (Tamil, Malayalam, Telugu, Kannada) get a smaller hero headline and no negative tracking, so the buttons stay above the fold at 1440 by 900 in every language.
+- **Tests**: every language has exactly the English keys; every translation keeps its placeholders (compared by argument index) and its markup, and has no em dashes or arrows; every key the templates and code use exists, including keys built at run time; detection order and q-values; and every page renders in every language with the right `lang` attribute, the right font link, the cookie set and no rejected template values.
+
+At 390 pixels the header shows the mark without the wordmark, so the four links and the language button fit in all eight languages with no sideways scroll (checked in headless Chrome: document width 390, language button ending at 376).
+
+## Speed
+
+**Static files** are embedded and served from memory with fingerprinted names: `app.css` is linked as, for example, `app.806ec71c.css` (the first 8 hex digits of its SHA-256, so it changes with the file) with `Cache-Control: public, max-age=31536000, immutable`, an `ETag`, and a gzip copy made at start for text types. The plain name still works with a 5-minute cache. CSS `url()` references to fonts are rewritten to the fingerprinted names. Map pages preconnect to `tiles.openfreemap.org`; pages in an Indic language preconnect to the two Google Fonts hosts.
+
+**Landing page weight**, cold cache: HTML 81 KB (23 KB gzipped), CSS 11 KB, Inter 47 KB, the logo as WebP 15 KB (32 KB on a 2x screen), header mark 8 to 24 KB, about 105 KB on a desktop and 140 KB on a phone, plus the Noto stylesheet for an Indic language. Before this pass it was 371 KB, mostly a 281 KB PNG logo drawn 240 pixels wide and 178 KB of per-cell SVG. The logo, preview and header mark have fixed dimensions, so nothing moves while it loads.
+
+**Measured** with headless Chrome (software rendering, cache disabled) against the local gateway and engine with the 1,325-cell demo map, English, Tamil and Hindi, desktop and phone sizes, 13 loads:
+
+| | Result |
+|---|---|
+| Cumulative layout shift | 0 in every load |
+| Largest contentful paint (the headline or the lead) | 164 to 544 ms, median about 340 ms, excluding the two loads that include Chrome starting (1.3 s for the first desktop load) |
+| Load event | 80 to 958 ms; the slowest was Tamil, which waits for the Google Fonts stylesheet |
+| Server time for `/` | about 11 ms (curl, warm) |
+
+The machine was running other builds at the time (load average 2 to 3; an earlier attempt at a load average of 17 gave up to 2.5 s), so these show the shape, not a benchmark.
+
+**Fifty map viewers.** `go run ./cmd/loadtest -n 50 -d 60s -pid <gateway pid>` starts 50 simulated viewers over 2 seconds. Each loads `/map` and its eight static files as a first visit, fetches `/api/cells`, holds `/api/stream` open, and revalidates `/api/cells` with its ETag every 15 seconds. The tool samples the gateway's resident memory and CPU time from `ps` once a second. All viewers share one address, so the gateway ran with `API_RATE_PER_MIN=100000 API_BURST=10000` (with the defaults the per-address limiter refuses them, as it should). Local run, 28 October 2026, 8 GB M1 MacBook Air:
+
+| | Demo drip every 6 s (default) | Demo drip every 1 s |
+|---|---|---|
+| `GET /map` p50 / p95 / max | 11.1 / 42.1 / 123.6 ms | 11.1 / 39.6 / 121.3 ms |
+| `GET /api/cells` revalidation p50 / p95 | 0.9 / 73.9 ms | 0.7 / 85.3 ms |
+| Static files p95 | 0.3 ms | 0.3 ms |
+| Cell events delivered | 3,367 (63 to 70 per viewer) | 20,769 (406 to 420 per viewer) |
+| Errors | none | none |
+| Gateway memory (RSS) start / mean / peak | 41.7 / 52.1 / 64.3 MB | 44.7 / 45.3 / 65.9 MB |
+| Gateway CPU, mean | 2.4 percent of one core | 3.0 percent of one core |
+
+The per-viewer spread in events is viewers joining during the 2-second ramp. Revalidations all return 200 because the demo changes the map faster than the 15-second interval; the p95 is the moment the 2-second cache expires and one viewer waits for the engine query and compression. Concurrent misses for the same area share that one query and one compression (`TestConcurrentCellMissesShareOneQuery`); before that change the first run's `/map` p95 was 229 ms.
+
+The load test found a real bug: the demo's reading ids came from a fixed seed, so a gateway restarted against a running engine replayed ids the engine had already seen, the engine dropped them as duplicates, and the live map stopped moving. Reading ids now mix in a random salt chosen at start; the scenario itself still comes from the fixed seed and looks the same every run (`TestReadingIDsDifferBetweenRuns`).
 
 ## Request path
 
@@ -93,7 +172,7 @@ When the voice model gives no depth, words such as "ankle", "knee" or "waist" (a
 
 ## Live map and the cell proxy
 
-`GET /api/cells` proxies `/v1/cells` for the whole service area (or a `bbox`), caches each answer for 2 seconds, and serves it gzipped at the best ratio with an `ETag`; a matching `If-None-Match` gets 304 with no body. A crowd opening the map costs the engine one query every 2 seconds.
+`GET /api/cells` proxies `/v1/cells` for the whole service area (or a `bbox`), caches each answer for 2 seconds, and serves it gzipped at the best ratio with an `ETag`; a matching `If-None-Match` gets 304 with no body. A crowd opening the map costs the engine one query every 2 seconds: requests that miss the cache together wait for one shared fetch, which is not cancelled when the request that started it goes away.
 
 The payload is compacted for the map: coordinates are rounded to 5 decimals (about a metre, against a 66 m cell), and only the fields the map and its popup use are kept (depth, sigma and upper estimate, velocity and its sigma, whether velocity was assumed, hazard rating and class, unknown, report counts, update time, origin). Debris factor, the upper hazard class and the duplicate top-level id stay in the engine's API. Measured locally with the 1,325-cell demo map:
 
@@ -130,7 +209,7 @@ The rest is MapLibre and the base map, which come from OpenFreeMap. These are tw
 
 Simulated and real evidence are never mixed unlabelled:
 
-- Simulated readings have ids starting with `sim_` and no `source`.
+- Simulated readings have ids starting with `sim_` and no `source`. The ids include a random salt chosen when the gateway starts, so a restarted gateway is not deduplicated by an engine that kept running.
 - The gateway labels every cell it serves as `simulated`, `reported` or `mixed`. The engine streams a reading's seven changed cells before the gateway sees its response, so before each post the gateway registers a 160 m zone around the point for 15 seconds, and a streamed cell whose centre falls inside is labelled from it.
 - The map shows a "Simulated scenario" banner, outlines real cells, tags the ticker, and the popup, result card and route summary all say when simulated water is involved.
 - Verification never compares a real report with simulated cells.
@@ -173,10 +252,10 @@ The logo is the user's design: `gateway/brand-src/neermattam-logo-original.png` 
 
 - the mark alone, the wave N and the drop with the background removed, at 64, 128 and 512 pixels. The backdrop is removed by growing a region from the image border across the smooth light-blue background; the artwork's edges stop it, so pale parts of the N survive;
 - `favicon.ico` (16, 32 and 48), `favicon-32.png` and a 180-pixel `apple-touch-icon.png` on the theme background;
-- `logo-full.png`, the mark and wordmark, shown on the About page;
+- `logo-full.png`, the mark and wordmark, shown on the About page, and `logo-240.webp` and `logo-480.webp` from the same crop for the landing page (15 KB and 33 KB against the PNG's 281 KB);
 - `og-card.png`, a 1200 by 630 Open Graph card with the tagline "Street-level flood depth for Chennai, from one photo" and the depth scale.
 
-The header shows the mark (64 or 128 pixels for high-density screens) beside the existing "Neermattam / நீர்மட்டம் · water level" text. Every page links the favicons and carries Open Graph and Twitter card tags; the image URL is built from `PUBLIC_URL`, so set that to the public address.
+The header shows the mark (64 or 128 pixels for high-density screens) beside the "Neermattam / நீர்மட்டம் · water level" text, the second line translated into the page language; below 480 pixels the mark stands alone. Every page links the favicons and carries Open Graph and Twitter card tags; the image URL is built from `PUBLIC_URL`, so set that to the public address.
 
 ![Header at twice the density](img/gateway-header.png)
 
@@ -192,6 +271,7 @@ The header shows the mark (64 or 128 pixels for high-density screens) beside the
 | `ENGINE_TIMEOUT`, `ROUTE_TIMEOUT`, `PERCEPTION_TIMEOUT`, `WEATHER_TIMEOUT` | `5s`, `20s`, `240s`, `4s` | Upstream timeouts |
 | `REPLY_DEADLINE` | `4m30s` | Deadline for every non-streaming reply, from the start of the request |
 | `GATEWAY_DATA_DIR` | `../data/gateway` | Where `provenance.json` is kept; empty disables it |
+| `REPO_ROOT` | `..` | Where the landing page reads its numbers live (`docs/`, `eval/`); the embedded copy is used when they are absent |
 | `GATEWAY_BBOX` | `80.10,12.85,80.33,13.24` | Service area, same as the engine |
 | `MAX_IMAGE_BYTES`, `MAX_VIDEO_BYTES`, `MAX_AUDIO_BYTES` | 12 MiB, 40 MiB, 8 MiB | Upload sizes |
 | `MAX_VIDEO_SECONDS` | `30` | Video length |
@@ -217,7 +297,8 @@ Locally, next to the engine:
 ```sh
 cd engine && ENGINE_SNAPSHOT_PATH=/tmp/neermattam-demo-cells.json cargo run --release &
 cd gateway && DEMO=1 go run ./cmd/neermattam-gateway
-# open http://localhost:8080
+# open http://localhost:8080 (landing) or http://localhost:8080/map
+# a language: http://localhost:8080/?lang=ta
 ```
 
 With Docker (the OSM extract must be at `data/osm/chennai-roads.osm.pbf`; see ENGINE.md):
@@ -235,6 +316,7 @@ cd gateway
 go test ./...
 go vet ./...
 gofmt -l .
+go generate ./internal/facts   # after ENGINE.md, GEOMETRY.md or RESULTS_REAL.md change
 ```
 
-The tests use `httptest` fakes for the engine (including its SSE stream) and perception, a fake Graph API and a fake rainfall source. They cover a fixed clock for every check of capture times (no test depends on today's date), the overlay re-encode and its LRU, a report reply under 30 KB with a multi-megabyte overlay, compact cells with ETag and 304, the cells inlined in the map page, provenance surviving a restart in demo mode, the stage and live step events in order, the fallback when perception has no stream (and that it is probed once), the model-estimate card and its trust, both readings beside a measurement, perception's `captured_at` winning over the photo's own EXIF and an explicit null meaning none, voice reports end to end with a Tamil transcript, trace step classification, upload limits (size, video length, missing header, disguised files, location, area), rate limiting and `Retry-After`, exact and near duplicates, the full report path with the reading the engine receives, the NDJSON stages, every verification rule, Open-Meteo summing and caching, WhatsApp signatures (good, tampered, missing, wrong secret), the handshake, pairing and the pairing window, template rendering of every page (no rejected values, no em dashes or arrows, every inline script carrying the CSP nonce), the cell cache and origin labels, the SSE fan-out with its client limit and resync, readiness, metrics format, gzip of static files, MP4 duration parsing, EXIF capture times and the demo scenario's validity.
+The tests use `httptest` fakes for the engine (including its SSE stream) and perception, a fake Graph API and a fake rainfall source. They cover a fixed clock for every check of capture times (no test depends on today's date), the overlay re-encode and its LRU, a report reply under 30 KB with a multi-megabyte overlay, compact cells with ETag and 304, the cells inlined in the map page, provenance surviving a restart in demo mode, the stage and live step events in order, the fallback when perception has no stream (and that it is probed once), the model-estimate card and its trust, both readings beside a measurement, perception's `captured_at` winning over the photo's own EXIF and an explicit null meaning none, voice reports end to end with a Tamil transcript, trace step classification, upload limits (size, video length, missing header, disguised files, location, area), rate limiting and `Retry-After`, exact and near duplicates, the full report path with the reading the engine receives, the NDJSON stages, every verification rule, Open-Meteo summing and caching, WhatsApp signatures (good, tampered, missing, wrong secret), the handshake, pairing and the pairing window, template rendering of every page (no rejected values, no em dashes or arrows, every inline script carrying the CSP nonce) and of every page in all eight languages (`lang` attribute, font link, language cookie), the translation catalogues (every key in every language, placeholders and markup kept, every used key defined, language detection), the landing numbers matching the documents they come from, concurrent cell-cache misses sharing one engine query, demo reading ids differing between runs, the cell cache and origin labels, the SSE fan-out with its client limit and resync, readiness, metrics format, gzip of static files, MP4 duration parsing, EXIF capture times and the demo scenario's validity.

@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"neermattam/gateway/internal/config"
@@ -47,12 +48,23 @@ type Error struct {
 	Status  int    `json:"-"`
 	Code    string `json:"code"`
 	Message string `json:"error"`
+	// Key and Args let the web pages show the message in the reader's
+	// language; Message is the English text the API returns.
+	Key  string `json:"-"`
+	Args []any  `json:"-"`
 }
 
 func (e *Error) Error() string { return e.Message }
 
 func fail(status int, code, format string, args ...any) *Error {
-	return &Error{Status: status, Code: code, Message: fmt.Sprintf(format, args...)}
+	return &Error{Status: status, Code: code, Message: fmt.Sprintf(format, args...), Key: code, Args: args}
+}
+
+// failKey is fail with a message key that differs from the code.
+func failKey(status int, code, key, format string, args ...any) *Error {
+	e := fail(status, code, format, args...)
+	e.Key = key
+	return e
 }
 
 // File is one uploaded part.
@@ -205,7 +217,9 @@ func (p *Pipeline) check(sub Submission) (*checked, error) {
 
 func (p *Pipeline) checkFile(f File) (*checked, error) {
 	if len(f.Data) == 0 {
-		return nil, fail(http.StatusBadRequest, "empty_file", "The file %q is empty.", f.Filename)
+		e := fail(http.StatusBadRequest, "empty_file", "The file %q is empty.", f.Filename)
+		e.Args = nil
+		return nil, e
 	}
 	typ, err := media.Sniff(f.Data)
 	if err != nil {
@@ -213,18 +227,28 @@ func (p *Pipeline) checkFile(f File) (*checked, error) {
 		if errors.Is(err, media.ErrUnsupported) && err.Error() != media.ErrUnsupported.Error() {
 			msg = "Unsupported file: " + err.Error()[len(media.ErrUnsupported.Error())+2:] + "."
 		}
-		return nil, fail(http.StatusUnsupportedMediaType, "unsupported_media", "%s", msg)
+		e := fail(http.StatusUnsupportedMediaType, "unsupported_media", "%s", msg)
+		e.Args = nil
+		switch {
+		case strings.Contains(err.Error(), "HEIC"):
+			e.Key = "unsupported_heic"
+		case strings.Contains(err.Error(), "WebP"):
+			e.Key = "unsupported_webp"
+		}
+		return nil, e
 	}
 	c := &checked{file: f, typ: typ, sum: sha256.Sum256(f.Data)}
 	c.info = MediaInfo{Kind: typ.Kind, MIME: typ.MIME, Bytes: len(f.Data), SHA256: hex.EncodeToString(c.sum[:])}
 	switch typ.Kind {
 	case media.Image:
 		if int64(len(f.Data)) > p.Cfg.MaxImageBytes {
-			return nil, fail(http.StatusRequestEntityTooLarge, "too_large", "Photos can be up to %d MB.", p.Cfg.MaxImageBytes>>20)
+			return nil, failKey(http.StatusRequestEntityTooLarge, "too_large", "too_large_photo", "Photos can be up to %d MB.", p.Cfg.MaxImageBytes>>20)
 		}
 		cfg, err := media.CheckImage(f.Data, p.Cfg.MaxPixels)
 		if err != nil {
-			return nil, fail(http.StatusBadRequest, "bad_image", "%s.", capitalise(err.Error()))
+			e := fail(http.StatusBadRequest, "bad_image", "%s.", capitalise(err.Error()))
+			e.Args = nil
+			return nil, e
 		}
 		c.info.Width, c.info.Height = cfg.Width, cfg.Height
 		if h, err := media.ImageDHash(f.Data); err == nil {
@@ -232,7 +256,7 @@ func (p *Pipeline) checkFile(f File) (*checked, error) {
 		}
 	case media.Video:
 		if int64(len(f.Data)) > p.Cfg.MaxVideoBytes {
-			return nil, fail(http.StatusRequestEntityTooLarge, "too_large", "Videos can be up to %d MB.", p.Cfg.MaxVideoBytes>>20)
+			return nil, failKey(http.StatusRequestEntityTooLarge, "too_large", "too_large_video", "Videos can be up to %d MB.", p.Cfg.MaxVideoBytes>>20)
 		}
 		d, err := media.MP4Duration(f.Data)
 		if err != nil {
@@ -245,7 +269,7 @@ func (p *Pipeline) checkFile(f File) (*checked, error) {
 		}
 	case media.Audio:
 		if int64(len(f.Data)) > p.Cfg.MaxAudioBytes {
-			return nil, fail(http.StatusRequestEntityTooLarge, "too_large", "Voice notes can be up to %d MB.", p.Cfg.MaxAudioBytes>>20)
+			return nil, failKey(http.StatusRequestEntityTooLarge, "too_large", "too_large_voice", "Voice notes can be up to %d MB.", p.Cfg.MaxAudioBytes>>20)
 		}
 	}
 	return c, nil
@@ -279,9 +303,13 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 	if m, dup := p.Dedupe.Check(c.sum, c.dhash, c.hasHash); dup {
 		p.count(sub.Channel, "duplicate")
 		if m.Exact {
-			return nil, fail(http.StatusConflict, "duplicate", "This exact file was already reported %s ago, so it is not counted twice.", ago(m.Ago))
+			e := fail(http.StatusConflict, "duplicate", "This exact file was already reported %s ago, so it is not counted twice.", ago(m.Ago))
+			e.Args = []any{verify.Age(m.Ago)}
+			return nil, e
 		}
-		return nil, fail(http.StatusConflict, "near_duplicate", "This photo looks the same as one reported %s ago (hash distance %d of 64), so it is not counted twice.", ago(m.Ago), m.Distance)
+		e := fail(http.StatusConflict, "near_duplicate", "This photo looks the same as one reported %s ago (hash distance %d of 64), so it is not counted twice.", ago(m.Ago), m.Distance)
+		e.Args = []any{verify.Age(m.Ago), m.Distance}
+		return nil, e
 	}
 
 	select {
@@ -474,11 +502,17 @@ func (p *Pipeline) upstreamFail(service string, err error) error {
 	var ue *upstream.Error
 	if errors.As(err, &ue) {
 		if ue.Status >= 400 && ue.Status < 500 {
-			return fail(http.StatusBadGateway, service+"_refused", "The %s service could not use this report: %s", serviceName(service), ue.Message)
+			e := fail(http.StatusBadGateway, service+"_refused", "The %s service could not use this report: %s", serviceName(service), ue.Message)
+			e.Args = []any{ue.Message}
+			return e
 		}
-		return fail(http.StatusBadGateway, service+"_error", "The %s service had a problem. Please try again shortly.", serviceName(service))
+		e := fail(http.StatusBadGateway, service+"_error", "The %s service had a problem. Please try again shortly.", serviceName(service))
+		e.Args = nil
+		return e
 	}
-	return fail(http.StatusServiceUnavailable, service+"_unavailable", "The %s service is not reachable right now. Please try again shortly.", serviceName(service))
+	e := fail(http.StatusServiceUnavailable, service+"_unavailable", "The %s service is not reachable right now. Please try again shortly.", serviceName(service))
+	e.Args = nil
+	return e
 }
 
 func serviceName(s string) string {

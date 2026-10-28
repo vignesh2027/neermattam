@@ -9,13 +9,35 @@ import (
 	"strings"
 	"time"
 
+	"neermattam/gateway/internal/i18n"
 	"neermattam/gateway/internal/ratelimit"
 	"neermattam/gateway/internal/web"
 )
 
 type ctxKey int
 
-const nonceKey ctxKey = 1
+const (
+	nonceKey ctxKey = 1
+	langKey  ctxKey = 2
+)
+
+func langFrom(ctx context.Context) string {
+	if l, ok := ctx.Value(langKey).(string); ok {
+		return l
+	}
+	return i18n.Default
+}
+
+// withLang picks the page language and remembers an explicit choice.
+func (a *App) withLang(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lang, explicit := i18n.Detect(r)
+		if explicit {
+			i18n.Remember(w, lang)
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), langKey, lang)))
+	})
+}
 
 func nonceFrom(ctx context.Context) string {
 	n, _ := ctx.Value(nonceKey).(string)

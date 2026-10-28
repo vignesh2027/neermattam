@@ -11,10 +11,10 @@
       {{if eq .Status "fused"}}<span class="chip chip-ok">{{.Title}}</span>{{else if eq .Status "rejected"}}<span class="chip chip-amber">{{.Title}}</span>{{else}}<span class="chip chip-grey">{{.Title}}</span>{{end}}
       {{if eq .Method "geometry"}}<span class="chip method-chip">{{template "icon-ruler"}}{{.MethodLabel}}</span>{{end}}
       {{if eq .Method "estimate"}}<span class="chip chip-violet method-chip">{{template "icon-eye"}}{{.MethodLabel}}</span>{{end}}
-      {{if eq .Source "voice"}}<span class="chip chip-violet method-chip">{{template "icon-mic"}}Voice estimate</span>{{end}}
+      {{if eq .Source "voice"}}<span class="chip chip-violet method-chip">{{template "icon-mic"}}{{t "result.voice_estimate"}}</span>{{end}}
     </p>
     {{if .HasDepth}}
-    <h2 id="res-title" class="res-depth"><b>{{.Depth}}<small>cm</small></b><span>± {{.Sigma}} cm</span><span class="visually-hidden">of water, plus or minus {{.Sigma}} centimetres</span></h2>
+    <h2 id="res-title" class="res-depth"><b>{{.Depth}}<small>cm</small></b><span>± {{.Sigma}} cm</span><span class="visually-hidden">{{t "result.depth_a11y" .Sigma}}</span></h2>
     <p class="res-place">{{.Place}} · {{.When}}</p>
     {{if .EstimateNote}}<p class="estimate-note">{{template "icon-eye"}}<span>{{.EstimateNote}}</span></p>{{end}}
     <div class="gauge{{if .Gauge.HasEstimate}} has-est{{end}}{{if or (eq .Method "estimate") (eq .Source "voice")}} is-est{{end}}" aria-hidden="true">
@@ -35,22 +35,22 @@
   <div class="res-body">
     {{if .Overlay}}
     <figure class="overlay-fig">
-      <img src="{{.Overlay}}" alt="The photo with the detected wheel outline and waterline drawn on it">
-      <figcaption>{{if eq .Method "estimate"}}Perception's overlay: what it found in the photo. No wheel outline passed its checks, so nothing here was measured.{{else}}What the models saw: the reference outline and the waterline.{{end}}</figcaption>
+      <img src="{{.Overlay}}" alt="{{t "result.overlay_alt"}}">
+      <figcaption>{{if eq .Method "estimate"}}{{t "result.overlay_estimate"}}{{else}}{{t "result.overlay_measured"}}{{end}}</figcaption>
     </figure>
     {{end}}
 
     {{if .Reasons}}
     <div>
-      <p class="section-title">Why</p>
+      <p class="section-title">{{t "result.why"}}</p>
       <ul class="reasons">{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>
-      <p class="small muted" style="margin-top:8px">Tips: stand a few metres away, keep the whole wheel in frame, side on, and include the point where it meets the water.</p>
+      <p class="small muted" style="margin-top:8px">{{t "result.tips"}}</p>
     </div>
     {{end}}
 
     {{with .Readings}}
     <div class="readings">
-      <p class="section-title">Two independent readings</p>
+      <p class="section-title">{{t "result.two_readings"}}</p>
       {{range .}}<div class="reading{{if .Primary}} primary{{end}}"><span class="r-label">{{.Label}}</span><b class="num">{{.Value}}</b>{{if .Note}}<span class="r-note">{{.Note}}</span>{{end}}</div>{{end}}
     </div>
     {{end}}
@@ -61,10 +61,10 @@
       <blockquote>{{.Transcript}}</blockquote>
       <figcaption>
         <dl class="voice-facts">
-          {{if .Place}}<div><dt>Place said</dt><dd>{{.Place}}</dd></div>{{end}}
-          {{if .DepthWords}}<div><dt>Depth words</dt><dd>{{.DepthWords}}</dd></div>{{end}}
-          {{if .Language}}<div><dt>Language</dt><dd>{{.Language}}</dd></div>{{end}}
-          {{if .Model}}<div><dt>Heard by</dt><dd>{{.Model}}</dd></div>{{end}}
+          {{if .Place}}<div><dt>{{t "voice.place"}}</dt><dd>{{.Place}}</dd></div>{{end}}
+          {{if .DepthWords}}<div><dt>{{t "voice.depth_words"}}</dt><dd>{{.DepthWords}}</dd></div>{{end}}
+          {{if .Language}}<div><dt>{{t "voice.language"}}</dt><dd>{{.Language}}</dd></div>{{end}}
+          {{if .Model}}<div><dt>{{t "voice.heard_by"}}</dt><dd>{{.Model}}</dd></div>{{end}}
         </dl>
         <p class="small muted">{{.Basis}} The reading is placed at the map pin, not at the place said.</p>
       </figcaption>
@@ -79,13 +79,13 @@
 
     {{if .Rules}}
     <div>
-      <p class="section-title"><span>Verification</span><span class="chip">Trust {{.Trust}}</span></p>
+      <p class="section-title"><span>{{t "result.verification"}}</span><span class="chip">{{t "result.trust" .Trust}}</span></p>
       <span class="meter" aria-hidden="true"><i style="width:{{.TrustPct}}"></i></span>
       <ul class="rules">
         {{range .Rules}}
         <li class="o-{{.Outcome}}">
           <span class="ic" aria-hidden="true">{{if eq .Outcome "pass"}}{{template "icon-check"}}{{else if eq .Outcome "reject"}}!{{else if eq .Outcome "lower"}}−{{else}}·{{end}}</span>
-          <span><b>{{.Name}} <span class="visually-hidden">({{.Outcome}})</span></b><span class="why">{{.Reason}}</span></span>
+          <span><b>{{.Name}} <span class="visually-hidden">({{t (printf "outcome.%s" .Outcome)}})</span></b><span class="why">{{.Reason}}</span></span>
           <span class="f">{{.Factor}}</span>
         </li>
         {{end}}
@@ -95,15 +95,15 @@
 
     {{with .Cell}}
     <div class="cell-update">
-      <p class="section-title"><span>Map cell after fusion</span><span class="{{.HazardChip}}">{{.Hazard}}</span></p>
-      <p>{{if .Unknown}}The cell is still <b>unknown</b>: evidence there is too uncertain to rely on.{{else}}The cell now reads <b class="num">{{.Depth}} cm ± {{.Sigma}}</b>, upper estimate <b class="num">{{.Upper}} cm</b>, from {{.Readings}} {{if eq .Readings 1}}report{{else}}reports{{end}}.{{end}}</p>
-      {{if .Simulated}}<p class="small" style="color:var(--violet)">This cell also holds readings from the simulated demo scenario, so its value mixes both.</p>{{end}}
-      <div class="row"><a class="btn btn-primary btn-sm" href="{{$.MapLink}}">See it on the live map</a><a class="btn btn-ghost btn-sm" href="/route">Plan a route</a></div>
+      <p class="section-title"><span>{{t "result.cell_title"}}</span><span class="{{.HazardChip}}">{{.Hazard}}</span></p>
+      <p>{{if .Unknown}}{{th "result.cell_unknown.html"}}{{else}}{{th "result.cell_reads.html" .Depth .Sigma .Upper .Readings}}{{end}}</p>
+      {{if .Simulated}}<p class="small" style="color:var(--violet)">{{t "result.cell_mixed"}}</p>{{end}}
+      <div class="row"><a class="btn btn-primary btn-sm" href="{{$.MapLink}}">{{t "result.see_map"}}</a><a class="btn btn-ghost btn-sm" href="/route">{{t "result.plan_route"}}</a></div>
     </div>
     {{end}}
 
-    {{if .ModelsLine}}<p class="small muted">Models: {{.ModelsLine}}.</p>{{end}}
-    <p class="res-advisory">{{template "icon-alert"}}<span>{{.Advisory}} Depths carry uncertainty; water can rise quickly.</span></p>
+    {{if .ModelsLine}}<p class="small muted">{{t "result.models" .ModelsLine}}</p>{{end}}
+    <p class="res-advisory">{{template "icon-alert"}}<span>{{t "advisory.long"}} {{t "result.uncertainty_note"}}</span></p>
   </div>
 </article>
 {{end}}

@@ -9,7 +9,19 @@ window.NM = (function () {
   var DEPTH_VALUE = ["to-number", ["coalesce", ["get", "depth_cm"], 0], 0];
   var DEPTH = ["step", DEPTH_VALUE, "#BAE6FD", 15, "#38BDF8", 30, "#2563EB", 50, "#4C1D95", 80, "#9F1239"];
   var HAZARD = ["match", ["coalesce", ["get", "hazard_class"], "unknown"], "low", "#BAE6FD", "danger_some", "#38BDF8", "danger_most", "#4C1D95", "danger_all", "#9F1239", "#CBD5E1"];
-  var HAZ_TEXT = { low: "Caution", danger_some: "Danger for some", danger_most: "Danger for most", danger_all: "Danger for all", unknown: "Unknown" };
+  // Interface text for the current language, rendered by the server.
+  var TEXT = {};
+  try { TEXT = JSON.parse(document.getElementById("i18n").textContent); } catch (e) { TEXT = {}; }
+  function tr(key) {
+    var s = TEXT[key] || key, args = Array.prototype.slice.call(arguments, 1), i = 0;
+    return s.replace(/%(\.\d)?[sdf]/g, function () { var a = args[i++]; return a == null ? "" : String(a); });
+  }
+  function place(p) {
+    if (!p) return "";
+    if (p.indexOf("near ") === 0) return tr("js.place_near", p.slice(5));
+    return p.charAt(0).toUpperCase() + p.slice(1);
+  }
+  var HAZ_TEXT = { low: tr("hazard.low"), danger_some: tr("hazard.danger_some"), danger_most: tr("hazard.danger_most"), danger_all: tr("hazard.danger_all"), unknown: tr("hazard.unknown") };
   var HAZ_CHIP = { low: "chip", danger_some: "chip", danger_most: "chip chip-violet", danger_all: "chip chip-danger", unknown: "chip chip-grey" };
 
   function depthColor(cm) {
@@ -23,10 +35,10 @@ window.NM = (function () {
   }
   function ago(iso) {
     var s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
-    if (s < 60) return "just now";
-    if (s < 3600) return Math.round(s / 60) + " min ago";
-    if (s < 86400) return (s / 3600).toFixed(s < 36000 ? 1 : 0) + " h ago";
-    return Math.round(s / 86400) + " d ago";
+    if (s < 60) return tr("js.just_now");
+    if (s < 3600) return tr("js.min_ago", Math.round(s / 60));
+    if (s < 86400) return tr("js.h_ago", (s / 3600).toFixed(s < 36000 ? 1 : 0));
+    return tr("js.d_ago", Math.round(s / 86400));
   }
 
   function tint(m) {
@@ -110,7 +122,7 @@ window.NM = (function () {
     var veil = el("div", "map-loading");
     veil.setAttribute("role", "status");
     veil.appendChild(el("span", "map-spinner"));
-    veil.appendChild(el("span", null, "Loading the live map"));
+    veil.appendChild(el("span", null, tr("js.loading_map")));
     m.getContainer().appendChild(veil);
     var lifted = false;
     function lift() {
@@ -123,7 +135,7 @@ window.NM = (function () {
     m.on("load", function () { m.once("idle", lift); });
     m._nmLift = lift;
     setTimeout(lift, 15000);
-    m.on("error", function (e) { if (!m.loaded() && e && e.error) veil.lastChild.textContent = "The base map is slow to load. The flood cells will appear when it does."; });
+    m.on("error", function (e) { if (!m.loaded() && e && e.error) veil.lastChild.textContent = tr("js.basemap_slow"); });
     maps.push(m);
     return m;
   }
@@ -226,11 +238,10 @@ window.NM = (function () {
     var box = el("div");
     var head = el("div", "pop-head");
     if (p.unknown) {
-      head.appendChild(el("b", null, "Unknown"));
+      head.appendChild(el("b", null, tr("hazard.unknown")));
       box.appendChild(head);
       box.appendChild(el("div", "pop-bar")).style.background = "repeating-linear-gradient(135deg,#8A99B2 0 2px,#F1F4F9 2px 6px)";
-      box.appendChild(el("p", "pop-unknown", "Too little recent evidence here. Do not assume it is safe. Best guess " +
-        Math.round(p.depth_cm) + " cm, plus or minus " + Math.round(p.depth_sigma_cm) + " cm."));
+      box.appendChild(el("p", "pop-unknown", tr("js.unknown_note", Math.round(p.depth_cm), Math.round(p.depth_sigma_cm))));
     } else {
       head.appendChild(el("b", null, Math.round(p.depth_cm) + " cm"));
       head.appendChild(el("span", null, "± " + (Math.round(p.depth_sigma_cm * 10) / 10) + " cm"));
@@ -239,19 +250,19 @@ window.NM = (function () {
     }
     var dl = el("dl", "pop-rows");
     function row(k, v) { dl.appendChild(el("dt", null, k)); dl.appendChild(el("dd", null, v)); }
-    if (!p.unknown) row("Upper estimate", Math.round(p.depth_upper_cm) + " cm");
-    row("Velocity", p.velocity_assumed || p.velocity_mps == null ? "Not measured" :
+    if (!p.unknown) row(tr("js.upper"), Math.round(p.depth_upper_cm) + " cm");
+    row(tr("js.velocity"), p.velocity_assumed || p.velocity_mps == null ? tr("js.not_measured") :
       p.velocity_mps.toFixed(2) + " ± " + (p.velocity_sigma_mps || 0).toFixed(2) + " m/s");
-    if (p.hazard_rating != null && !p.unknown) row("Hazard rating", p.hazard_rating.toFixed(2) + (p.velocity_assumed ? " (1.0 m/s assumed)" : ""));
-    row("Reports", p.n_readings + " here, " + (p.n_neighbour || 0) + " nearby");
-    row("Updated", ago(p.updated_at));
+    if (p.hazard_rating != null && !p.unknown) row(tr("js.hazard_rating"), p.hazard_rating.toFixed(2) + (p.velocity_assumed ? " " + tr("js.v_assumed") : ""));
+    row(tr("js.reports"), tr("js.reports_here", p.n_readings, p.n_neighbour || 0));
+    row(tr("js.updated"), ago(p.updated_at));
     box.appendChild(dl);
     var tags = el("div", "pop-tags");
     var cls = p.unknown ? "unknown" : p.hazard_class;
     tags.appendChild(el("span", HAZ_CHIP[cls] || "chip", HAZ_TEXT[cls] || cls));
-    if (p.origin === "simulated") tags.appendChild(el("span", "chip chip-violet", "Simulated scenario"));
-    else if (p.origin === "mixed") tags.appendChild(el("span", "chip chip-violet", "Simulated and real reports"));
-    else tags.appendChild(el("span", "chip chip-ok", "Real reports"));
+    if (p.origin === "simulated") tags.appendChild(el("span", "chip chip-violet", tr("sim.title_plain")));
+    else if (p.origin === "mixed") tags.appendChild(el("span", "chip chip-violet", tr("js.mixed")));
+    else tags.appendChild(el("span", "chip chip-ok", tr("js.real_reports")));
     box.appendChild(tags);
     return box;
   }
@@ -268,7 +279,7 @@ window.NM = (function () {
     });
   }
 
-  var api = { maps: maps, create: create, addCells: addCells, live: live, popups: popups, colourBy: colourBy, depthColor: depthColor, el: el, ago: ago, firstPaintMs: null };
+  var api = { maps: maps, create: create, addCells: addCells, live: live, popups: popups, colourBy: colourBy, depthColor: depthColor, el: el, ago: ago, tr: tr, place: place, firstPaintMs: null };
   return api;
 })();
 </script>{{end}}

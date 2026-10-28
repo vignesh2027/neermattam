@@ -88,6 +88,11 @@ full_box = bbox(slice(0, 1254))
 full = rgba.crop((full_box[0] - 20, full_box[1] - 20, full_box[2] + 20, full_box[3] + 20))
 w = 720
 save(full.resize((w, round(full.height * w / full.width)), Image.LANCZOS), "logo-full.png")
+# The landing page shows the logo 240 px wide: WebP at 1x and 2x, with alpha.
+for lw in (240, 480):
+    lh = round(full.height * lw / full.width)
+    full.resize((lw, lh), Image.LANCZOS).save(OUT + f"logo-{lw}.webp", quality=88, method=6)
+    print(f"logo-{lw}.webp", (lw, lh))
 
 # Favicons: transparent for browsers, opaque light tile for iOS.
 fav = mark.resize((256, 256), Image.LANCZOS)

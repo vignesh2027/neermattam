@@ -34,7 +34,15 @@ type RuleResult struct {
 	Outcome Outcome `json:"outcome"`
 	Factor  float64 `json:"factor"`
 	Reason  string  `json:"reason"`
+	// Key and Args give the reason in other languages; Reason is English.
+	Key  string `json:"-"`
+	Args []any  `json:"-"`
+	// ZoneAssumed says the camera time was read as IST.
+	ZoneAssumed bool `json:"-"`
 }
+
+// Age is a duration shown to people, formatted in their language.
+type Age time.Duration
 
 // Result is the full verdict.
 type Result struct {
@@ -177,23 +185,29 @@ func (v *Verifier) confidence(in Input) RuleResult {
 		// by the source rule, so scaling again would count the doubt twice.
 		r.Outcome, r.Factor = Pass, 1
 		r.Reason = fmt.Sprintf("confidence %.2f, as expected for a visual estimate; its wide uncertainty limits its weight", c)
+		r.Key, r.Args = "conf_estimate", []any{c}
 		return r
 	case estimate:
 		r.Outcome, r.Factor = Reject, 0
 		r.Reason = fmt.Sprintf("estimate confidence %.2f is below the floor of %.2f", c, v.T.EstimateConfidenceReject)
+		r.Key, r.Args = "conf_estimate_low", []any{c, v.T.EstimateConfidenceReject}
 		return r
 	case c < 0:
 		r.Outcome, r.Factor = Skip, 1
 		r.Reason = "spoken report, so there is no model confidence to check"
+		r.Key = "conf_voice"
 	case math.IsNaN(c) || c < v.T.ConfidenceReject:
 		r.Outcome, r.Factor = Reject, 0
 		r.Reason = fmt.Sprintf("measurement confidence %.2f is below the floor of %.2f", c, v.T.ConfidenceReject)
+		r.Key, r.Args = "conf_low", []any{c, v.T.ConfidenceReject}
 	case c < v.T.ConfidenceFull:
 		r.Outcome, r.Factor = Lower, c/v.T.ConfidenceFull
 		r.Reason = fmt.Sprintf("measurement confidence %.2f is under %.2f, so trust is scaled down", c, v.T.ConfidenceFull)
+		r.Key, r.Args = "conf_scaled", []any{c, v.T.ConfidenceFull}
 	default:
 		r.Outcome, r.Factor = Pass, 1
 		r.Reason = fmt.Sprintf("measurement confidence %.2f", c)
+		r.Key, r.Args = "conf_ok", []any{c}
 	}
 	return r
 }
@@ -204,6 +218,7 @@ func (v *Verifier) freshness(in Input) (RuleResult, time.Time, string) {
 	if in.CapturedAt == nil {
 		r.Outcome, r.Factor = Lower, 0.9
 		r.Reason = "no capture time in the file (WhatsApp and many apps remove it), so the time it arrived is used"
+		r.Key = "fresh_none"
 		return r, received, "received"
 	}
 	taken := in.CapturedAt.UTC()
@@ -216,23 +231,28 @@ func (v *Verifier) freshness(in Input) (RuleResult, time.Time, string) {
 	case age < -v.T.FutureSkew:
 		r.Outcome, r.Factor = Lower, 0.6
 		r.Reason = fmt.Sprintf("the photo clock is %s ahead of ours%s; the time it arrived is used", roundDur(-age), zone)
+		r.Key, r.Args, r.ZoneAssumed = "fresh_future", []any{Age(-age)}, !in.ZoneKnown
 		return r, received, "received"
 	case age > v.T.MaxAge:
 		r.Outcome, r.Factor = Reject, 0
 		r.Reason = fmt.Sprintf("taken %s ago%s; water changes too fast for that to describe the street now", roundDur(age), zone)
+		r.Key, r.Args, r.ZoneAssumed = "fresh_old", []any{Age(age)}, !in.ZoneKnown
 		return r, taken, "exif"
 	case age > v.T.StaleAfter:
 		r.Outcome, r.Factor = Lower, 0.5
 		r.Reason = fmt.Sprintf("taken %s ago%s; fused at its capture time so the map ages it", roundDur(age), zone)
+		r.Key, r.Args, r.ZoneAssumed = "fresh_stale", []any{Age(age)}, !in.ZoneKnown
 	case age > v.T.FreshFor:
 		r.Outcome, r.Factor = Lower, 0.8
 		r.Reason = fmt.Sprintf("taken %s ago%s; fused at its capture time", roundDur(age), zone)
+		r.Key, r.Args, r.ZoneAssumed = "fresh_recent", []any{Age(age)}, !in.ZoneKnown
 	default:
 		if age < 0 {
 			age = 0
 		}
 		r.Outcome, r.Factor = Pass, 1
 		r.Reason = fmt.Sprintf("taken %s ago%s", roundDur(age), zone)
+		r.Key, r.Args, r.ZoneAssumed = "fresh_ok", []any{Age(age)}, !in.ZoneKnown
 	}
 	return r, taken, "exif"
 }
@@ -243,17 +263,23 @@ func (v *Verifier) source(in Input) RuleResult {
 	case in.Source == "voice":
 		r.Outcome, r.Factor = Lower, 0.6
 		r.Reason = "a spoken depth is a rough estimate, so it counts for less than a measured photo"
+		r.Key = "src_voice"
 	case in.Method == "model_estimate":
 		r.Outcome, r.Factor = Lower, 0.7
 		r.Reason = "no wheel could be measured, so this is the scene model's visual estimate; it counts for less than a measurement"
+		r.Key = "src_estimate"
 	case in.Method == "wheel_geometry" && in.Source == "video":
 		r.Reason = "video measured from a wheel of known size"
+		r.Key = "src_video_geo"
 	case in.Method == "wheel_geometry":
 		r.Reason = "photo measured from a wheel of known size"
+		r.Key = "src_photo_geo"
 	case in.Source == "video":
 		r.Reason = "video measurement"
+		r.Key = "src_video"
 	default:
 		r.Reason = "photo measurement"
+		r.Key = "src_photo"
 	}
 	return r
 }
@@ -262,17 +288,20 @@ func (v *Verifier) agreement(ctx context.Context, in Input) RuleResult {
 	r := RuleResult{Rule: "neighbour_agreement"}
 	if v.Cells == nil {
 		r.Outcome, r.Factor, r.Reason = Skip, 1, "no map to compare against"
+		r.Key = "near_no_map"
 		return r
 	}
 	cells, err := v.Cells.Nearby(ctx, in.Lat, in.Lon, v.T.NearbyRadiusM)
 	if err != nil {
 		r.Outcome, r.Factor = Skip, 1
 		r.Reason = "the map could not be read for comparison"
+		r.Key = "near_unreadable"
 		return r
 	}
 	if len(cells) == 0 {
 		r.Outcome, r.Factor = Skip, 1
 		r.Reason = fmt.Sprintf("no recent real reports within %.0f m to compare with", v.T.NearbyRadiusM)
+		r.Key, r.Args = "near_none", []any{v.T.NearbyRadiusM}
 		return r
 	}
 	// Inverse-variance mean of nearby cells, where each cell's variance
@@ -296,12 +325,15 @@ func (v *Verifier) agreement(ctx context.Context, in Input) RuleResult {
 	case z > 3:
 		r.Outcome, r.Factor = Lower, 0.4
 		r.Reason = fmt.Sprintf("disagrees strongly with %d nearby %s (%.0f cm expected, %.1f standard deviations away); trust lowered, not rejected, because water can change fast", n, plural(n, "cell", "cells"), mean, z)
+		r.Key, r.Args = "near_strong", []any{n, mean, z}
 	case z > 2:
 		r.Outcome, r.Factor = Lower, 0.75
 		r.Reason = fmt.Sprintf("differs from %d nearby %s (%.0f cm expected, %.1f standard deviations away)", n, plural(n, "cell", "cells"), mean, z)
+		r.Key, r.Args = "near_differs", []any{n, mean, z}
 	default:
 		r.Outcome, r.Factor = Pass, 1
 		r.Reason = fmt.Sprintf("agrees with %d nearby %s (%.0f cm expected)", n, plural(n, "cell", "cells"), mean)
+		r.Key, r.Args = "near_agrees", []any{n, mean}
 	}
 	return r
 }
@@ -310,24 +342,29 @@ func (v *Verifier) rainfall(ctx context.Context, in Input, at time.Time) RuleRes
 	r := RuleResult{Rule: "rainfall_plausibility"}
 	if v.Rain == nil {
 		r.Outcome, r.Factor, r.Reason = Skip, 1, "rainfall check is not configured"
+		r.Key = "rain_off"
 		return r
 	}
 	s, err := v.Rain.Rain(ctx, in.Lat, in.Lon, at)
 	if err != nil || s.Hours == 0 {
 		r.Outcome, r.Factor = Skip, 1
 		r.Reason = "rainfall data was not available"
+		r.Key = "rain_unavailable"
 		return r
 	}
 	switch {
 	case s.Past48hMM >= v.T.WetRainMM:
 		r.Outcome, r.Factor = Pass, 1
 		r.Reason = fmt.Sprintf("%.0f mm of rain modelled here in the previous 48 hours (Open-Meteo)", s.Past48hMM)
+		r.Key, r.Args = "rain_wet", []any{s.Past48hMM}
 	case s.Past48hMM < v.T.DryRainMM && in.DepthCm > v.T.DeepWithoutRainCm:
 		r.Outcome, r.Factor = Lower, 0.6
 		r.Reason = fmt.Sprintf("almost no rain (%.1f mm) modelled here in 48 hours; deep water could still come from a reservoir release, a burst main or tides, so trust is lowered, not rejected", s.Past48hMM)
+		r.Key, r.Args = "rain_dry", []any{s.Past48hMM}
 	default:
 		r.Outcome, r.Factor = Pass, 1
 		r.Reason = fmt.Sprintf("%.1f mm of rain modelled here in the previous 48 hours (Open-Meteo)", s.Past48hMM)
+		r.Key, r.Args = "rain_ok", []any{s.Past48hMM}
 	}
 	return r
 }

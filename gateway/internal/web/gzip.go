@@ -3,12 +3,8 @@ package web
 import (
 	"bytes"
 	"compress/gzip"
-	"io/fs"
-	"mime"
 	"net/http"
-	"path"
 	"strings"
-	"sync"
 )
 
 // AcceptsGzip reports whether the client takes gzip responses.
@@ -41,12 +37,22 @@ func CompressBest(b []byte) []byte {
 	return buf.Bytes()
 }
 
+// AddVary adds a field to Vary once, keeping what is already there.
+func AddVary(h http.Header, field string) {
+	for _, v := range h.Values("Vary") {
+		for _, f := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(f), field) {
+				return
+			}
+		}
+	}
+	h.Add("Vary", field)
+}
+
 // WriteBody writes body, gzipped when the client accepts it and the body is
 // worth compressing. gz may be a precomputed compressed copy, or nil.
 func WriteBody(w http.ResponseWriter, r *http.Request, body, gz []byte) {
-	if w.Header().Get("Vary") == "" {
-		w.Header().Set("Vary", "Accept-Encoding")
-	}
+	AddVary(w.Header(), "Accept-Encoding")
 	if len(body) > 1024 && AcceptsGzip(r) {
 		if gz == nil {
 			gz = Compress(body)
@@ -57,45 +63,4 @@ func WriteBody(w http.ResponseWriter, r *http.Request, body, gz []byte) {
 		return
 	}
 	_, _ = w.Write(body)
-}
-
-// gzipStatic compresses each text asset once, on first request, and serves
-// it from memory afterwards. MapLibre GL JS shrinks from about 920 KB to
-// about a quarter of that.
-type gzipStatic struct {
-	fsys  fs.FS
-	next  http.Handler
-	mu    sync.Mutex
-	cache map[string][]byte
-}
-
-func (g *gzipStatic) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-	ext := path.Ext(name)
-	if (ext != ".js" && ext != ".css" && ext != ".svg" && ext != ".txt") || !AcceptsGzip(r) {
-		g.next.ServeHTTP(w, r)
-		return
-	}
-	g.mu.Lock()
-	gz, ok := g.cache[name]
-	g.mu.Unlock()
-	if !ok {
-		raw, err := fs.ReadFile(g.fsys, name)
-		if err != nil {
-			g.next.ServeHTTP(w, r)
-			return
-		}
-		gz = Compress(raw)
-		g.mu.Lock()
-		g.cache[name] = gz
-		g.mu.Unlock()
-	}
-	ct := mime.TypeByExtension(ext)
-	if ext == ".txt" {
-		ct = "text/plain; charset=utf-8"
-	}
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Header().Add("Vary", "Accept-Encoding")
-	_, _ = w.Write(gz)
 }

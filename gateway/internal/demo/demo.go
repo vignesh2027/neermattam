@@ -9,6 +9,8 @@ package demo
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"math"
@@ -73,6 +75,26 @@ type Seeder struct {
 	mu    sync.Mutex
 	rng   *rand.Rand
 	start time.Time
+
+	// salt makes reading ids unique to this process. The scenario's shape
+	// comes from a fixed seed so it looks the same every run, but the engine
+	// drops a reading id it has seen, so without the salt a restarted
+	// gateway would replay ids the engine already holds and the map would
+	// stop moving.
+	salt     uint64
+	saltOnce sync.Once
+}
+
+func (s *Seeder) id() string {
+	s.saltOnce.Do(func() {
+		var b [8]byte
+		if _, err := crand.Read(b[:]); err == nil {
+			s.salt = binary.LittleEndian.Uint64(b[:])
+		} else {
+			s.salt = uint64(time.Now().UnixNano())
+		}
+	})
+	return fmt.Sprintf("%s%x", live.SimulatedPrefix, s.rng.Uint64()^s.salt)
 }
 
 // reading builds one simulated reading at a point near hotspot h.
@@ -86,7 +108,7 @@ func (s *Seeder) reading(h Hotspot, lat, lon float64, scale float64, observed ti
 	depth = math.Round(depth*10) / 10
 	sigma := math.Round((3+0.07*depth+s.rng.Float64()*1.5)*10) / 10
 	r := upstream.Reading{
-		ReadingID:    fmt.Sprintf("%s%x", live.SimulatedPrefix, s.rng.Uint64()),
+		ReadingID:    s.id(),
 		Lat:          lat,
 		Lon:          lon,
 		DepthCm:      depth,
@@ -139,7 +161,7 @@ func (s *Seeder) Plan(now time.Time) []upstream.Reading {
 			lat, lon := offset(p[0], p[1], s.rng.NormFloat64()*120, s.rng.NormFloat64()*120)
 			depth := math.Round(s.rng.Float64()*30) / 10
 			out = append(out, upstream.Reading{
-				ReadingID: fmt.Sprintf("%s%x", live.SimulatedPrefix, s.rng.Uint64()), Lat: lat, Lon: lon,
+				ReadingID: s.id(), Lat: lat, Lon: lon,
 				DepthCm: depth, DepthSigmaCm: 2.5, ObservedAt: now.Add(-time.Duration(10+s.rng.IntN(50)) * time.Minute).UTC().Truncate(time.Second),
 				Trust: 0.9,
 			})
@@ -147,7 +169,7 @@ func (s *Seeder) Plan(now time.Time) []upstream.Reading {
 	}
 	for _, p := range vaguePoints {
 		out = append(out, upstream.Reading{
-			ReadingID: fmt.Sprintf("%s%x", live.SimulatedPrefix, s.rng.Uint64()), Lat: p[0], Lon: p[1],
+			ReadingID: s.id(), Lat: p[0], Lon: p[1],
 			DepthCm: math.Round(10 + s.rng.Float64()*20), DepthSigmaCm: 14,
 			ObservedAt: now.Add(-time.Duration(20+s.rng.IntN(60)) * time.Minute).UTC().Truncate(time.Second),
 			Trust:      0.9,

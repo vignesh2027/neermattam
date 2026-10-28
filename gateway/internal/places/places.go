@@ -75,6 +75,21 @@ var localities = []Place{
 	{"", "Kotturpuram", 13.0180, 80.2420},
 }
 
+// Landmarks are the localities worth labelling on a small map.
+func Landmarks() []Place {
+	keep := map[string]bool{
+		"Velachery": true, "Guindy": true, "T. Nagar": true, "Saidapet": true, "Pallikaranai": true,
+		"Madipakkam": true, "Adyar": true, "Perungudi": true, "Taramani": true, "Ashok Nagar": true, "Nanganallur": true,
+	}
+	var out []Place
+	for _, p := range localities {
+		if keep[p.Name] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // Near names the closest locality within 2.5 km, or returns coordinates.
 func Near(lat, lon float64) string {
 	best, bestD := "", math.Inf(1)

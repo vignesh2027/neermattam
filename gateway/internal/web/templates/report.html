@@ -1,9 +1,9 @@
 {{define "content"}}
 <div class="page">
   <header class="page-head">
-    <p class="eyebrow">Report water</p>
-    <h1>Measure the water from one photo</h1>
-    <p>A wheel has a known size, so it works as a ruler. Photograph one where it meets the water, and Neermattam measures the depth, checks the report and adds it to the live map.</p>
+    <p class="eyebrow">{{t "report.eyebrow"}}</p>
+    <h1>{{t "report.title"}}</h1>
+    <p>{{t "report.lead"}}</p>
   </header>
 
   <div class="split">
@@ -11,20 +11,20 @@
       <div class="step">
         <span class="step-n" aria-hidden="true">1</span>
         <div>
-          <h3 id="media-label">Photo, short video or voice note</h3>
-          <p class="hint">Include a whole scooter, auto or car wheel, side on, where it meets the water. Videos up to {{.Limits.VideoSeconds}} seconds also measure how fast the water moves. No photo? Say how deep it is, in Tamil or English.</p>
+          <h3 id="media-label">{{t "report.step1"}}</h3>
+          <p class="hint">{{t "report.step1_hint" .Limits.VideoSeconds}}</p>
           <label class="drop" id="drop">
             <input type="file" id="media" name="media" accept="image/jpeg,image/png,video/mp4,video/quicktime,audio/ogg,audio/wav,audio/mpeg,audio/mp4,audio/x-m4a,.m4a,.mp3,.ogg,.opus" aria-labelledby="media-label" aria-describedby="media-limits" required>
             <span class="icon">{{template "icon-upload"}}</span>
-            <b>Choose or take a photo</b>
-            <small id="media-limits">JPEG or PNG up to {{.Limits.ImageMB}} MB, MP4 or MOV up to {{.Limits.VideoMB}} MB, voice notes up to {{.Limits.AudioMB}} MB</small>
+            <b>{{t "report.choose"}}</b>
+            <small id="media-limits">{{t "report.limits" .Limits.ImageMB .Limits.VideoMB .Limits.AudioMB}}</small>
           </label>
           <div class="voice-row">
-            <span class="muted small">or</span>
-            <label class="btn btn-ghost btn-sm voice-btn">{{template "icon-mic"}}Record a voice note
+            <span class="muted small">{{t "report.or"}}</span>
+            <label class="btn btn-ghost btn-sm voice-btn">{{template "icon-mic"}}{{t "report.record_voice"}}
               <input type="file" id="voice" name="voice" accept="audio/*" capture class="visually-hidden">
             </label>
-            <span class="muted small">for example, “Velachery main road, water is knee deep”</span>
+            <span class="muted small">{{t "report.voice_example"}}</span>
           </div>
           <div class="preview" id="preview" aria-live="polite"></div>
         </div>
@@ -33,13 +33,13 @@
       <div class="step">
         <span class="step-n" aria-hidden="true">2</span>
         <div>
-          <h3>Where is it?</h3>
-          <p class="hint">Tap the map, use your device location, or type coordinates.</p>
-          <div id="pick-map" class="pick-map" role="region" aria-label="Map. Tap to set the report location."></div>
+          <h3>{{t "report.step2"}}</h3>
+          <p class="hint">{{t "report.step2_hint"}}</p>
+          <div id="pick-map" class="pick-map" role="region" aria-label="{{t "report.pick_aria"}}"></div>
           <div class="row">
-            <div class="field"><label for="lat">Latitude</label><input class="input" id="lat" name="lat" inputmode="decimal" autocomplete="off" placeholder="12.9791" value="{{.Report.Lat}}" required></div>
-            <div class="field"><label for="lon">Longitude</label><input class="input" id="lon" name="lon" inputmode="decimal" autocomplete="off" placeholder="80.2209" value="{{.Report.Lon}}" required></div>
-            <button type="button" class="btn btn-ghost" id="geo">{{template "icon-pin"}}Use my location</button>
+            <div class="field"><label for="lat">{{t "report.lat"}}</label><input class="input" id="lat" name="lat" inputmode="decimal" autocomplete="off" placeholder="12.9791" value="{{.Report.Lat}}" required></div>
+            <div class="field"><label for="lon">{{t "report.lon"}}</label><input class="input" id="lon" name="lon" inputmode="decimal" autocomplete="off" placeholder="80.2209" value="{{.Report.Lon}}" required></div>
+            <button type="button" class="btn btn-ghost" id="geo">{{template "icon-pin"}}{{t "report.use_location"}}</button>
           </div>
         </div>
       </div>
@@ -48,22 +48,22 @@
         <span class="step-n" aria-hidden="true">3</span>
         <div>
           <details class="more">
-            <summary>Optional: tell us about the wheel</summary>
+            <summary>{{t "report.optional"}}</summary>
             <div class="row">
               <div class="field">
-                <label for="hint_reference">Reference in the photo</label>
+                <label for="hint_reference">{{t "report.reference"}}</label>
                 <select class="input" id="hint_reference" name="hint_reference">
-                  <option value="">Let the model decide</option>
-                  <option value="two_wheeler_wheel">Two-wheeler wheel</option>
-                  <option value="auto_wheel">Auto-rickshaw wheel</option>
-                  <option value="car_wheel">Car wheel</option>
-                  <option value="kerb">Kerb</option>
-                  <option value="person">Person</option>
+                  <option value="">{{t "report.ref_auto"}}</option>
+                  <option value="two_wheeler_wheel">{{t "ref.two_wheeler_wheel"}}</option>
+                  <option value="auto_wheel">{{t "ref.auto_wheel"}}</option>
+                  <option value="car_wheel">{{t "ref.car_wheel"}}</option>
+                  <option value="kerb">{{t "ref.kerb"}}</option>
+                  <option value="person">{{t "ref.person"}}</option>
                 </select>
               </div>
               <div class="field">
-                <label for="hint_diameter_cm">Wheel diameter, if known (cm)</label>
-                <input class="input" id="hint_diameter_cm" name="hint_diameter_cm" inputmode="decimal" placeholder="e.g. 43">
+                <label for="hint_diameter_cm">{{t "report.diameter"}}</label>
+                <input class="input" id="hint_diameter_cm" name="hint_diameter_cm" inputmode="decimal" placeholder="43">
               </div>
             </div>
           </details>
@@ -71,28 +71,28 @@
       </div>
 
       <div class="submit-row">
-        <button class="btn btn-primary btn-lg" type="submit" id="submit">Measure the water</button>
-        <p class="muted">Your photo is measured and then discarded. Only the depth, its uncertainty and the location reach the map.</p>
+        <button class="btn btn-primary btn-lg" type="submit" id="submit">{{t "js.measure"}}</button>
+        <p class="muted">{{t "report.privacy"}}</p>
       </div>
       <p class="form-error" id="form-error" role="alert">{{.Report.Error}}</p>
     </form>
 
     <div>
       <section class="card panel" id="process" aria-labelledby="process-title">
-        <h2 id="process-title">How the measurement works</h2>
+        <h2 id="process-title">{{t "report.how_title"}}</h2>
         <div class="explain">
           {{template "wheel-diagram"}}
           <ol>
-            <li><b>Read the scene.</b> Muse Spark finds the water and a reference of known size, usually a wheel.</li>
-            <li><b>Measure.</b> SAM masks the wheel and the water, and Muse Spark checks every mask before it is used. Where they meet is the waterline; the hidden part of the wheel is the depth. With no measurable wheel, you get Muse Spark's own estimate, clearly labelled.</li>
-            <li><b>Check and fuse.</b> The report is checked for freshness, agreement with nearby cells and recent rain, then fused into the map with its uncertainty.</li>
+            <li>{{th "report.how1.html"}}</li>
+            <li>{{th "report.how2.html"}}</li>
+            <li>{{th "report.how3.html"}}</li>
           </ol>
         </div>
         <ol class="stages" id="stages" hidden>
-          <li class="stage" data-stage="upload"><span class="dot">{{template "icon-check"}}</span><span><b>Uploading</b><small>Sending the file securely</small><span class="upload-bar"><i id="upbar"></i></span></span><span class="val" id="upval"></span></li>
-          <li class="stage" data-stage="scene"><span class="dot">{{template "icon-check"}}</span><span><b>Reading the scene and measuring</b><small id="scene-sub">Scene model, masks and the checking agent</small></span><span class="val"></span></li>
-          <li class="stage" data-stage="verify"><span class="dot">{{template "icon-check"}}</span><span><b>Checking the report</b><small>Freshness, nearby cells, rainfall, confidence</small></span><span class="val"></span></li>
-          <li class="stage" data-stage="fuse"><span class="dot">{{template "icon-check"}}</span><span><b>Fusing into the map</b><small>Kalman update of the hex cell and its neighbours</small></span><span class="val"></span></li>
+          <li class="stage" data-stage="upload"><span class="dot">{{template "icon-check"}}</span><span><b>{{t "stage.upload"}}</b><small>{{t "stage.upload_sub"}}</small><span class="upload-bar"><i id="upbar"></i></span></span><span class="val" id="upval"></span></li>
+          <li class="stage" data-stage="scene"><span class="dot">{{template "icon-check"}}</span><span><b>{{t "stage.scene"}}</b><small id="scene-sub">{{t "js.scene_sub"}}</small></span><span class="val"></span></li>
+          <li class="stage" data-stage="verify"><span class="dot">{{template "icon-check"}}</span><span><b>{{t "stage.verify"}}</b><small>{{t "stage.verify_sub"}}</small></span><span class="val"></span></li>
+          <li class="stage" data-stage="fuse"><span class="dot">{{template "icon-check"}}</span><span><b>{{t "stage.fuse"}}</b><small>{{t "stage.fuse_sub"}}</small></span><span class="val"></span></li>
         </ol>
       </section>
       <div class="result" id="result" aria-live="polite" tabindex="-1">{{if .Result}}{{template "result_card" .Result}}{{end}}</div>
@@ -103,7 +103,7 @@
 </div>
 {{end}}
 
-{{define "wheel-diagram"}}<svg viewBox="0 0 170 170" role="img" aria-label="Diagram: a wheel of known diameter partly under water; the submerged height is the depth.">
+{{define "wheel-diagram"}}<svg viewBox="0 0 170 170" role="img" aria-label="{{t "report.diagram_aria"}}">
   <defs><linearGradient id="wd-w" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38BDF8" stop-opacity=".55"/><stop offset="1" stop-color="#2563EB" stop-opacity=".75"/></linearGradient></defs>
   <rect x="0" y="0" width="170" height="170" rx="18" fill="#F2F7FF"/>
   <circle cx="85" cy="82" r="52" fill="#fff" stroke="#0B1B33" stroke-width="9"/>
@@ -117,7 +117,7 @@
   <text x="140" y="70" font-size="11" font-weight="700" fill="#0B1B33" text-anchor="end" font-family="Inter, sans-serif">D</text>
   <line x1="20" y1="108" x2="20" y2="134" stroke="#9F1239" stroke-width="2.5"/>
   <line x1="14" y1="134" x2="26" y2="134" stroke="#9F1239" stroke-width="2.5"/>
-  <text x="28" y="127" font-size="11" font-weight="700" fill="#9F1239" font-family="Inter, sans-serif">depth</text>
+  <text x="28" y="127" font-size="11" font-weight="700" fill="#9F1239" font-family="Inter, sans-serif">{{t "report.diagram_depth"}}</text>
 </svg>{{end}}
 
 {{define "scripts"}}<script nonce="{{.Nonce}}">
@@ -144,10 +144,10 @@ document.addEventListener("DOMContentLoaded", function () {
   }); });
 
   document.getElementById("geo").addEventListener("click", function () {
-    if (!navigator.geolocation) { err.textContent = "This browser cannot share its location. Tap the map instead."; return; }
+    if (!navigator.geolocation) { err.textContent = NM.tr("js.no_geo"); return; }
     err.textContent = "";
     navigator.geolocation.getCurrentPosition(function (p) { setLoc(p.coords.latitude, p.coords.longitude, true); },
-      function () { err.textContent = "Location was not shared. Tap the map or type coordinates instead."; },
+      function () { err.textContent = NM.tr("js.geo_denied"); },
       { enableHighAccuracy: true, timeout: 10000 });
   });
 
@@ -196,7 +196,7 @@ document.addEventListener("DOMContentLoaded", function () {
     traceBox.appendChild(shell.content.cloneNode(true));
     var li = NM.el("li", "twait");
     li.appendChild(NM.el("span", "tnode"));
-    li.appendChild(NM.el("p", null, "Waiting for the scene model. Each model call appears here, with its output and how long it took."));
+    li.appendChild(NM.el("p", null, NM.tr("js.waiting")));
     traceBox.querySelector("#trace-list").appendChild(li);
   }
   var traceBox = document.getElementById("trace-box"), shell = document.getElementById("trace-shell");
@@ -233,12 +233,12 @@ document.addEventListener("DOMContentLoaded", function () {
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     err.textContent = "";
-    if (!chosen()) { err.textContent = "Choose a photo, a short video or a voice note first."; input.focus(); return; }
-    if (!lat.value || !lon.value) { err.textContent = "Add a location: tap the map, use your location, or type coordinates."; lat.focus(); return; }
+    if (!chosen()) { err.textContent = NM.tr("js.need_media"); input.focus(); return; }
+    if (!lat.value || !lon.value) { err.textContent = NM.tr("js.need_location"); lat.focus(); return; }
     document.getElementById("process").classList.add("is-busy");
-    document.getElementById("process-title").textContent = "Your report";
-    stages.hidden = false; result.textContent = ""; traceBox.textContent = ""; submit.disabled = true; submit.textContent = "Measuring";
-    document.getElementById("scene-sub").textContent = voice.files[0] && !input.files[0] ? "The voice model transcribes the note" : "Scene model, masks and the checking agent";
+    document.getElementById("process-title").textContent = NM.tr("js.your_report");
+    stages.hidden = false; result.textContent = ""; traceBox.textContent = ""; submit.disabled = true; submit.textContent = NM.tr("js.measuring");
+    document.getElementById("scene-sub").textContent = voice.files[0] && !input.files[0] ? NM.tr("js.voice_sub") : NM.tr("js.scene_sub");
     rows().forEach(function (li) { li.removeAttribute("data-state"); li.querySelector(".val").textContent = ""; });
     document.getElementById("upbar").style.width = "0";
     current = null; enter("upload");
@@ -269,8 +269,8 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     xhr.onprogress = function () { pump(false); };
     xhr.onload = function () { pump(true); done(); };
-    xhr.onerror = function () { err.textContent = "The upload failed. Check your connection and try again."; handle("error", {}); done(); };
-    function done() { submit.disabled = false; submit.textContent = "Measure the water"; }
+    xhr.onerror = function () { err.textContent = NM.tr("js.upload_failed"); handle("error", {}); done(); };
+    function done() { submit.disabled = false; submit.textContent = NM.tr("js.measure"); }
     xhr.send(new FormData(form));
   });
 });

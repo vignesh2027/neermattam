@@ -1,0 +1,168 @@
+{{define "content"}}
+<div class="home">
+  <section class="h-hero" aria-labelledby="h-title">
+    <div class="h-hero-text">
+      <img class="h-logo" src="{{asset "brand/logo-240.webp"}}" srcset="{{asset "brand/logo-240.webp"}} 1x, {{asset "brand/logo-480.webp"}} 2x" width="240" height="182" alt="{{t "logo.alt"}}" fetchpriority="high">
+      <p class="eyebrow">{{t "home.eyebrow"}}</p>
+      <h1 id="h-title">{{t "hero.line1"}} <em>{{t "hero.line2"}}</em></h1>
+      <p class="h-lead">{{t "home.lead"}}</p>
+      <div class="h-cta">
+        <a class="btn btn-primary btn-lg" href="/map">{{template "icon-map"}}{{t "home.cta_map"}}</a>
+        <a class="btn btn-ghost btn-lg" href="/report">{{template "icon-camera"}}{{t "cta.report_water"}}</a>
+      </div>
+      <p class="h-advisory">{{template "icon-alert"}}<span>{{t "advisory.short"}}</span></p>
+    </div>
+
+    <a class="h-preview card" href="/map" aria-label="{{t "home.preview_aria"}}">
+      <div class="h-preview-head">
+        <span class="live-dot" aria-hidden="true"></span>
+        <b>{{t "home.preview_title"}}</b>
+        <span class="muted small" id="pv-count">{{t "home.preview_count" .Home.Preview.Count}}</span>
+        {{if .Demo}}<span class="chip chip-violet">{{t "sim.title_plain"}}</span>{{end}}
+      </div>
+      {{with .Home.Preview}}
+      <svg class="h-map" id="pv" viewBox="0 0 {{.W}} {{.H}}" width="{{.W}}" height="{{.H}}" role="img" aria-label="{{t "home.preview_img"}}" data-bounds="{{.Bounds}}">
+        <defs>
+          <pattern id="pv-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#F1F4F9"/><rect width="2" height="6" fill="#8A99B2"/></pattern>
+          <radialGradient id="pv-bg" cx="50%" cy="40%" r="75%"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E7F0FB"/></radialGradient>
+        </defs>
+        <rect width="{{.W}}" height="{{.H}}" fill="url(#pv-bg)"/>
+        <g class="pv-grid" stroke="#DCE7F5" stroke-width="1">{{range .Grid}}<path d="{{.}}"/>{{end}}</g>
+        <g id="pv-cells">{{range .Bands}}<path fill="{{.Fill}}" d="{{.D}}"/>{{end}}</g><g id="pv-live"></g>
+        <g class="pv-places">{{range .Places}}<g transform="translate({{.X}} {{.Y}})"><circle r="3.5"/><text x="7" y="4">{{.Name}}</text></g>{{end}}</g>
+      </svg>
+      {{end}}
+      <div class="h-preview-foot"><span>{{t "home.preview_foot"}}</span><span class="h-arrow" aria-hidden="true">{{template "icon-chev-right"}}</span></div>
+    </a>
+  </section>
+
+  <section class="h-section" aria-labelledby="h-how">
+    <p class="eyebrow">{{t "home.how_eyebrow"}}</p>
+    <h2 id="h-how">{{t "home.how_title"}}</h2>
+    <ol class="h-steps">
+      <li class="card"><span class="n">1</span>{{template "icon-camera"}}<h3>{{t "home.step1_title"}}</h3><p>{{t "home.step1"}}</p></li>
+      <li class="card"><span class="n">2</span>{{template "icon-eye"}}<h3>{{t "home.step2_title"}}</h3><p>{{t "home.step2"}}</p></li>
+      <li class="card"><span class="n">3</span>{{template "icon-check"}}<h3>{{t "home.step3_title"}}</h3><p>{{t "home.step3"}}</p></li>
+      <li class="card"><span class="n">4</span>{{template "icon-route"}}<h3>{{t "home.step4_title"}}</h3><p>{{t "home.step4"}}</p></li>
+    </ol>
+  </section>
+
+  {{with .Home.Trace}}
+  <section class="h-section h-agent" aria-labelledby="h-trace">
+    <div class="h-split-head">
+      <div>
+        <p class="eyebrow">{{t "home.trace_eyebrow"}}</p>
+        <h2 id="h-trace">{{t "home.trace_title"}}</h2>
+        <p class="h-sub">{{t "home.trace_lead" .Total}}</p>
+      </div>
+      <a class="btn btn-ghost" href="/report">{{t "home.trace_try"}}</a>
+    </div>
+    <ol class="timeline excerpt" role="list">
+      {{range .Steps}}{{template "trace_step" .}}{{end}}
+    </ol>
+    <p class="small muted h-credit">{{t "home.trace_credit" .Photo .Credit .Date}}</p>
+  </section>
+  {{end}}
+
+  <section class="h-section" aria-labelledby="h-meta">
+    <p class="eyebrow">{{t "home.models_eyebrow"}}</p>
+    <h2 id="h-meta">{{t "home.models_title"}}</h2>
+    <div class="h-models">
+      <article class="card h-model"><span class="h-model-tag">{{t "home.model_reasoning"}}</span><h3>Muse Spark Open</h3><p>{{t "home.model_muse"}}</p></article>
+      <article class="card h-model"><span class="h-model-tag">{{t "home.model_masks"}}</span><h3>SAM 2.1</h3><p>{{t "home.model_sam"}}</p></article>
+    </div>
+  </section>
+
+  <section class="h-section" aria-labelledby="h-who">
+    <p class="eyebrow">{{t "home.who_eyebrow"}}</p>
+    <h2 id="h-who">{{t "home.who_title"}}</h2>
+    <ul class="h-who" role="list">
+      <li class="card">{{template "vehicle-icon-car"}}<h3>{{t "home.who_commuters"}}</h3><p>{{t "home.who_commuters_p"}}</p></li>
+      <li class="card">{{template "vehicle-icon-bike"}}<h3>{{t "home.who_riders"}}</h3><p>{{t "home.who_riders_p"}}</p></li>
+      <li class="card">{{template "vehicle-icon-auto"}}<h3>{{t "home.who_autos"}}</h3><p>{{t "home.who_autos_p"}}</p></li>
+      <li class="card">{{template "icon-family"}}<h3>{{t "home.who_families"}}</h3><p>{{t "home.who_families_p"}}</p></li>
+      <li class="card">{{template "icon-control"}}<h3>{{t "home.who_control"}}</h3><p>{{t "home.who_control_p"}}</p></li>
+    </ul>
+  </section>
+
+  {{with .Home.Facts}}
+  <section class="h-section" aria-labelledby="h-numbers">
+    <p class="eyebrow">{{t "home.numbers_eyebrow"}}</p>
+    <h2 id="h-numbers">{{t "home.numbers_title"}}</h2>
+    <p class="h-sub">{{t "home.numbers_lead"}}</p>
+    <div class="h-numbers">
+      <article class="card h-num">
+        <b class="num">{{.Routing.DryMs}}</b>
+        <h3>{{t "home.num_route" .Routing.Trip}}</h3>
+        <p>{{t "home.num_route_p" .Routing.Readings200Ms .Routing.Readings2000Ms .Routing.Machine}}</p>
+        <p class="h-src">{{t "home.source" .Routing.Source}}</p>
+      </article>
+      <article class="card h-num">
+        <b class="num">{{.Depth.MAECm}} cm</b>
+        <h3>{{t "home.num_depth" .Depth.Cases}}</h3>
+        <p>{{t "home.num_depth_p" .Depth.MedianCm .Depth.Usable .Depth.Within1}}</p>
+        <p class="h-src">{{t "home.source" .Depth.Source}}</p>
+      </article>
+      <article class="card h-num h-num-honest">
+        <b class="num">{{.Real.Geometry}} / {{.Real.Photos}}</b>
+        <h3>{{t "home.num_real"}}</h3>
+        <p>{{t "home.num_real_p" .Real.Estimates .Real.Photos}}</p>
+        <p class="h-src">{{t "home.source" .Real.Source}}</p>
+      </article>
+    </div>
+  </section>
+  {{end}}
+
+  <section class="h-section">
+    <div class="card h-safety" role="note">
+      {{template "icon-alert"}}
+      <div>
+        <h2>{{t "home.safety_title"}}</h2>
+        <p>{{t "home.safety_p"}}</p>
+      </div>
+    </div>
+  </section>
+</div>
+{{end}}
+
+{{define "icon-map"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg>{{end}}
+{{define "icon-chev-right"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>{{end}}
+{{define "icon-family"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="5" r="2"/><circle cx="17" cy="5" r="2"/><circle cx="12" cy="11" r="1.6"/><path d="M5 21v-6l-1-4 3-2 3 2-1 4v6"/><path d="M15 21v-6l-1-4 3-2 3 2-1 4v6"/><path d="M11 21v-4l-1-2h4l-1 2v4"/></svg>{{end}}
+{{define "icon-control"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="m6 12 3-3 3 2 5-4"/></svg>{{end}}
+{{define "vehicle-icon-car"}}{{template "vehicle-icon" "car"}}{{end}}
+{{define "vehicle-icon-bike"}}{{template "vehicle-icon" "two_wheeler"}}{{end}}
+{{define "vehicle-icon-auto"}}{{template "vehicle-icon" "auto"}}{{end}}
+
+{{define "scripts"}}<script nonce="{{.Nonce}}">
+/* Keep the preview live: recolour cells as the engine reports them. */
+(function () {
+  "use strict";
+  var svg = document.getElementById("pv");
+  if (!svg || !window.EventSource) return;
+  var b = svg.getAttribute("data-bounds").split(",").map(Number); // minLon,maxLat,kx,ky
+  var g = document.getElementById("pv-live");
+  function colour(p) {
+    if (p.unknown) return "url(#pv-hatch)";
+    var d = p.depth_cm || 0;
+    return d < 15 ? "#BAE6FD" : d < 30 ? "#38BDF8" : d < 50 ? "#2563EB" : d < 80 ? "#4C1D95" : "#9F1239";
+  }
+  var es = new EventSource("/api/stream");
+  es.addEventListener("cell", function (e) {
+    var f = JSON.parse(e.data), p = f.properties || {}, id = p.cell;
+    var el = g.querySelector('[data-cell="' + id + '"]');
+    if (!el) {
+      var ring = (f.geometry && f.geometry.coordinates && f.geometry.coordinates[0]) || [];
+      var pts = ring.map(function (c) { return ((c[0] - b[0]) * b[2]).toFixed(1) + "," + ((b[1] - c[1]) * b[3]).toFixed(1); });
+      var inside = ring.some(function (c) { var x = (c[0] - b[0]) * b[2], y = (b[1] - c[1]) * b[3]; return x > 0 && y > 0 && x < svg.viewBox.baseVal.width && y < svg.viewBox.baseVal.height; });
+      if (!inside) return;
+      el = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      el.setAttribute("data-cell", id);
+      el.setAttribute("points", pts.join(" "));
+      g.appendChild(el);
+    }
+    el.setAttribute("fill", colour(p));
+    el.classList.remove("pv-flash"); void el.getBBox(); el.classList.add("pv-flash");
+  });
+  addEventListener("pagehide", function () { es.close(); });
+})();
+</script>{{end}}

@@ -24,11 +24,11 @@ func TestResultCardRendersEveryStatus(t *testing.T) {
 		Cell:         &upstream.ReadingResult{DepthCm: 21, DepthSigmaCm: 2.4, DepthUpperCm: 25, NReadings: 3, Hazard: upstream.Hazard{Class: "danger_some"}},
 		Advisory:     report.Advisory,
 	}
-	html, err := r.Fragment("result_card", NewResultView(fused))
+	html, err := r.Fragment("en", "result_card", NewResultView(fused, "en"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"23<small>cm</small>", "± 3.1 cm", "Near Velachery", "Taken 3 hours ago", "× 0.80", "Danger for some", "3 reports", "Advisory only"} {
+	for _, want := range []string{"23<small>cm</small>", "± 3.1 cm", "Near Velachery", "Taken 3 hours ago", "× 0.80", "Danger for some", "Reports fused there: 3", "Advisory only"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("fused card lacks %q", want)
 		}
@@ -38,22 +38,22 @@ func TestResultCardRendersEveryStatus(t *testing.T) {
 	}
 	unusable := &report.Outcome{Status: report.StatusUnusable, Summary: "The photo could not be measured.", ReceivedAt: time.Now(),
 		Measurement: &upstream.Measurement{Reasons: []string{"no reference object found"}}, Advisory: report.Advisory}
-	html, _ = r.Fragment("result_card", NewResultView(unusable))
+	html, _ = r.Fragment("en", "result_card", NewResultView(unusable, "en"))
 	if !strings.Contains(html, "no reference object found") || !strings.Contains(html, "could not measure") {
 		t.Errorf("unusable card: %s", html)
 	}
-	html, _ = r.Fragment("result_card", ErrorView("The measurement service is not reachable right now."))
+	html, _ = r.Fragment("en", "result_card", ErrorView("en", &report.Error{Message: "The measurement service is not reachable right now."}))
 	if !strings.Contains(html, "not reachable") {
 		t.Error("error card")
 	}
 }
 
 func TestGaugeScalesForDeepWater(t *testing.T) {
-	g := newGauge(20, 3)
+	g := newGauge("en", 20, 3)
 	if g.Max != 100 || g.MarkPct != "20.0%" || g.Ticks[0].Pct != "15.0%" {
 		t.Fatalf("%+v", g)
 	}
-	if g := newGauge(120, 10); g.Max != 150 {
+	if g := newGauge("en", 120, 10); g.Max != 150 {
 		t.Fatalf("deep water gauge max %d", g.Max)
 	}
 }
@@ -61,7 +61,7 @@ func TestGaugeScalesForDeepWater(t *testing.T) {
 func TestRouteViewEscapesGeoJSON(t *testing.T) {
 	raw := []byte(`{"type":"Feature","geometry":{"type":"LineString","coordinates":[[80.2,12.9],[80.21,12.91]]},"properties":{"route_kind":"least_bad","distance_m":5000,"eta_min":15,"max_depth_cm_on_route":22.4,"max_depth_sigma_cm":5.1,"cells_on_route":10,"cells_avoided":0,"unknown_cells_crossed":4,"impassable_cells_crossed":2,"passable":false,"explanation":"</script><b>x</b>","depth_limit_cm":15,"safety_sigmas":1.5},
 		"baseline":{"properties":{"distance_m":4000,"eta_min":12,"impassable_cells_crossed":3}}}`)
-	v, err := NewRouteView(raw, "car", true)
+	v, err := NewRouteView(raw, "car", true, "en")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestTraceStepClassification(t *testing.T) {
 		{"mystery", "", "other", "neutral", "Mystery", ""},
 	}
 	for _, c := range cases {
-		v := NewTraceStep(0, upstream.AgentStep{Step: c.step, Decision: c.decision, LatencyMs: 11377})
+		v := NewTraceStep("en", 0, upstream.AgentStep{Step: c.step, Decision: c.decision, LatencyMs: 11377})
 		if v.Kind != c.kind || v.Tone != c.tone || v.Label != c.label || v.Detail != c.detail {
 			t.Errorf("%s/%q: got kind %s tone %s label %s detail %q", c.step, c.decision, v.Kind, v.Tone, v.Label, v.Detail)
 		}
@@ -96,7 +96,7 @@ func TestTraceStepClassification(t *testing.T) {
 			t.Errorf("latency %q slow %v", v.Latency, v.Slow)
 		}
 	}
-	tv := NewTraceView([]upstream.AgentStep{
+	tv := NewTraceView("en", []upstream.AgentStep{
 		{Step: "scene", Target: "photo", Model: "muse-spark-open", LatencyMs: 15000},
 		{Step: "segment", Target: "wheel 1", Model: "sam-2.1-hiera-small", Decision: "verify", LatencyMs: 900},
 		{Step: "verify", Target: "wheel 1", Model: "muse-spark-open", Decision: "give up", LatencyMs: 61000},
@@ -108,8 +108,8 @@ func TestTraceStepClassification(t *testing.T) {
 
 func TestTracePanelRenders(t *testing.T) {
 	r, _ := NewRenderer()
-	tv := NewTraceView([]upstream.AgentStep{{Step: "verify", Target: "two wheeler wheel 1", Model: "muse-spark-open", Input: "crop <b>", Output: "is_target=true", Decision: "accept", LatencyMs: 18000}}, false)
-	html, err := r.Fragment("trace_panel", tv)
+	tv := NewTraceView("en", []upstream.AgentStep{{Step: "verify", Target: "two wheeler wheel 1", Model: "muse-spark-open", Input: "crop <b>", Output: "is_target=true", Decision: "accept", LatencyMs: 18000}}, false)
+	html, err := r.Fragment("en", "trace_panel", tv)
 	if err != nil {
 		t.Fatal(err)
 	}
