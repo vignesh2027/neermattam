@@ -1,0 +1,23 @@
+Data in this Space
+
+data/osm/chennai-roads.osm.pbf
+
+    Road network of Chennai, extracted from OpenStreetMap.
+    © OpenStreetMap contributors.
+    Available under the Open Database Licence (ODbL) 1.0:
+    https://opendatacommons.org/licenses/odbl/1-0/
+    Copyright and attribution: https://www.openstreetmap.org/copyright
+
+    The file is a filtered extract (highway ways and their nodes) of the
+    OpenStreetMap data for the Chennai area. It is a derivative database and
+    is offered under the same licence. The live map's base tiles come from
+    OpenFreeMap and carry their own OpenStreetMap and OpenMapTiles
+    attribution in the map corner.
+
+opt/neermattam/models/sam2.1-hiera-small (inside the image, not in this repository)
+
+    SAM 2.1 Hiera small by Meta, downloaded at build time from
+    https://huggingface.co/facebook/sam2.1-hiera-small
+    Licence: Apache License 2.0.
+
+Rainfall checks use the Open-Meteo API (CC BY 4.0), called at run time.
