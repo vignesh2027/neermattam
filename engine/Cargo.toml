@@ -3,7 +3,7 @@ name = "neermattam-engine"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
-description = "Hex-grid flood depth fusion, Defra hazard rating and vehicle-aware routing for Chennai"
+description = "Hex-grid flood depth fusion, Defra hazard rating and vehicle-aware routing for Indian cities"
 license = "MIT"
 publish = false
 

@@ -3,11 +3,16 @@
 //! | Variable | Default | Meaning |
 //! |---|---|---|
 //! | `ENGINE_BIND` | `127.0.0.1:8302` | Listen address; keep it on the internal network |
-//! | `ENGINE_OSM_PATH` | `../data/osm/chennai-roads.osm.pbf` | Road extract |
+//! | `ENGINE_CITIES` | `chennai,mumbai,bengaluru,hyderabad,kolkata,delhi` | Cities to cover, in order |
+//! | `ENGINE_OSM_DIR` | `../data/osm` | Folder holding `<city>-roads.osm.pbf` |
+//! | `ENGINE_CITY_<ID>_BBOX` | built-in box | Override a city's box, or give a new city its box |
+//! | `ENGINE_CITY_<ID>_NAME` | built-in name, else the id | Display name |
+//! | `ENGINE_CITY_<ID>_OSM_PATH` | `<ENGINE_OSM_DIR>/<id>-roads.osm.pbf` | A city's road extract |
+//! | `ENGINE_OSM_PATH`, `ENGINE_BBOX` | | Older names for Chennai's extract and box |
 //! | `ENGINE_SNAPSHOT_PATH` | `../data/engine/cells.json` | Cell snapshot; empty disables |
 //! | `ENGINE_SNAPSHOT_INTERVAL_SECS` | `5` | Minimum seconds between snapshots |
 //! | `ENGINE_H3_RESOLUTION` | `10` | H3 resolution (7 to 12) |
-//! | `ENGINE_BBOX` | `80.10,12.85,80.33,13.24` | Service area, minLon,minLat,maxLon,maxLat |
+//! | `ENGINE_HISTORY_POINTS` | `48` | Depth history kept per cell for `/v1/recession` (0 to 1000) |
 //! | `ENGINE_HALF_LIFE_HOURS` | `off` | Opt-in recession half-life; `off` holds the level |
 //! | `ENGINE_DEPTH_NOISE_CM_PER_SQRT_HOUR` | `6` | Depth process noise |
 //! | `ENGINE_VELOCITY_NOISE_MPS_PER_SQRT_HOUR` | `0.2` | Velocity process noise |
@@ -33,6 +38,7 @@
 //! | `ENGINE_MAX_CELLS` | `20000` | Most features one `/v1/cells` call returns |
 //! | `ENGINE_LOG_FORMAT` | `json` | `json` or `pretty`; filter with `RUST_LOG` |
 
+use crate::city::{default_cities, valid_id, City, CityLookup, DEFAULT_CITIES};
 use crate::fusion::FusionParams;
 use crate::geo::BBox;
 use crate::hazard::{DebrisRule, HazardClass};
@@ -57,16 +63,14 @@ pub struct ConfigError {
 pub struct Config {
     /// Listen address.
     pub bind: SocketAddr,
-    /// OSM PBF extract of highway ways.
-    pub osm_path: PathBuf,
+    /// Covered cities, in lookup order. Never empty.
+    pub cities: Vec<City>,
     /// Snapshot file, or `None` to disable persistence.
     pub snapshot_path: Option<PathBuf>,
     /// Minimum time between snapshots.
     pub snapshot_interval: Duration,
     /// H3 resolution.
     pub resolution: Resolution,
-    /// Readings and route ends must fall inside this box.
-    pub service_bbox: BBox,
     /// Fusion tuning.
     pub fusion: FusionParams,
     /// Routing policy.
@@ -90,11 +94,10 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             bind: SocketAddr::from(([127, 0, 0, 1], 8302)),
-            osm_path: PathBuf::from("../data/osm/chennai-roads.osm.pbf"),
+            cities: default_cities(std::path::Path::new("../data/osm")),
             snapshot_path: Some(PathBuf::from("../data/engine/cells.json")),
             snapshot_interval: Duration::from_secs(5),
             resolution: Resolution::Ten,
-            service_bbox: BBox::CHENNAI,
             fusion: FusionParams::default(),
             policy: RoutePolicy::default(),
             max_observation_skew_h: 24.0,
@@ -154,6 +157,18 @@ fn any<T>(_: &T) -> Result<(), String> {
 }
 
 impl Config {
+    /// The first city whose box holds the point.
+    #[must_use]
+    pub fn city_at(&self, lat: f64, lon: f64) -> Option<&City> {
+        self.cities.city_at(lat, lon)
+    }
+
+    /// The city with this id.
+    #[must_use]
+    pub fn city(&self, id: &str) -> Option<&City> {
+        self.cities.city(id)
+    }
+
     /// True when the bind address is loopback or a private (RFC 1918, ULA)
     /// address. The engine has no authentication and trusts the `trust`
     /// field, so it must only be reachable from the gateway.
@@ -174,7 +189,7 @@ impl Config {
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let mut c = Config::default();
         parse(&get, "ENGINE_BIND", &mut c.bind, any)?;
-        parse(&get, "ENGINE_OSM_PATH", &mut c.osm_path, any)?;
+        c.cities = cities_from(&get)?;
         if let Some(p) = get("ENGINE_SNAPSHOT_PATH") {
             c.snapshot_path = (!p.trim().is_empty()).then(|| PathBuf::from(p.trim()));
         }
@@ -190,7 +205,6 @@ impl Config {
             }
         })?;
         c.resolution = Resolution::try_from(res).expect("checked range");
-        parse(&get, "ENGINE_BBOX", &mut c.service_bbox, any)?;
 
         let f = &mut c.fusion;
         if let Some(raw) = get("ENGINE_HALF_LIFE_HOURS") {
@@ -247,6 +261,13 @@ impl Config {
         parse(&get, "ENGINE_STALE_HOURS", &mut f.stale_after_h, positive)?;
         parse(&get, "ENGINE_EXPIRE_HOURS", &mut f.expire_after_h, positive)?;
         parse(&get, "ENGINE_FORGET_HOURS", &mut f.forget_after_h, positive)?;
+        parse(&get, "ENGINE_HISTORY_POINTS", &mut f.history_len, |n| {
+            if *n <= 1000 {
+                Ok(())
+            } else {
+                Err("must be between 0 and 1000".into())
+            }
+        })?;
 
         let p = &mut c.policy;
         parse(
@@ -346,6 +367,96 @@ impl Config {
     }
 }
 
+/// Read the city list. See the module docs for the variables.
+fn cities_from(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<City>, ConfigError> {
+    let err = |var: &'static str, value: &str, reason: String| ConfigError {
+        var,
+        value: value.to_string(),
+        reason,
+    };
+    let mut osm_dir = PathBuf::from("../data/osm");
+    parse(get, "ENGINE_OSM_DIR", &mut osm_dir, any)?;
+    let defaults = default_cities(&osm_dir);
+    let list = get("ENGINE_CITIES").unwrap_or_else(|| {
+        DEFAULT_CITIES
+            .iter()
+            .map(|c| c.0)
+            .collect::<Vec<_>>()
+            .join(",")
+    });
+    let mut cities: Vec<City> = Vec::new();
+    for id in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if !valid_id(id) {
+            return Err(err(
+                "ENGINE_CITIES",
+                &list,
+                format!("'{id}' is not a valid city id (lower-case letters, digits and _, starting with a letter)"),
+            ));
+        }
+        if cities.iter().any(|c| c.id == id) {
+            return Err(err(
+                "ENGINE_CITIES",
+                &list,
+                format!("'{id}' is listed twice"),
+            ));
+        }
+        let upper = id.to_ascii_uppercase();
+        // Variable names must be 'static for ConfigError, so leak the few
+        // per-city names; this runs once at start.
+        let var = |suffix: &str| -> &'static str {
+            Box::leak(format!("ENGINE_CITY_{upper}_{suffix}").into_boxed_str())
+        };
+        let mut city = defaults.city(id).cloned().unwrap_or_else(|| City {
+            id: id.to_string(),
+            name: id.to_string(),
+            bbox: BBox {
+                min_lon: f64::NAN,
+                min_lat: f64::NAN,
+                max_lon: f64::NAN,
+                max_lat: f64::NAN,
+            },
+            osm_path: osm_dir.join(format!("{id}-roads.osm.pbf")),
+        });
+        if id == "chennai" {
+            // Older single-city names, kept so existing deployments still work.
+            parse(get, "ENGINE_BBOX", &mut city.bbox, any)?;
+            parse(get, "ENGINE_OSM_PATH", &mut city.osm_path, any)?;
+        }
+        parse(get, var("BBOX"), &mut city.bbox, any)?;
+        parse(get, var("OSM_PATH"), &mut city.osm_path, any)?;
+        if let Some(name) = get(var("NAME")) {
+            let name = name.trim();
+            if name.is_empty() || name.len() > 64 {
+                return Err(err(var("NAME"), name, "must be 1 to 64 characters".into()));
+            }
+            city.name = name.to_string();
+        }
+        if city.bbox.min_lon.is_nan() {
+            return Err(err(
+                "ENGINE_CITIES",
+                &list,
+                format!("'{id}' is not a built-in city, so ENGINE_CITY_{upper}_BBOX is required"),
+            ));
+        }
+        if city.bbox.area_deg2() > 1.0 {
+            return Err(err(
+                var("BBOX"),
+                &city.bbox.to_string(),
+                "a city box may cover at most 1 square degree".into(),
+            ));
+        }
+        cities.push(city);
+    }
+    if cities.is_empty() {
+        return Err(err(
+            "ENGINE_CITIES",
+            &list,
+            "at least one city is required".into(),
+        ));
+    }
+    Ok(cities)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,7 +483,13 @@ mod tests {
         assert_eq!(c.policy.sigma_cap_cm, 10.0);
         assert_eq!(c.policy.growth_cap_cm, 5.0);
         assert_eq!(c.resolution, Resolution::Ten);
-        assert_eq!(c.service_bbox, BBox::CHENNAI);
+        assert_eq!(c.cities.len(), 6);
+        assert_eq!(c.city("chennai").unwrap().bbox, BBox::CHENNAI);
+        assert_eq!(
+            c.city("delhi").unwrap().osm_path,
+            PathBuf::from("../data/osm/delhi-roads.osm.pbf")
+        );
+        assert_eq!(c.fusion.history_len, 48);
         assert_eq!(c.policy.safety_sigmas, 1.5);
     }
 
@@ -408,5 +525,63 @@ mod tests {
         assert_eq!(c.fusion.expire_after_h, 8.0);
         assert_eq!(c.policy.sigma_cap_cm, 12.0);
         assert!(!c.bind_is_internal());
+    }
+
+    #[test]
+    fn city_list_and_overrides() {
+        let c = Config::from_lookup(lookup(&[
+            ("ENGINE_CITIES", "mumbai, pune ,chennai"),
+            ("ENGINE_OSM_DIR", "/osm"),
+            ("ENGINE_CITY_PUNE_BBOX", "73.70,18.40,74.00,18.70"),
+            ("ENGINE_CITY_PUNE_NAME", "Pune"),
+            ("ENGINE_CITY_MUMBAI_OSM_PATH", "/x/m.pbf"),
+            ("ENGINE_BBOX", "80.1,12.9,80.3,13.2"),
+            ("ENGINE_OSM_PATH", "/legacy/chennai.pbf"),
+            ("ENGINE_HISTORY_POINTS", "0"),
+        ]))
+        .unwrap();
+        let ids: Vec<&str> = c.cities.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["mumbai", "pune", "chennai"]);
+        assert_eq!(c.city("pune").unwrap().name, "Pune");
+        assert_eq!(
+            c.city("pune").unwrap().osm_path,
+            PathBuf::from("/osm/pune-roads.osm.pbf")
+        );
+        assert_eq!(
+            c.city("mumbai").unwrap().osm_path,
+            PathBuf::from("/x/m.pbf")
+        );
+        assert_eq!(c.city("chennai").unwrap().bbox.min_lat, 12.9);
+        assert_eq!(
+            c.city("chennai").unwrap().osm_path,
+            PathBuf::from("/legacy/chennai.pbf")
+        );
+        assert_eq!(c.city_at(18.5, 73.8).unwrap().id, "pune");
+        assert_eq!(c.fusion.history_len, 0);
+
+        for (pairs, needle) in [
+            (
+                vec![("ENGINE_CITIES", "pune")],
+                "ENGINE_CITY_PUNE_BBOX is required",
+            ),
+            (vec![("ENGINE_CITIES", "chennai,chennai")], "listed twice"),
+            (vec![("ENGINE_CITIES", "Chennai")], "not a valid city id"),
+            (vec![("ENGINE_CITIES", " , ")], "at least one city"),
+            (
+                vec![("ENGINE_CITY_DELHI_BBOX", "76,28,78,30")],
+                "at most 1 square degree",
+            ),
+            (
+                vec![("ENGINE_CITY_DELHI_BBOX", "1,2,3")],
+                "ENGINE_CITY_DELHI_BBOX",
+            ),
+            (
+                vec![("ENGINE_HISTORY_POINTS", "5000")],
+                "ENGINE_HISTORY_POINTS",
+            ),
+        ] {
+            let e = Config::from_lookup(lookup(&pairs)).unwrap_err().to_string();
+            assert!(e.contains(needle), "{e}");
+        }
     }
 }

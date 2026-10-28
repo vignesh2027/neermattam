@@ -899,6 +899,8 @@ mod tests {
             updated_at: now(),
             last_depth_cm: Some(depth.mean),
             last_reading_age_h: Some(0.0),
+            last_direct_at: Some(now()),
+            neighbour_sources: 0,
         }
     }
 

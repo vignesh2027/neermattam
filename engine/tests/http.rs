@@ -15,9 +15,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
 
+/// Chennai only, no snapshot.
 fn config() -> Config {
+    let d = Config::default();
     Config {
         snapshot_path: None,
+        cities: d.cities.into_iter().filter(|c| c.id == "chennai").collect(),
         ..Config::default()
     }
 }
@@ -86,10 +89,11 @@ async fn health_and_readiness() {
     let (s, b) = send(&app, get("/readyz")).await;
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
     assert!(b["reason"].as_str().unwrap().contains("loading"));
-    state.set_graph(town());
+    assert!(state.set_graph("chennai", town()));
+    assert!(!state.set_graph("atlantis", town()));
     let (s, b) = send(&app, get("/readyz")).await;
     assert_eq!(s, StatusCode::OK);
-    assert!(b["graph"]["nodes"].as_u64().unwrap() > 0);
+    assert!(b["cities"]["chennai"]["nodes"].as_u64().unwrap() > 0);
     let (s, b) = send(&app, get("/nope")).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
     assert!(b["error"].is_string());
@@ -359,7 +363,7 @@ async fn route_returns_advisory_linestring_with_baseline() {
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
     assert!(b["error"].as_str().unwrap().contains("loading"));
 
-    state.set_graph(town());
+    state.set_graph("chennai", town());
     // Flood the southern street.
     send(
         &app,
@@ -463,7 +467,7 @@ async fn snapshot_survives_restart() {
     let path = dir.path().join("cells.json");
     let cfg = Config {
         snapshot_path: Some(path.clone()),
-        ..Config::default()
+        ..config()
     };
     let first = AppState::new(cfg.clone());
     let app = app_with(&first);

@@ -1,27 +1,37 @@
 //! The HTTP API, as specified in `docs/CONTRACTS.md` section 2.
 //!
-//! - `POST /v1/readings`: fuse one depth reading.
-//! - `GET /v1/cells?bbox=minLon,minLat,maxLon,maxLat`: GeoJSON hex cells.
-//! - `GET /v1/route?from=lat,lon&to=lat,lon&vehicle=...`: water-aware route
-//!   as a GeoJSON LineString Feature, with the baseline route in a `baseline`
-//!   member alongside.
-//! - `GET /v1/stream`: server-sent events, one `cell` event per changed cell.
+//! - `POST /v1/readings`: fuse one depth reading from inside any covered city.
+//! - `GET /v1/cells?bbox=minLon,minLat,maxLon,maxLat&city=...`: GeoJSON hex
+//!   cells; at least one of `bbox` and `city`.
+//! - `GET /v1/route?from=lat,lon&to=lat,lon&vehicle=...`: water-aware route on
+//!   the graph of the city holding both ends, as a GeoJSON LineString Feature,
+//!   with the baseline route in a `baseline` member alongside.
+//! - `GET /v1/stream?city=...`: server-sent events, one `cell` event per
+//!   changed cell.
+//! - `GET /v1/cities`: the covered cities with their boxes and graphs.
+//! - `GET /v1/hotspots?city=...&limit=...`: cells ranked by an explained score.
+//! - `GET /v1/summary?city=...`: counts for a control room.
+//! - `GET /v1/recession?cell=...`: a cell's depth history and drain rate.
+//! - `GET /v1/export?city=...&format=geojson|csv`: the city's cells.
 //! - `GET /healthz`, `GET /readyz`.
 //!
 //! Every error is JSON, `{"error": "..."}`, with status 400 for invalid
-//! input, 404 for an unknown path or when no road connects the points, 413
-//! for an oversized body and 503 while the road graph is loading.
+//! input, 404 for an unknown path, an unknown cell or when no road connects
+//! the points, 413 for an oversized body and 503 while a road graph is
+//! loading or has failed.
 
+use crate::analytics;
+use crate::city::{City, CityLookup};
 use crate::config::Config;
 use crate::fusion::{CellView, Grid, Observation};
-use crate::graph::RoadGraph;
+use crate::graph::{GraphStats, RoadGraph};
 use crate::hazard::{assess, HazardClass};
 use crate::persist;
 use crate::routing::{blocking_estimate, plan_route, RouteError, RouteKind, RouteSummary};
 use crate::vehicle::{CrossingLimit, Vehicle};
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{DefaultBodyLimit, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -93,15 +103,42 @@ impl RecentIds {
     }
 }
 
+/// One changed cell, as broadcast to `/v1/stream` subscribers.
+#[derive(Debug)]
+struct CellEvent {
+    /// The city the cell's centre lies in, if any.
+    city: Option<String>,
+    /// The GeoJSON Feature, serialised.
+    data: String,
+}
+
+/// A city's road graph slot: empty while loading, then the graph or an error.
+#[derive(Debug, Default)]
+struct GraphSlot {
+    graph: OnceLock<Arc<RoadGraph>>,
+    error: Mutex<Option<String>>,
+}
+
+/// Where a city's road graph stands.
+#[derive(Clone, Debug)]
+pub enum GraphStatus {
+    /// Still loading.
+    Loading,
+    /// Loaded.
+    Ready(GraphStats),
+    /// Failed to load, with the reason.
+    Failed(String),
+}
+
 /// Shared server state.
 pub struct AppState {
     /// Configuration.
     pub config: Config,
-    /// The live cell map.
+    /// The live cell map, shared by every city (the H3 grid is global).
     pub grid: RwLock<Grid>,
-    graph: OnceLock<Arc<RoadGraph>>,
-    graph_error: Mutex<Option<String>>,
-    events: broadcast::Sender<Arc<str>>,
+    /// One slot per configured city, in `config.cities` order.
+    graphs: Vec<GraphSlot>,
+    events: broadcast::Sender<Arc<CellEvent>>,
     dirty: AtomicBool,
     recent_ids: Mutex<RecentIds>,
     shutdown_tx: watch::Sender<bool>,
@@ -116,30 +153,57 @@ impl AppState {
         let (shutdown_tx, _) = watch::channel(false);
         Arc::new(AppState {
             recent_ids: Mutex::new(RecentIds::new(config.dedupe_capacity)),
+            graphs: config.cities.iter().map(|_| GraphSlot::default()).collect(),
             config,
             grid: RwLock::new(grid),
-            graph: OnceLock::new(),
-            graph_error: Mutex::new(None),
             events,
             dirty: AtomicBool::new(false),
             shutdown_tx,
         })
     }
 
-    /// Install the loaded road graph. Later calls are ignored.
-    pub fn set_graph(&self, g: RoadGraph) {
-        let _ = self.graph.set(Arc::new(g));
+    fn slot(&self, city: &str) -> Option<&GraphSlot> {
+        self.config
+            .cities
+            .iter()
+            .position(|c| c.id == city)
+            .map(|i| &self.graphs[i])
     }
 
-    /// Record why the graph failed to load (reported by `/readyz`).
-    pub fn set_graph_error(&self, e: String) {
-        *self.graph_error.lock() = Some(e);
+    /// Install a city's loaded road graph. Returns false for an unknown city;
+    /// later calls for the same city are ignored.
+    pub fn set_graph(&self, city: &str, g: RoadGraph) -> bool {
+        self.slot(city)
+            .map(|s| {
+                let _ = s.graph.set(Arc::new(g));
+            })
+            .is_some()
     }
 
-    /// The road graph, once loaded.
+    /// Record why a city's graph failed to load (reported by `/readyz`).
+    pub fn set_graph_error(&self, city: &str, e: String) {
+        if let Some(s) = self.slot(city) {
+            *s.error.lock() = Some(e);
+        }
+    }
+
+    /// A city's road graph, once loaded.
     #[must_use]
-    pub fn graph(&self) -> Option<Arc<RoadGraph>> {
-        self.graph.get().cloned()
+    pub fn graph(&self, city: &str) -> Option<Arc<RoadGraph>> {
+        self.slot(city).and_then(|s| s.graph.get().cloned())
+    }
+
+    /// Where a city's road graph stands. Unknown cities report a failure.
+    #[must_use]
+    pub fn graph_status(&self, city: &str) -> GraphStatus {
+        match self.slot(city) {
+            None => GraphStatus::Failed(format!("'{city}' is not a configured city")),
+            Some(s) => match (s.graph.get(), s.error.lock().clone()) {
+                (Some(g), _) => GraphStatus::Ready(g.stats()),
+                (None, Some(e)) => GraphStatus::Failed(e),
+                (None, None) => GraphStatus::Loading,
+            },
+        }
     }
 
     /// Ask streaming responses to end, so graceful shutdown can finish.
@@ -209,6 +273,13 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    fn not_found(message: impl Into<String>) -> Self {
+        ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -275,6 +346,21 @@ pub struct ReadingIn {
     pub trust: Option<f64>,
 }
 
+/// Each covered city with its box, for error messages.
+fn coverage(cfg: &Config) -> String {
+    cfg.cities
+        .iter()
+        .map(|c| format!("{} {}", c.id, c.bbox))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// The id of the city holding a cell's centre.
+fn city_of_cell(cfg: &Config, cell: h3o::CellIndex) -> Option<String> {
+    let c = h3o::LatLng::from(cell);
+    cfg.city_at(c.lat(), c.lng()).map(|c| c.id.clone())
+}
+
 /// Check a reading against the contract. Returns the observation to fuse or a
 /// message for a 400 response.
 pub fn validate_reading(
@@ -287,10 +373,12 @@ pub fn validate_reading(
             return Err("reading_id must be 1 to 128 printable characters".into());
         }
     }
-    if !(r.lat.is_finite() && r.lon.is_finite()) || !cfg.service_bbox.contains(r.lat, r.lon) {
+    if !(r.lat.is_finite() && r.lon.is_finite()) || cfg.city_at(r.lat, r.lon).is_none() {
         return Err(format!(
-            "lat/lon ({}, {}) is outside the service area {} (minLon,minLat,maxLon,maxLat)",
-            r.lat, r.lon, cfg.service_bbox
+            "lat/lon ({}, {}) is outside the service area: it is not inside any covered city ({})",
+            r.lat,
+            r.lon,
+            coverage(cfg)
         ));
     }
     if !(r.depth_cm.is_finite() && (0.0..=500.0).contains(&r.depth_cm)) {
@@ -372,6 +460,8 @@ pub fn validate_reading(
 pub struct CellProperties {
     /// H3 index, hex.
     pub cell: String,
+    /// The covered city the cell's centre lies in, if any.
+    pub city: Option<String>,
     /// Mean depth, cm.
     pub depth_cm: f64,
     /// Depth standard deviation, cm.
@@ -434,6 +524,7 @@ pub fn cell_properties(v: &CellView, cfg: &Config) -> CellProperties {
     );
     CellProperties {
         cell: v.cell.to_string(),
+        city: city_of_cell(cfg, v.cell),
         depth_cm: r1(v.depth.mean),
         depth_sigma_cm: r1(v.depth.sigma()),
         depth_upper_cm: r1(depth_upper),
@@ -499,6 +590,7 @@ struct HazardOut {
 struct ReadingOut {
     reading_id: Option<String>,
     cell: String,
+    city: Option<String>,
     depth_cm: f64,
     depth_sigma_cm: f64,
     depth_upper_cm: f64,
@@ -528,6 +620,7 @@ fn reading_out(
     Ok(ReadingOut {
         reading_id: id,
         cell: p.cell,
+        city: p.city,
         depth_cm: p.depth_cm,
         depth_sigma_cm: p.depth_sigma_cm,
         depth_upper_cm: p.depth_upper_cm,
@@ -599,9 +692,10 @@ async fn post_reading(
         let g = st.grid.read();
         for v in ingested.touched.iter().filter_map(|c| g.view(*c, now)) {
             // No subscribers is fine.
-            let _ = st
-                .events
-                .send(Arc::from(cell_feature(&v, &st.config).to_string()));
+            let _ = st.events.send(Arc::new(CellEvent {
+                city: city_of_cell(&st.config, v.cell),
+                data: cell_feature(&v, &st.config).to_string(),
+            }));
         }
     }
 
@@ -619,31 +713,80 @@ async fn post_reading(
     Ok(Json(out))
 }
 
+/// The optional `city` query parameter, checked against the configuration.
+fn city_param<'a>(
+    q: &HashMap<String, String>,
+    cfg: &'a Config,
+) -> Result<Option<&'a City>, ApiError> {
+    match q.get("city").map(|s| s.trim()) {
+        None => Ok(None),
+        Some(id) => cfg.city(id).map(Some).ok_or_else(|| {
+            ApiError::bad_request(format!(
+                "unknown city '{id}'; covered cities are {}",
+                cfg.cities.ids()
+            ))
+        }),
+    }
+}
+
+/// A required `city` query parameter.
+fn required_city<'a>(q: &HashMap<String, String>, cfg: &'a Config) -> Result<&'a City, ApiError> {
+    city_param(q, cfg)?.ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "city is required; covered cities are {}",
+            cfg.cities.ids()
+        ))
+    })
+}
+
+/// True when the cell's centre is inside the box.
+fn cell_in(bbox: &crate::geo::BBox, cell: h3o::CellIndex) -> bool {
+    let c = h3o::LatLng::from(cell);
+    bbox.contains(c.lat(), c.lng())
+}
+
+/// Every cell with state whose centre is in the city's box (all cells when
+/// `city` is `None`), sorted by index.
+fn city_views(st: &AppState, city: Option<&City>, now: DateTime<Utc>) -> Vec<CellView> {
+    let mut views: Vec<CellView> = {
+        let g = st.grid.read();
+        g.views(now)
+            .filter(|v| city.is_none_or(|c| cell_in(&c.bbox, v.cell)))
+            .collect()
+    };
+    views.sort_unstable_by_key(|v| u64::from(v.cell));
+    views
+}
+
 async fn get_cells(
     State(st): State<Arc<AppState>>,
     q: Result<Query<HashMap<String, String>>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let Query(q) = q?;
-    let raw = q.get("bbox").ok_or_else(|| {
-        ApiError::bad_request("bbox is required: bbox=minLon,minLat,maxLon,maxLat")
-    })?;
-    let bbox: crate::geo::BBox = raw.parse().map_err(ApiError::bad_request)?;
-    if bbox.area_deg2() > 1.0 {
+    let city = city_param(&q, &st.config)?;
+    let bbox: Option<crate::geo::BBox> = q
+        .get("bbox")
+        .map(|raw| raw.parse().map_err(ApiError::bad_request))
+        .transpose()?;
+    let area = match (bbox, city) {
+        (Some(b), _) => b,
+        (None, Some(c)) => c.bbox,
+        (None, None) => {
+            return Err(ApiError::bad_request(
+                "bbox or city is required: bbox=minLon,minLat,maxLon,maxLat or city=<id>",
+            ))
+        }
+    };
+    if area.area_deg2() > 1.0 {
         return Err(ApiError::bad_request(
             "bbox is too large: at most 1 square degree per request",
         ));
     }
     let now = Utc::now();
-    let mut views: Vec<CellView> = {
-        let g = st.grid.read();
-        g.views(now)
-            .filter(|v| {
-                let c = h3o::LatLng::from(v.cell);
-                bbox.contains(c.lat(), c.lng())
-            })
-            .collect()
-    };
-    views.sort_unstable_by_key(|v| u64::from(v.cell));
+    let mut views: Vec<CellView> = city_views(&st, city, now)
+        .into_iter()
+        .filter(|v| cell_in(&area, v.cell))
+        .collect();
     let truncated = views.len() > st.config.max_cells;
     views.truncate(st.config.max_cells);
     let features: Vec<Value> = views.iter().map(|v| cell_feature(v, &st.config)).collect();
@@ -655,11 +798,7 @@ async fn get_cells(
     })))
 }
 
-fn parse_point(
-    q: &HashMap<String, String>,
-    key: &str,
-    cfg: &Config,
-) -> Result<(f64, f64), ApiError> {
+fn parse_point(q: &HashMap<String, String>, key: &str) -> Result<(f64, f64), ApiError> {
     let raw = q
         .get(key)
         .ok_or_else(|| ApiError::bad_request(format!("{key} is required: {key}=lat,lon")))?;
@@ -676,16 +815,16 @@ fn parse_point(
             )))
         }
     };
-    if !cfg.service_bbox.contains(lat, lon) {
-        return Err(ApiError::bad_request(format!(
-            "{key} ({lat}, {lon}) is outside the service area {} (minLon,minLat,maxLon,maxLat); note the order is lat,lon",
-            cfg.service_bbox
-        )));
-    }
     Ok((lat, lon))
 }
 
-fn route_feature(s: &RouteSummary, vehicle: Vehicle, cfg: &Config, now: DateTime<Utc>) -> Value {
+fn route_feature(
+    s: &RouteSummary,
+    vehicle: Vehicle,
+    city: &City,
+    cfg: &Config,
+    now: DateTime<Utc>,
+) -> Value {
     let mut coords: Vec<[f64; 2]> = s.coordinates.iter().map(|c| [r6(c[0]), r6(c[1])]).collect();
     if coords.len() == 1 {
         // Start and end snapped to the same node; GeoJSON needs two positions.
@@ -700,6 +839,7 @@ fn route_feature(s: &RouteSummary, vehicle: Vehicle, cfg: &Config, now: DateTime
         "geometry": { "type": "LineString", "coordinates": coords },
         "properties": {
             "vehicle": vehicle,
+            "city": city.id,
             "route_kind": s.kind,
             "distance_m": s.distance_m.round(),
             "eta_min": r1(s.eta_min),
@@ -730,8 +870,8 @@ async fn get_route(
 ) -> Result<Json<Value>, ApiError> {
     let Query(q) = q?;
     let cfg = &st.config;
-    let from = parse_point(&q, "from", cfg)?;
-    let to = parse_point(&q, "to", cfg)?;
+    let from = parse_point(&q, "from")?;
+    let to = parse_point(&q, "to")?;
     let vehicle: Vehicle = q
         .get("vehicle")
         .ok_or_else(|| {
@@ -739,10 +879,44 @@ async fn get_route(
         })?
         .parse()
         .map_err(ApiError::bad_request)?;
-    let graph = st.graph().ok_or_else(|| ApiError {
-        status: StatusCode::SERVICE_UNAVAILABLE,
-        message: "the road graph is still loading; try again shortly".into(),
-    })?;
+    let outside = |key: &str, (lat, lon): (f64, f64)| {
+        ApiError::bad_request(format!(
+            "{key} ({lat}, {lon}) is outside every covered city ({}); note the order is lat,lon",
+            coverage(cfg)
+        ))
+    };
+    let from_city = cfg
+        .city_at(from.0, from.1)
+        .ok_or_else(|| outside("from", from))?;
+    let to_city = cfg.city_at(to.0, to.1).ok_or_else(|| outside("to", to))?;
+    if from_city.id != to_city.id {
+        return Err(ApiError::bad_request(format!(
+            "from is in {} and to is in {}; a route must start and end in the same city",
+            from_city.name, to_city.name
+        )));
+    }
+    let city = from_city;
+    let graph = match st.graph_status(&city.id) {
+        GraphStatus::Ready(_) => st.graph(&city.id).expect("ready graph"),
+        GraphStatus::Loading => {
+            return Err(ApiError {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                message: format!(
+                    "the road graph for {} is still loading; try again shortly",
+                    city.name
+                ),
+            })
+        }
+        GraphStatus::Failed(e) => {
+            return Err(ApiError {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                message: format!(
+                    "the road graph for {} is unavailable, so routes there cannot be planned: {e}",
+                    city.name
+                ),
+            })
+        }
+    };
     let now = Utc::now();
     let water = st.grid.read().water_map(now);
     let policy = cfg.policy;
@@ -763,6 +937,7 @@ async fn get_route(
     })?;
     info!(
         vehicle = %vehicle,
+        city = %city.id,
         kind = ?result.route.kind,
         distance_m = result.route.distance_m.round(),
         baseline_m = result.baseline.distance_m.round(),
@@ -770,30 +945,319 @@ async fn get_route(
         elapsed_us = started.elapsed().as_micros() as u64,
         "route planned"
     );
-    let mut feature = route_feature(&result.route, vehicle, cfg, now);
-    feature["baseline"] = route_feature(&result.baseline, vehicle, cfg, now);
+    let mut feature = route_feature(&result.route, vehicle, city, cfg, now);
+    feature["baseline"] = route_feature(&result.baseline, vehicle, city, cfg, now);
     debug_assert!(result.route.kind != RouteKind::Baseline);
     Ok(Json(feature))
 }
 
 async fn stream(
     State(st): State<Arc<AppState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    q: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let Query(q) = q?;
+    let only: Option<String> = city_param(&q, &st.config)?.map(|c| c.id.clone());
     let rx = st.events.subscribe();
     let mut stop = st.shutdown_tx.subscribe();
     let stopped = async move {
         let _ = stop.wait_for(|v| *v).await;
     };
     let events = BroadcastStream::new(rx)
-        .map(|item| {
-            Ok(match item {
-                Ok(data) => Event::default().event("cell").data(data.as_ref()),
-                Err(BroadcastStreamRecvError::Lagged(n)) => Event::default()
-                    .comment(format!("lagged: {n} events dropped, refetch /v1/cells")),
-            })
+        .filter_map(move |item| {
+            let out = match item {
+                Ok(ev) if only.is_none() || ev.city == only => {
+                    Some(Ok(Event::default().event("cell").data(&ev.data)))
+                }
+                Ok(_) => None,
+                Err(BroadcastStreamRecvError::Lagged(n)) => Some(Ok(Event::default()
+                    .comment(format!("lagged: {n} events dropped, refetch /v1/cells")))),
+            };
+            std::future::ready(out)
         })
         .take_until(stopped);
-    Sse::new(events).keep_alive(KeepAlive::default())
+    Ok(Sse::new(events).keep_alive(KeepAlive::default()))
+}
+
+fn graph_json(status: &GraphStatus) -> Value {
+    match status {
+        GraphStatus::Loading => json!({ "status": "loading" }),
+        GraphStatus::Failed(e) => json!({ "status": "failed", "error": e }),
+        GraphStatus::Ready(s) => json!({
+            "status": "ready",
+            "ways": s.ways,
+            "nodes": s.nodes,
+            "edges": s.edges,
+            "segments": s.segments,
+            "segment_cell_refs": s.segment_cell_refs,
+            "memory_bytes": s.memory_bytes,
+            "memory_mib": r1(s.memory_bytes as f64 / 1_048_576.0),
+            "parse_ms": s.parse_ms,
+            "build_ms": s.build_ms,
+        }),
+    }
+}
+
+async fn get_cities(State(st): State<Arc<AppState>>) -> Json<Value> {
+    let now = Utc::now();
+    let views: Vec<CellView> = st.grid.read().views(now).collect();
+    let cities: Vec<Value> = st
+        .config
+        .cities
+        .iter()
+        .map(|c| {
+            let (lat, lon) = c.centre();
+            let cells = views.iter().filter(|v| cell_in(&c.bbox, v.cell)).count();
+            json!({
+                "id": c.id,
+                "name": c.name,
+                "bbox": [c.bbox.min_lon, c.bbox.min_lat, c.bbox.max_lon, c.bbox.max_lat],
+                "centre": { "lat": r6(lat), "lon": r6(lon) },
+                "cells": cells,
+                "graph": graph_json(&st.graph_status(&c.id)),
+            })
+        })
+        .collect();
+    Json(json!({ "cities": cities, "generated_at": now }))
+}
+
+/// Default and largest `limit` for `/v1/hotspots`.
+const HOTSPOT_DEFAULT_LIMIT: usize = 20;
+const HOTSPOT_MAX_LIMIT: usize = 200;
+
+async fn get_hotspots(
+    State(st): State<Arc<AppState>>,
+    q: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let Query(q) = q?;
+    let city = city_param(&q, &st.config)?;
+    let limit = match q.get("limit") {
+        None => HOTSPOT_DEFAULT_LIMIT,
+        Some(raw) => raw
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|n| (1..=HOTSPOT_MAX_LIMIT).contains(n))
+            .ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "limit must be a whole number from 1 to {HOTSPOT_MAX_LIMIT}, got '{raw}'"
+                ))
+            })?,
+    };
+    let now = Utc::now();
+    let views = city_views(&st, city, now);
+    let cfg = &st.config;
+    let ranked = analytics::hotspots(views, &cfg.policy, &cfg.fusion, now, limit);
+    Ok(Json(json!({
+        "city": city.map(|c| &c.id),
+        "generated_at": now,
+        "advisory": true,
+        "score": "depth 40 x min(depth_block / 60 cm, 1) + hazard 0, 10, 20 or 30 by class at depth_block + freshness 20 x (1 - age_h / 12) + reports 10 x min(independent reports / 5, 1)",
+        "count": ranked.len(),
+        "hotspots": ranked,
+    })))
+}
+
+async fn get_summary(
+    State(st): State<Arc<AppState>>,
+    q: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let Query(q) = q?;
+    let city = city_param(&q, &st.config)?;
+    let now = Utc::now();
+    let views = city_views(&st, city, now);
+    let cfg = &st.config;
+    let summary = analytics::summarise(views, &cfg.policy, &cfg.fusion, now);
+    let mut out = serde_json::to_value(&summary).expect("summary serialises");
+    out["city"] = json!(city.map(|c| &c.id));
+    out["generated_at"] = json!(now);
+    Ok(Json(out))
+}
+
+async fn get_recession(
+    State(st): State<Arc<AppState>>,
+    q: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let Query(q) = q?;
+    let raw = q
+        .get("cell")
+        .map(|s| s.trim())
+        .ok_or_else(|| ApiError::bad_request("cell is required: cell=<H3 index in hex>"))?;
+    let cell: h3o::CellIndex = raw
+        .parse()
+        .map_err(|_| ApiError::bad_request(format!("cell '{raw}' is not a valid H3 cell index")))?;
+    let res = st.config.resolution;
+    if cell.resolution() != res {
+        return Err(ApiError::bad_request(format!(
+            "cell {raw} is at H3 resolution {}; the engine's cells are at resolution {}",
+            u8::from(cell.resolution()),
+            u8::from(res)
+        )));
+    }
+    let now = Utc::now();
+    let (view, history) = {
+        let g = st.grid.read();
+        match (g.view(cell, now), g.state(cell)) {
+            (Some(v), Some(s)) => (v, s.history.iter().copied().collect::<Vec<_>>()),
+            _ => {
+                return Err(ApiError::not_found(format!(
+                    "no reports have touched cell {raw}"
+                )))
+            }
+        }
+    };
+    let (drain, note) = match analytics::drain_estimate(&history) {
+        Ok(d) => (
+            Some(d),
+            format!(
+                "A weighted straight-line fit to this cell's direct readings over the last {} hours. It describes the recent past, is not a forecast, and never opens a road.",
+                analytics::DRAIN_WINDOW_H
+            ),
+        ),
+        Err(reason) => (None, format!("No drain rate: {reason}.")),
+    };
+    let centre = h3o::LatLng::from(cell);
+    let history: Vec<Value> = history
+        .iter()
+        .map(|p| {
+            json!({
+                "at": p.at,
+                "reading_cm": r1(p.reading_cm),
+                "reading_sigma_cm": r1(p.reading_sigma_cm),
+                "fused_cm": r1(p.fused_cm),
+                "fused_sigma_cm": r1(p.fused_sigma_cm),
+                "migrated": p.migrated,
+            })
+        })
+        .collect();
+    Ok(Json(json!({
+        "cell": cell.to_string(),
+        "city": city_of_cell(&st.config, cell),
+        "lat": r6(centre.lat()),
+        "lon": r6(centre.lng()),
+        "advisory": true,
+        "current": cell_properties(&view, &st.config),
+        "history_capacity": st.config.fusion.history_len,
+        "history": history,
+        "drain": drain.map(|d| json!({
+            "rate_cm_per_h": r2(d.rate_cm_per_h),
+            "rate_sigma_cm_per_h": r2(d.rate_sigma_cm_per_h),
+            "trend": d.trend,
+            "points_used": d.points_used,
+            "from": d.from,
+            "to": d.to,
+            "hours_to_15_cm": d.hours_to_15_cm.map(r1),
+        })),
+        "drain_note": note,
+        "generated_at": now,
+    })))
+}
+
+/// Columns of `/v1/export?format=csv`, in order.
+pub const EXPORT_CSV_COLUMNS: [&str; 24] = [
+    "cell",
+    "city",
+    "lat",
+    "lon",
+    "depth_cm",
+    "depth_sigma_cm",
+    "depth_upper_cm",
+    "depth_sigma_meas_cm",
+    "conflict_high_mean_cm",
+    "velocity_mps",
+    "velocity_sigma_mps",
+    "velocity_assumed",
+    "hazard_rating",
+    "hazard_class",
+    "hazard_class_upper",
+    "debris_factor",
+    "unknown",
+    "expired",
+    "n_readings",
+    "n_neighbour",
+    "conflicts",
+    "updated_at",
+    "last_depth_cm",
+    "last_reading_age_h",
+];
+
+/// Quote a CSV field when it holds a comma, a quote or a line break.
+fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+fn csv_row(v: &CellView, cfg: &Config) -> String {
+    let p = serde_json::to_value(cell_properties(v, cfg)).expect("properties serialise");
+    let c = h3o::LatLng::from(v.cell);
+    EXPORT_CSV_COLUMNS
+        .iter()
+        .map(|col| match *col {
+            "lat" => r6(c.lat()).to_string(),
+            "lon" => r6(c.lng()).to_string(),
+            key => match &p[key] {
+                Value::Null => String::new(),
+                Value::String(s) => csv_field(s),
+                other => csv_field(&other.to_string()),
+            },
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+async fn get_export(
+    State(st): State<Arc<AppState>>,
+    q: Result<Query<HashMap<String, String>>, QueryRejection>,
+) -> Result<Response, ApiError> {
+    let Query(q) = q?;
+    let cfg = &st.config;
+    let city = required_city(&q, cfg)?;
+    let format = q.get("format").map_or("geojson", |s| s.trim());
+    if !matches!(format, "geojson" | "csv") {
+        return Err(ApiError::bad_request(format!(
+            "format must be geojson or csv, got '{format}'"
+        )));
+    }
+    let now = Utc::now();
+    let mut views = city_views(&st, Some(city), now);
+    let truncated = views.len() > cfg.max_cells;
+    views.truncate(cfg.max_cells);
+    let stamp = now.format("%Y%m%dT%H%M%SZ");
+    let (body, content_type, ext) = if format == "csv" {
+        let mut out = EXPORT_CSV_COLUMNS.join(",");
+        out.push('\n');
+        for v in &views {
+            out.push_str(&csv_row(v, cfg));
+            out.push('\n');
+        }
+        (out, "text/csv; charset=utf-8", "csv")
+    } else {
+        let features: Vec<Value> = views.iter().map(|v| cell_feature(v, cfg)).collect();
+        let doc = json!({
+            "type": "FeatureCollection",
+            "city": city.id,
+            "features": features,
+            "truncated": truncated,
+            "generated_at": now,
+        });
+        (doc.to_string(), "application/geo+json", "geojson")
+    };
+    let mut resp = body.into_response();
+    let h = resp.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    if let Ok(v) = HeaderValue::from_str(&format!(
+        "attachment; filename=\"neermattam-{}-{stamp}.{ext}\"",
+        city.id
+    )) {
+        h.insert(header::CONTENT_DISPOSITION, v);
+    }
+    h.insert(
+        "x-neermattam-truncated",
+        HeaderValue::from_static(if truncated { "true" } else { "false" }),
+    );
+    Ok(resp)
 }
 
 async fn healthz() -> Json<Value> {
@@ -802,18 +1266,37 @@ async fn healthz() -> Json<Value> {
 
 async fn readyz(State(st): State<Arc<AppState>>) -> Response {
     let cells = st.grid.read().len();
-    if let Some(g) = st.graph() {
-        return Json(json!({ "status": "ready", "graph": g.stats(), "cells": cells }))
+    let mut loading = Vec::new();
+    let mut failed = Vec::new();
+    let mut per_city = serde_json::Map::new();
+    for c in &st.config.cities {
+        let status = st.graph_status(&c.id);
+        match &status {
+            GraphStatus::Loading => loading.push(c.id.clone()),
+            GraphStatus::Failed(e) => failed.push(format!("{}: {e}", c.id)),
+            GraphStatus::Ready(_) => {}
+        }
+        per_city.insert(c.id.clone(), graph_json(&status));
+    }
+    if loading.is_empty() && failed.is_empty() {
+        return Json(json!({ "status": "ready", "cities": per_city, "cells": cells }))
             .into_response();
     }
-    let reason = st
-        .graph_error
-        .lock()
-        .clone()
-        .unwrap_or_else(|| "road graph is still loading".into());
+    let mut reasons = Vec::new();
+    if !loading.is_empty() {
+        reasons.push(format!("road graphs still loading: {}", loading.join(", ")));
+    }
+    if !failed.is_empty() {
+        reasons.push(format!("road graphs failed: {}", failed.join("; ")));
+    }
     (
         StatusCode::SERVICE_UNAVAILABLE,
-        Json(json!({ "status": "not_ready", "reason": reason, "cells": cells })),
+        Json(json!({
+            "status": "not_ready",
+            "reason": reasons.join(". "),
+            "cities": per_city,
+            "cells": cells,
+        })),
     )
         .into_response()
 }
@@ -839,6 +1322,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/readings", post(post_reading))
         .route("/v1/cells", get(get_cells))
         .route("/v1/route", get(get_route))
+        .route("/v1/cities", get(get_cities))
+        .route("/v1/hotspots", get(get_hotspots))
+        .route("/v1/summary", get(get_summary))
+        .route("/v1/recession", get(get_recession))
+        .route("/v1/export", get(get_export))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .layer(TimeoutLayer::with_status_code(

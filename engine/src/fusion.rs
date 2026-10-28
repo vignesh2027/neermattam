@@ -104,6 +104,11 @@
 //! report 40 cm, 13 h ago". Cells are dropped from memory after
 //! `forget_after_h` hours (48 h).
 //!
+//! **History.** Each cell keeps its last `history_len` (48) direct readings as
+//! [`HistoryPoint`]s: the reading as fused (after the sigma floor and trust)
+//! and the cell's direct estimate just after it. The history is for the
+//! control room's recession view only; routing never reads it.
+//!
 //! **Velocity.** Velocity uses the same steps with its own noise rate
 //! (`velocity_noise_mps_per_sqrt_h`) and neighbour inflation. Velocity is
 //! shown as unknown when it has never been observed, its standard deviation
@@ -113,7 +118,7 @@
 use chrono::{DateTime, Duration, Utc};
 use h3o::{CellIndex, LatLng, Resolution};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
 use thiserror::Error;
 
@@ -171,6 +176,8 @@ pub struct FusionParams {
     pub expire_after_h: f64,
     /// Hours without evidence after which a cell is dropped from memory.
     pub forget_after_h: f64,
+    /// Depth history points kept per cell (see [`HistoryPoint`]); 0 keeps none.
+    pub history_len: usize,
 }
 
 impl Default for FusionParams {
@@ -186,6 +193,7 @@ impl Default for FusionParams {
             stale_after_h: 6.0,
             expire_after_h: 12.0,
             forget_after_h: 48.0,
+            history_len: 48,
         }
     }
 }
@@ -367,6 +375,41 @@ pub struct NeighbourTrack {
     pub track: Track,
 }
 
+/// One direct reading in a cell's depth history, with the cell's direct
+/// estimate just after it was fused.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HistoryPoint {
+    /// When the water was seen (`observed_at`).
+    pub at: DateTime<Utc>,
+    /// The reading, cm.
+    pub reading_cm: f64,
+    /// The reading's standard deviation as fused (after the 1 cm floor and
+    /// the trust weighting), cm.
+    pub reading_sigma_cm: f64,
+    /// The cell's direct depth estimate just after this reading, cm. For a
+    /// reading that arrived late this is the estimate at the cell's newer
+    /// state time.
+    pub fused_cm: f64,
+    /// Standard deviation of that estimate, cm.
+    pub fused_sigma_cm: f64,
+    /// True for a point made when a version 3 snapshot was migrated. Those
+    /// files kept only the estimate after the latest reading, not the reading,
+    /// so `reading_cm` repeats `fused_cm` and the point is left out of drain
+    /// estimates.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub migrated: bool,
+}
+
+impl HistoryPoint {
+    fn is_valid(&self) -> bool {
+        self.reading_cm.is_finite()
+            && self.reading_sigma_cm.is_finite()
+            && self.reading_sigma_cm > 0.0
+            && self.fused_cm.is_finite()
+            && self.fused_sigma_cm.is_finite()
+    }
+}
+
 /// One piece of evidence about one cell.
 #[derive(Clone, Copy, Debug)]
 struct Evidence {
@@ -416,6 +459,10 @@ pub struct CellState {
     pub n_readings: u32,
     /// Neighbour readings fused into this cell.
     pub n_neighbour: u32,
+    /// The latest direct readings, oldest first, at most
+    /// `FusionParams::history_len` of them.
+    #[serde(default)]
+    pub history: VecDeque<HistoryPoint>,
 }
 
 impl CellState {
@@ -435,6 +482,7 @@ impl CellState {
             conflict_agree: 0,
             n_readings: 0,
             n_neighbour: 0,
+            history: VecDeque::new(),
         }
     }
 
@@ -448,6 +496,54 @@ impl CellState {
             && self.conflict_floor_var >= 0.0
             && self.last_depth_cm.is_none_or(f64::is_finite)
             && self.conflict_high_mean_cm.is_none_or(f64::is_finite)
+            && self.history.iter().all(HistoryPoint::is_valid)
+    }
+
+    /// Give a state loaded from a version 3 snapshot, which had no history,
+    /// one migrated point from what that format kept: the time of the latest
+    /// direct reading and the estimate just after it.
+    pub fn migrate_v3_history(&mut self, p: &FusionParams) {
+        if p.history_len == 0 || !self.history.is_empty() {
+            return;
+        }
+        if let (Some(at), Some(depth), Some(d)) =
+            (self.last_direct_at, self.last_depth_cm, self.direct)
+        {
+            let sigma = d.meas_var.sqrt();
+            self.history.push_back(HistoryPoint {
+                at,
+                reading_cm: depth,
+                reading_sigma_cm: sigma,
+                fused_cm: depth,
+                fused_sigma_cm: sigma,
+                migrated: true,
+            });
+        }
+    }
+
+    /// Record a direct reading in the bounded history, keeping it in time
+    /// order.
+    fn record(&mut self, ev: &Evidence, p: &FusionParams) {
+        if p.history_len == 0 {
+            self.history.clear();
+            return;
+        }
+        let Some(fused) = self.direct_at(self.as_of, p) else {
+            return;
+        };
+        let point = HistoryPoint {
+            at: ev.at,
+            reading_cm: ev.track.depth.mean,
+            reading_sigma_cm: ev.track.depth.sigma(),
+            fused_cm: fused.depth.mean.max(0.0),
+            fused_sigma_cm: fused.depth.sigma(),
+            migrated: false,
+        };
+        let pos = self.history.partition_point(|h| h.at <= ev.at);
+        self.history.insert(pos, point);
+        while self.history.len() > p.history_len {
+            self.history.pop_front();
+        }
     }
 
     /// True while a conflict is in force at `t`.
@@ -625,6 +721,7 @@ impl CellState {
                 self.n_readings = self.n_readings.saturating_add(1);
                 self.last_direct_at = Some(self.last_direct_at.map_or(ev.at, |t| t.max(ev.at)));
                 self.last_depth_cm = self.direct.map(|d| d.depth.mean.max(0.0));
+                self.record(ev, p);
             }
             Some(from) => {
                 match self.neighbours.iter_mut().find(|n| n.from == from) {
@@ -685,6 +782,10 @@ pub struct CellView {
     pub last_depth_cm: Option<f64>,
     /// Hours since the latest direct reading.
     pub last_reading_age_h: Option<f64>,
+    /// Time of the latest direct reading.
+    pub last_direct_at: Option<DateTime<Utc>>,
+    /// Adjacent cells whose readings are still in force here.
+    pub neighbour_sources: u32,
 }
 
 /// A validated observation, as accepted by [`Grid::ingest`].
@@ -774,6 +875,12 @@ impl Grid {
     /// Raw stored states, for snapshots.
     pub fn states(&self) -> impl Iterator<Item = (&CellIndex, &CellState)> {
         self.cells.iter()
+    }
+
+    /// The stored state of one cell.
+    #[must_use]
+    pub fn state(&self, cell: CellIndex) -> Option<&CellState> {
+        self.cells.get(&cell)
     }
 
     /// Replace a cell's stored state (used when loading a snapshot).
@@ -898,6 +1005,12 @@ impl Grid {
             updated_at: s.last_evidence_at,
             last_depth_cm: s.last_depth_cm,
             last_reading_age_h: s.last_direct_at.map(|at| hours_between(at, now).max(0.0)),
+            last_direct_at: s.last_direct_at,
+            neighbour_sources: s
+                .neighbours
+                .iter()
+                .filter(|n| hours_between(n.last_at, now) <= p.expire_after_h)
+                .count() as u32,
         }
     }
 
@@ -1269,6 +1382,61 @@ mod tests {
         o.lat = 95.0;
         assert!(g.ingest(&o).is_err());
         assert!(g.is_empty());
+    }
+
+    #[test]
+    fn history_is_bounded_ordered_and_off_when_zero() {
+        let p = FusionParams {
+            history_len: 3,
+            ..FusionParams::default()
+        };
+        let mut g = Grid::new(p, Resolution::Ten);
+        let mut cell = None;
+        for (i, d) in [40.0, 36.0, 30.0, 25.0].into_iter().enumerate() {
+            cell = Some(g.ingest(&obs(d, 3.0, t(i as f64))).unwrap().cell);
+        }
+        let cell = cell.unwrap();
+        // A late reading slots into time order.
+        g.ingest(&obs(33.0, 3.0, t(1.5))).unwrap();
+        let h = &g.state(cell).unwrap().history;
+        let readings: Vec<f64> = h.iter().map(|p| p.reading_cm).collect();
+        assert_eq!(readings, [33.0, 30.0, 25.0]);
+        assert!(h.iter().zip(h.iter().skip(1)).all(|(a, b)| a.at <= b.at));
+        let last = h.back().unwrap();
+        assert!(close(last.reading_sigma_cm, 3.0, 1e-9));
+        assert!(last.fused_cm > 25.0 && last.fused_cm < 33.0);
+        assert!(last.fused_sigma_cm < 3.0);
+        // Neighbour cells keep no history of their own.
+        let ring: Vec<CellIndex> = cell.grid_disk(1);
+        let n = ring.into_iter().find(|c| *c != cell).unwrap();
+        assert!(g.state(n).unwrap().history.is_empty());
+        // history_len 0 keeps nothing.
+        let mut g0 = Grid::new(
+            FusionParams {
+                history_len: 0,
+                ..FusionParams::default()
+            },
+            Resolution::Ten,
+        );
+        let r = g0.ingest(&obs(10.0, 3.0, t(0.0))).unwrap();
+        assert!(g0.state(r.cell).unwrap().history.is_empty());
+    }
+
+    #[test]
+    fn view_counts_live_neighbour_sources() {
+        let mut g = grid();
+        let c = g.cell_at(12.9791, 80.2209).unwrap();
+        let ring: Vec<CellIndex> = c.grid_disk(1);
+        for (k, cell) in ring.iter().filter(|n| **n != c).take(2).enumerate() {
+            let ll = h3o::LatLng::from(*cell);
+            let mut o = obs(10.0, 3.0, t(k as f64 * 10.0));
+            o.lat = ll.lat();
+            o.lon = ll.lng();
+            g.ingest(&o).unwrap();
+        }
+        assert_eq!(g.view(c, t(10.0)).unwrap().neighbour_sources, 2);
+        // The first neighbour's report expires 12 hours after it was made.
+        assert_eq!(g.view(c, t(12.5)).unwrap().neighbour_sources, 1);
     }
 
     #[test]

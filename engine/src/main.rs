@@ -87,39 +87,67 @@ async fn main() -> ExitCode {
     info!(
         bind = %config.bind,
         resolution = u8::from(config.resolution),
-        bbox = %config.service_bbox,
-        osm = %config.osm_path.display(),
+        cities = %config.cities.iter().map(|c| c.id.as_str()).collect::<Vec<_>>().join(","),
         "starting neermattam-engine"
     );
 
     let state = AppState::new(config);
     load_snapshot(&state);
 
-    // Load the road graph in the background; /readyz reports progress.
+    // Load every city's road graph in the background, in parallel; /readyz
+    // and /v1/cities report progress. A city whose graph fails still accepts
+    // readings; only its routes are unavailable.
     {
-        let st = Arc::clone(&state);
-        tokio::task::spawn_blocking(move || {
-            let path = st.config.osm_path.clone();
-            match RoadGraph::load_pbf(&path, st.config.resolution) {
-                Ok(g) => {
-                    let s = g.stats();
-                    info!(
-                        ways = s.ways,
-                        nodes = s.nodes,
-                        edges = s.edges,
-                        segments = s.segments,
-                        memory_mib = format!("{:.1}", s.memory_bytes as f64 / 1_048_576.0),
-                        parse_ms = s.parse_ms,
-                        build_ms = s.build_ms,
-                        "road graph ready"
-                    );
-                    st.set_graph(g);
+        let started = std::time::Instant::now();
+        let mut loads = tokio::task::JoinSet::new();
+        for city in state.config.cities.clone() {
+            let st = Arc::clone(&state);
+            loads.spawn_blocking(move || {
+                let t = std::time::Instant::now();
+                match RoadGraph::load_pbf(&city.osm_path, st.config.resolution) {
+                    Ok(g) => {
+                        let s = g.stats();
+                        info!(
+                            city = %city.id,
+                            ways = s.ways,
+                            nodes = s.nodes,
+                            edges = s.edges,
+                            segments = s.segments,
+                            memory_mib = format!("{:.1}", s.memory_bytes as f64 / 1_048_576.0),
+                            parse_ms = s.parse_ms,
+                            build_ms = s.build_ms,
+                            wall_ms = t.elapsed().as_millis() as u64,
+                            "road graph ready"
+                        );
+                        st.set_graph(&city.id, g);
+                        Some(s.memory_bytes)
+                    }
+                    Err(e) => {
+                        error!(city = %city.id, error = %e, "road graph failed to load; routing in this city is unavailable");
+                        st.set_graph_error(&city.id, e.to_string());
+                        None
+                    }
                 }
-                Err(e) => {
-                    error!(error = %e, "road graph failed to load; routing is unavailable");
-                    st.set_graph_error(e.to_string());
+            });
+        }
+        tokio::spawn(async move {
+            let (mut ok, mut failed, mut bytes) = (0, 0, 0usize);
+            while let Some(r) = loads.join_next().await {
+                match r {
+                    Ok(Some(b)) => {
+                        ok += 1;
+                        bytes += b;
+                    }
+                    _ => failed += 1,
                 }
             }
+            info!(
+                loaded = ok,
+                failed,
+                memory_mib = format!("{:.1}", bytes as f64 / 1_048_576.0),
+                wall_ms = started.elapsed().as_millis() as u64,
+                "all road graphs processed"
+            );
         });
     }
 

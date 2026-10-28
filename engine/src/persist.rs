@@ -15,9 +15,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const FORMAT: &str = "neermattam-engine-cells";
-/// Version 3 keeps direct and per-neighbour tracks separately, each with its
-/// measurement variance. Older files are refused and moved aside at start.
-const VERSION: u32 = 3;
+/// Version 4 adds each cell's depth history. Version 3 (direct and
+/// per-neighbour tracks, each with its measurement variance) is migrated on
+/// load: its cells get a single history point marked `migrated` from the
+/// latest direct level it kept. Older files are refused and moved aside at
+/// start.
+const VERSION: u32 = 4;
+/// The oldest version [`load`] can migrate.
+const OLDEST_MIGRATABLE: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct Snapshot {
@@ -144,7 +149,7 @@ pub fn load(path: &Path, grid: &mut Grid) -> Result<usize, PersistError> {
         reason,
     };
     let snap: Snapshot = serde_json::from_slice(&bytes).map_err(|e| invalid(e.to_string()))?;
-    if snap.format != FORMAT || snap.version != VERSION {
+    if snap.format != FORMAT || !(OLDEST_MIGRATABLE..=VERSION).contains(&snap.version) {
         return Err(invalid(format!(
             "unsupported format {} v{}",
             snap.format, snap.version
@@ -173,7 +178,11 @@ pub fn load(path: &Path, grid: &mut Grid) -> Result<usize, PersistError> {
                 c.cell
             )));
         }
-        parsed.push((cell, c.state));
+        let mut state = c.state;
+        if snap.version < 4 {
+            state.migrate_v3_history(grid.params());
+        }
+        parsed.push((cell, state));
     }
     let n = parsed.len();
     for (cell, state) in parsed {
@@ -258,6 +267,51 @@ mod tests {
             Err(PersistError::Invalid { .. })
         ));
         assert!(g2.is_empty());
+    }
+
+    #[test]
+    fn version_3_snapshots_are_migrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cells.json");
+        let g = sample();
+        save(&g, &path, Utc::now()).unwrap();
+        // Rewrite as version 3: no history field anywhere.
+        let mut v: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        v["version"] = 3.into();
+        for c in v["cells"].as_array_mut().unwrap() {
+            c.as_object_mut().unwrap().remove("history");
+        }
+        fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+
+        let mut back = Grid::new(FusionParams::default(), Resolution::Ten);
+        assert_eq!(load(&path, &mut back).unwrap(), 7);
+        let (cell, orig) = g.states().find(|(_, s)| s.n_readings == 1).unwrap();
+        let migrated = back.state(*cell).unwrap();
+        assert_eq!(migrated.history.len(), 1);
+        let p = migrated.history[0];
+        assert!(p.migrated);
+        assert_eq!(Some(p.at), orig.last_direct_at);
+        assert_eq!(Some(p.fused_cm), orig.last_depth_cm);
+        // Apart from the history, the state is unchanged.
+        let mut stripped = migrated.clone();
+        stripped.history = orig.history.clone();
+        assert_eq!(&stripped, orig);
+        // Neighbour-only cells get no history.
+        assert!(back
+            .states()
+            .filter(|(_, s)| s.n_readings == 0)
+            .all(|(_, s)| s.history.is_empty()));
+        // Version 4 round trip keeps the real history, and version 2 is refused.
+        save(&back, &path, Utc::now()).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"version\":4") && text.contains("\"migrated\":true"));
+        let v2 = text.replace("\"version\":4", "\"version\":2");
+        fs::write(&path, v2).unwrap();
+        let mut g2 = Grid::new(FusionParams::default(), Resolution::Ten);
+        assert!(matches!(
+            load(&path, &mut g2),
+            Err(PersistError::Invalid { .. })
+        ));
     }
 
     #[test]

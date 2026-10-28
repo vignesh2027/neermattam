@@ -2,10 +2,11 @@
 
 The engine is the Rust service at `engine/` (crate `neermattam-engine`, port 8302). It does four things:
 
-1. Fuses street-level flood depth readings into a live hex map of Chennai, with uncertainty that grows with time.
+1. Fuses street-level flood depth readings into a live hex map, with uncertainty that grows with time. It covers six metros by default: Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata and Delhi.
 2. Rates each cell with the UK Defra and Environment Agency flood hazard formula.
-3. Loads the Chennai road network from OpenStreetMap into a compact directed graph.
+3. Loads each city's road network from OpenStreetMap into a compact directed graph.
 4. Routes pedestrians, two-wheelers, autos, cars and buses around water each of them should not cross, and returns the plain shortest route next to it for comparison.
+5. Gives city control rooms ranked hotspots, a summary, each cell's depth history with a drain rate, and an export for their own tools.
 
 Every route is advisory. A cell with too little evidence is reported as `unknown`, never as safe, and every depth the engine returns comes with its standard deviation. The rules that keep a flooded road from being shown as safe are collected in [Safety model](#safety-model).
 
@@ -54,6 +55,8 @@ Either way the cell counts a conflict (`conflicts`), `delta^2 / 4` becomes a flo
 
 **Unknown.** A cell is `unknown` when its depth standard deviation, predicted to now, exceeds 10 cm, or when no evidence has arrived for 6 hours. Unknown does not mean passable: an unknown cell that still holds evidence is judged by the same blocking rule as a known one (see [Safety model](#safety-model)).
 
+**History.** Each cell keeps its latest 48 direct readings (`ENGINE_HISTORY_POINTS`, 0 to 1000), each with the cell's direct estimate just after it, for the recession view. Neighbour evidence is not recorded there, and routing never reads the history.
+
 **Expiry.** Each track (the cell's own readings, and the readings from each adjacent cell) expires 12 hours after its latest reading and then stops counting. When every track has expired the cell is `expired`: unknown, never blocking, and still reporting `last_depth_cm` (the direct level just after the latest direct reading) and `last_reading_age_h`, so a map can say "last report 40 cm, 13 h ago". Cells with no evidence for 48 hours are dropped from memory.
 
 The noise rates, neighbour offset, thresholds and windows are engineering assumptions for Chennai street flooding. They are not fitted to data and are all configurable.
@@ -82,6 +85,8 @@ The engine must never present a flooded road as safe. These rules carry that, ea
 10. **Route text names old water.** Routes report `max_known_depth_cm` (the deepest mean among known cells) and `max_unknown_depth_cm` with `max_unknown_depth_age_h` (the deepest last level among unknown cells that still carry one). When a route crosses unknown cells whose last report was too deep for the vehicle, the explanation says how many, how deep and how old, and tells the traveller to treat them as flooded.
 11. **Inputs are bounded.** Readings dated more than 5 minutes ahead are refused; sigmas are floored; variances stay finite so a snapshot can always be reloaded.
 12. **Trust and network.** `trust` is computed server-side by the gateway. The engine has no authentication, so it must only listen on the internal network: `ENGINE_BIND` defaults to `127.0.0.1:8302`, and the engine logs a warning at start when it is bound to anything other than a loopback or private address.
+
+The control-room analytics (hotspots, summary, recession and export) only read the map. None of them can open or close a road: the hotspot score and the drain rate are aids for people, and rule 2 stays the only thing routing obeys. In particular a falling drain rate never shortens rule 6's hold on an old deep report.
 
 ## Hazard rating
 
@@ -135,11 +140,57 @@ Sources:
 
 No Indian government or Indian Roads Congress figure for a safe crossing depth was found during the build. If one exists it should replace the three unverified rows.
 
-Speeds used for `eta_min` (pedestrian 4, two-wheeler 20, auto 18, car 20, bus 15 km/h) are rough assumptions, not measured Chennai values.
+Speeds used for `eta_min` (pedestrian 4, two-wheeler 20, auto 18, car 20, bus 15 km/h) are rough assumptions, not measured city values. The same limits and speeds apply in every city.
+
+## Cities
+
+The engine covers a list of cities, each with an id, a display name, a metro bounding box and a road extract. The H3 grid is global, so readings from every city share one map; a city scopes queries and chooses the road graph.
+
+- A reading is accepted when it falls inside any city's box.
+- A route is planned on the graph of the city whose box holds both ends. An end outside every box, or ends in two different cities, is a 400 that says which.
+- `/v1/cells`, `/v1/stream`, `/v1/hotspots` and `/v1/summary` take an optional `city`; `/v1/export` requires one. A cell belongs to the city that holds its centre.
+- All graphs load in parallel at start. A city whose graph fails still accepts readings and shows its map; only its routes answer 503, and `/readyz` stays 503 with the reason until the configuration is fixed.
+
+**Metro boxes.** Each box covers the continuously built-up area that floods together, not the administrative district, and was drawn by hand from OpenStreetMap. The boxes do not overlap, and each fits in one `/v1/cells` request (at most 1 square degree).
+
+| id | Box (minLon,minLat,maxLon,maxLat) | Covers | Cut from |
+|---|---|---|---|
+| chennai | 80.10,12.85,80.33,13.24 | Greater Chennai Corporation, Tambaram to Ennore | southern zone |
+| mumbai | 72.77,18.88,73.13,19.32 | Island city, western and eastern suburbs, Thane, Navi Mumbai to Belapur | western zone |
+| bengaluru | 77.44,12.82,77.80,13.15 | BBMP inside the outer ring, Electronic City to Yelahanka | southern zone |
+| hyderabad | 78.24,17.22,78.66,17.62 | GHMC and Secunderabad, inside the outer ring road | southern zone |
+| kolkata | 88.20,22.42,88.52,22.72 | Kolkata Municipal Corporation, Howrah, Salt Lake and New Town | eastern zone |
+| delhi | 76.84,28.40,77.35,28.89 | National Capital Territory of Delhi | northern zone |
+
+**Extracts.** Each city's roads are cut from the Geofabrik India zone extracts (downloaded 28 October 2026) with the box padded by 0.03 degrees on every side, so roads that cross the edge stay whole, then filtered to highway ways. For Mumbai:
+
+```sh
+curl -4 -LO https://download.geofabrik.de/asia/india/western-zone-latest.osm.pbf
+osmium extract -s complete_ways -b 72.74,18.85,73.16,19.35 western-zone-latest.osm.pbf -o mumbai-bbox.osm.pbf
+osmium tags-filter mumbai-bbox.osm.pbf w/highway -o data/osm/mumbai-roads.osm.pbf
+```
+
+The Chennai extract predates this and was clipped to 80.06,12.79,80.34,13.28.
+
+**Graph sizes**, as built by the engine (release build, `/v1/cities` and the start-up log, 28 October 2026). Memory is the heap held by the graph's vectors (`RoadGraph::memory_bytes`).
+
+| City | Highway ways in extract | Ways kept | Nodes | Directed edges | Segments | Memory | Parse | Build |
+|---|---|---|---|---|---|---|---|---|
+| chennai | 99,897 | 83,902 | 316,734 | 709,504 | 355,037 | 17.6 MiB | 179 ms | 450 ms |
+| mumbai | 121,123 | 79,086 | 449,384 | 964,586 | 484,701 | 24.1 MiB | 289 ms | 714 ms |
+| bengaluru | 230,786 | 191,703 | 690,647 | 1,545,473 | 775,145 | 38.3 MiB | 503 ms | 1,110 ms |
+| hyderabad | 206,897 | 178,437 | 717,772 | 1,626,212 | 816,296 | 40.2 MiB | 451 ms | 1,204 ms |
+| kolkata | 115,349 | 107,129 | 790,434 | 1,674,077 | 837,997 | 41.2 MiB | 352 ms | 1,287 ms |
+| delhi | 237,273 | 204,342 | 976,869 | 2,201,301 | 1,103,715 | 54.2 MiB | 660 ms | 738 ms |
+| **all six** | | | 3,941,840 | 8,721,153 | 4,372,891 | **215.5 MiB** | | |
+
+Loaded in parallel, the six graphs took 2.2 s of wall time and the server answered `/readyz` 3.7 s after start, with 369 MiB resident (`ps -o rss`); the rest of the resident memory is the allocator keeping what the decode freed, the runtime and the binary. That is under 5 percent of an 8 GB laptop. These figures are from one start on an 8 GB M1 MacBook Air with other work running (load average about 3), so they are indicative rather than benchmarks. Parse and build times overlap because the cities load at the same time.
+
+A city is added without code: list it in `ENGINE_CITIES` and give it `ENGINE_CITY_<ID>_BBOX` (and optionally `_NAME` and `_OSM_PATH`).
 
 ## Routing
 
-The road graph is built from `data/osm/chennai-roads.osm.pbf` with the `osmpbf` crate.
+Each city's road graph is built from `data/osm/<city>-roads.osm.pbf` with the `osmpbf` crate.
 
 - Every node on a kept way is a graph node, and each pair of consecutive nodes is a segment, stored once with its length and the H3 cells it passes through (sampled every quarter of a hex edge).
 - Directed edges point at segments, so both directions of a two-way street share one segment. Out-edges are stored in compressed sparse row form, so the graph is a handful of flat vectors.
@@ -148,7 +199,7 @@ The road graph is built from `data/osm/chennai-roads.osm.pbf` with the `osmpbf` 
 - Route ends snap to the nearest node, within 1.5 km, that lies in the vehicle's largest connected component, so a request never starts on a disconnected scrap of road.
 - When both ends snap to the same node there is no route to plan, but the response still reports the water in that node's cell, and `passable` is false when it is too deep.
 
-On the Chennai extract (99,897 highway ways and 387,959 nodes in the file) the engine keeps 83,902 ways that some vehicle may use. That gives 316,734 graph nodes, 355,037 segments, 709,504 directed edges and 470,587 segment-to-cell references. The graph's vectors hold 18,407,658 bytes (17.6 MiB), as reported by `RoadGraph::memory_bytes` and `/readyz`. The whole release process measured 88 MiB resident (`ps -o rss`) once the graph was loaded; the rest is the allocator keeping memory freed after the decode, the Tokio runtime and the binary. Decoding takes about 125 ms and building about 215 ms in the release build; the server is ready about one second after start.
+Sizes for every city are in [Cities](#cities). On the Chennai extract (99,897 highway ways and 387,959 nodes in the file) the engine keeps 83,902 ways that some vehicle may use. That gives 316,734 graph nodes, 355,037 segments, 709,504 directed edges and 470,587 segment-to-cell references. The graph's vectors hold 18,407,658 bytes (17.6 MiB), as reported by `RoadGraph::memory_bytes` and `/readyz`. The whole release process measured 88 MiB resident (`ps -o rss`) once the graph was loaded; the rest is the allocator keeping memory freed after the decode, the Tokio runtime and the binary. Decoding takes about 125 ms and building about 215 ms in the release build; the server is ready about one second after start.
 
 Each request runs A* with a haversine heuristic up to three times:
 
@@ -164,7 +215,7 @@ When the map holds no cell that is clear for the vehicle, every edge costs at le
 
 The contract is `docs/CONTRACTS.md` section 2. All errors are JSON, `{"error": "..."}`. Invalid input is 400 with a message naming the field; an oversized body (over 16 KiB) is 413; routing before the graph has loaded is 503; no road connection is 404.
 
-Readings are validated: lat and lon inside the service area (`80.10,12.85,80.33,13.24` by default), `depth_cm` from 0 to 500, `depth_sigma_cm` above 0 (fused as at least 1 cm), `velocity_sigma_mps` required when `velocity_mps` is given, `observed_at` no more than 24 hours old and no more than 5 minutes in the future (times up to 5 minutes ahead are clamped to server time, so no cell is ever dated in the future; a reading dated hours ahead would otherwise hold its cell at that time and make every real report arrive late and decayed), `source` one of `photo`, `video`, `voice`, `official`, and `trust` in (0, 1]. A repeated `reading_id` is not fused twice; the response says `"duplicate": true`. The last 100,000 ids are remembered in memory only, so a retry that arrives after a restart is fused again.
+Readings are validated: lat and lon inside any covered city's box, `depth_cm` from 0 to 500, `depth_sigma_cm` above 0 (fused as at least 1 cm), `velocity_sigma_mps` required when `velocity_mps` is given, `observed_at` no more than 24 hours old and no more than 5 minutes in the future (times up to 5 minutes ahead are clamped to server time, so no cell is ever dated in the future; a reading dated hours ahead would otherwise hold its cell at that time and make every real report arrive late and decayed), `source` one of `photo`, `video`, `voice`, `official`, and `trust` in (0, 1]. A repeated `reading_id` is not fused twice; the response says `"duplicate": true`. The last 100,000 ids are remembered in memory only, so a retry that arrives after a restart is fused again.
 
 The examples below are real responses from the release binary, trimmed where marked.
 
@@ -195,7 +246,17 @@ curl -s -X POST http://127.0.0.1:8302/v1/readings -H 'content-type: application/
 ```
 
 ```json
-{"error":"lat/lon (13.5, 80.2) is outside the service area 80.1,12.85,80.33,13.24 (minLon,minLat,maxLon,maxLat)"}
+{"error":"lat/lon (13.5, 80.2) is outside the service area: it is not inside any covered city (chennai 80.1,12.85,80.33,13.24; mumbai 72.77,18.88,73.13,19.32; ...)"}
+```
+
+Readings, cells and routes now also carry `city`. A route between two cities is refused:
+
+```sh
+curl -s 'http://127.0.0.1:8302/v1/route?from=18.9398,72.8355&to=22.5839,88.3426&vehicle=car'
+```
+
+```json
+{"error":"from is in Mumbai and to is in Kolkata; a route must start and end in the same city"}
 ```
 
 Cells in a box (one feature shown):
@@ -263,9 +324,92 @@ curl -s http://127.0.0.1:8302/readyz
  "segment_cell_refs":470587,"memory_bytes":18407658,"parse_ms":125,"build_ms":214}}
 ```
 
+## Control-room analytics
+
+These endpoints are read-only views for people running a city's response. They are advisory and never change routing.
+
+### Cities
+
+`GET /v1/cities` lists each city with its box, centre, the number of cells with state, and its graph (`ready` with sizes and load times, `loading`, or `failed` with the error):
+
+```json
+{"cities":[{"id":"mumbai","name":"Mumbai","bbox":[72.77,18.88,73.13,19.32],"centre":{"lat":19.1,"lon":72.95},"cells":14,
+  "graph":{"status":"ready","ways":79086,"nodes":449384,"edges":964586,"segments":484701,"segment_cell_refs":622455,
+           "memory_bytes":25242322,"memory_mib":24.1,"parse_ms":289,"build_ms":714}}, "..."]}
+```
+
+### Hotspots
+
+`GET /v1/hotspots?city=mumbai&limit=20` ranks the cells with evidence in force (expired cells are left out) by a score from 0 to 100, the sum of four parts:
+
+```
+depth     = 40 x min(depth_block / 60 cm, 1)
+hazard    = 0, 10, 20 or 30 for low, danger_some, danger_most, danger_all at depth_block
+freshness = 20 x max(0, 1 - age_h / 12)
+reports   = 10 x min(independent_reports / 5, 1)
+```
+
+- `depth_block` is the depth routing judges the cell at (rule 2 of the [Safety model](#safety-model): the deeper side of any conflict, plus the measurement margin and growth with time; the neighbour mean for neighbour-only cells). 60 cm is twice the bus limit; past it a street is closed to everything and more depth adds no urgency.
+- `hazard` is the Defra class at `depth_block` and the blocking velocity (the 1 m/s default when not measured).
+- `age_h` is the time since the latest evidence in force. Evidence expires at 12 hours, so freshness reaches zero there.
+- `independent_reports` counts direct readings plus adjacent cells whose readings are in force. Many reports from one neighbour count once, as in the fusion model.
+
+Depth and hazard carry 70 of the 100 points, so a fresh report of a dry street (about 25 points) never outranks deep water a few hours old. Ties go to the deeper `depth_block`, then the lower cell id. The weights are a judgement about what a control room should look at first, not fitted values. `limit` is 1 to 200 (default 20); `city` is optional. Each hotspot lists its parts, the vehicles it is closed to and one plain-English reason per part, plus notes for conflicts, neighbour-only evidence, unknown cells and assumed velocity. A real answer, trimmed:
+
+```json
+{"cell":"8a608b1996effff","lat":19.017451,"lon":72.856336,"score":77.2,
+ "parts":{"depth":35.2,"hazard":20.0,"freshness":20.0,"reports":2.0},
+ "depth_block_cm":52.8,"depth_cm":48.0,"depth_sigma_cm":3.2,"hazard_class_upper":"danger_most","age_h":0.0,
+ "independent_reports":1,"unknown":false,"blocks":["pedestrian","two_wheeler","auto","car","bus"],
+ "reasons":["Water may be as deep as 53 cm here (mean 48 cm plus the safety margin): 35.2 of 40 points.",
+            "At that depth the Defra hazard is danger for most people: 20 of 30 points.",
+            "The latest evidence is 0.0 hours old: 20.0 of 20 points.",
+            "1 independent report (1 in the cell, 0 from adjacent cells): 2 of 10 points.",
+            "Flow speed was not measured, so 1.0 m/s is assumed.",
+            "Closed to every vehicle and to people on foot."]}
+```
+
+### Summary
+
+`GET /v1/summary?city=kolkata` counts every cell with state in the city (all cities without `city`):
+
+- `by_class`: cells by the class shown on the map (`unknown` includes stale and expired cells);
+- `unknown`, `stale` (no evidence for 6 hours, not yet expired) and `expired`;
+- `cells_in_conflict` (a conflict in force) and `conflicting_readings` (all conflicts counted);
+- `blocked`: cells closed to each vehicle under rule 2;
+- `needs_fresh_report`: stale or expired cells whose last direct level was deeper than 15 cm, the lowest vehicle limit, with the 50 deepest listed (cells are forgotten after 48 hours, so these are all recent);
+- `readings` and `newest_reading_at`.
+
+### Recession
+
+`GET /v1/recession?cell=<H3 index>` returns a cell's depth history (its latest direct readings, oldest first, each with the cell's direct estimate after it), its current properties, and a drain rate when there is enough data.
+
+The drain rate is a weighted least-squares straight line through the direct readings of the last 6 hours before the newest one, weighted by `1 / sigma^2` of each reading as fused. It needs at least 3 readings spanning at least 30 minutes. Its standard error is the textbook one for known variances, scaled up by the square root of the reduced chi-squared when the readings scatter more than their sigmas say. `trend` is `falling` or `rising` when the rate is more than twice its standard error, otherwise `steady`. When falling, `hours_to_15_cm` is how long the fitted line takes to reach 15 cm from its value at the newest reading.
+
+What it is not: a forecast. It is a straight line through a handful of reports that may come from different spots in a 66 m cell and from different people, and recession is rarely linear. It is shown so a control room can see whether water is going down, and it never opens a road. Four readings of 50, 40, 30 and 20 cm an hour apart give, as the release binary answered:
+
+```json
+{"drain":{"rate_cm_per_h":10.0,"rate_sigma_cm_per_h":1.41,"trend":"falling","points_used":4,
+          "from":"2026-10-28T13:22:57Z","to":"2026-10-28T16:22:58Z","hours_to_15_cm":0.5},
+ "drain_note":"A weighted straight-line fit to this cell's direct readings over the last 6 hours. It describes the recent past, is not a forecast, and never opens a road."}
+```
+
+The cell keeps blocking cars all the while: its blocking depth is still above 15 cm. A cell with too few readings returns `"drain": null` and the reason in `drain_note`. An invalid index or one at another H3 resolution is a 400; a cell no report has touched is a 404.
+
+### Export
+
+`GET /v1/export?city=mumbai&format=csv` (or `format=geojson`, the default) returns every cell with state in the city as an attachment named `neermattam-<city>-<UTC time>.<ext>`. The GeoJSON is the `/v1/cells` collection; the CSV has one row per cell with the cell centre and the same properties, empty where a value is null:
+
+```text
+cell,city,lat,lon,depth_cm,depth_sigma_cm,depth_upper_cm,depth_sigma_meas_cm,conflict_high_mean_cm,velocity_mps,velocity_sigma_mps,velocity_assumed,hazard_rating,hazard_class,hazard_class_upper,debris_factor,unknown,expired,n_readings,n_neighbour,conflicts,updated_at,last_depth_cm,last_reading_age_h
+8a608b0a69b7fff,mumbai,19.017386,72.85518,48.0,8.6,48.0,8.6,,,,true,1.72,danger_most,danger_most,1.0,false,false,0,1,0,2026-10-28T16:22:57Z,,
+```
+
+Exports are capped at `ENGINE_MAX_CELLS` rows; the `X-Neermattam-Truncated` header says whether the cap was reached.
+
 ## Persistence
 
-Cell state is written to `data/engine/cells.json` (set `ENGINE_SNAPSHOT_PATH`; empty disables it) at most once every 5 seconds and only when something changed, plus once on shutdown. Each write goes to a temporary file in the same directory, is flushed to disk and is renamed over the old file, so a crash never leaves a half-written snapshot. On start the snapshot is loaded; a snapshot written at a different H3 resolution or by an older format version (the current one is 3), one that cannot be parsed, or one holding a cell with no evidence or a number that is not finite, is moved aside and the engine starts with an empty map.
+Cell state is written to `data/engine/cells.json` (set `ENGINE_SNAPSHOT_PATH`; empty disables it) at most once every 5 seconds and only when something changed, plus once on shutdown. Each write goes to a temporary file in the same directory, is flushed to disk and is renamed over the old file, so a crash never leaves a half-written snapshot. The snapshot holds every cell of every city, including each cell's depth history. The current format is version 4. A version 3 snapshot (from before the history existed) is migrated on load: each cell keeps its state and gets one history point, marked `migrated`, from the latest direct level and time that version 3 kept; migrated points are shown but left out of drain rates, because version 3 did not keep the reading itself. On start the snapshot is loaded; a snapshot written at a different H3 resolution or by a version older than 3, one that cannot be parsed, or one holding a cell with no evidence or a number that is not finite, is moved aside and the engine starts with an empty map.
 
 Shutdown on SIGTERM or Ctrl-C is graceful: open SSE streams are closed, in-flight requests finish (up to 10 seconds), and the final snapshot is written.
 
@@ -277,16 +421,20 @@ cargo run --release                      # listens on 127.0.0.1:8302
 ENGINE_LOG_FORMAT=pretty RUST_LOG=debug cargo run --release
 ```
 
-The road graph loads in the background; `/readyz` returns 503 with a reason until it is ready. Logs are structured JSON by default.
+The road graphs load in the background, all cities in parallel; `/readyz` returns 503 with a reason until every one is ready, and `/v1/cities` shows each city's progress. Logs are structured JSON by default.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `ENGINE_BIND` | `127.0.0.1:8302` | Listen address; internal network only (a warning is logged otherwise) |
-| `ENGINE_OSM_PATH` | `../data/osm/chennai-roads.osm.pbf` | Road extract |
+| `ENGINE_CITIES` | `chennai,mumbai,bengaluru,hyderabad,kolkata,delhi` | Cities to cover, in lookup order |
+| `ENGINE_OSM_DIR` | `../data/osm` | Folder holding `<city>-roads.osm.pbf` |
+| `ENGINE_CITY_<ID>_BBOX` | built-in box | Override a city's box, or give a new city its box (at most 1 square degree) |
+| `ENGINE_CITY_<ID>_NAME` | built-in name, else the id | Display name |
+| `ENGINE_CITY_<ID>_OSM_PATH` | `<ENGINE_OSM_DIR>/<id>-roads.osm.pbf` | A city's road extract |
+| `ENGINE_OSM_PATH`, `ENGINE_BBOX` | | Older names for Chennai's extract and box, still honoured |
 | `ENGINE_SNAPSHOT_PATH` | `../data/engine/cells.json` | Snapshot file; empty disables |
 | `ENGINE_SNAPSHOT_INTERVAL_SECS` | `5` | Minimum seconds between snapshots |
 | `ENGINE_H3_RESOLUTION` | `10` | H3 resolution, 7 to 12 |
-| `ENGINE_BBOX` | `80.10,12.85,80.33,13.24` | Service area |
 | `ENGINE_HALF_LIFE_HOURS` | `off` | Opt-in recession half-life; `off` holds the level |
 | `ENGINE_DEPTH_NOISE_CM_PER_SQRT_HOUR` | `6` | Depth process noise |
 | `ENGINE_VELOCITY_NOISE_MPS_PER_SQRT_HOUR` | `0.2` | Velocity process noise |
@@ -297,6 +445,7 @@ The road graph loads in the background; `/readyz` returns 503 with a reason unti
 | `ENGINE_STALE_HOURS` | `6` | Hours without evidence before a cell is unknown |
 | `ENGINE_EXPIRE_HOURS` | `12` | Hours after its latest reading that evidence stops counting |
 | `ENGINE_FORGET_HOURS` | `48` | Hours without evidence before a cell is dropped |
+| `ENGINE_HISTORY_POINTS` | `48` | Direct readings kept per cell for `/v1/recession` (0 to 1000) |
 | `ENGINE_SAFETY_SIGMAS` | `1.5` | k in the blocking rule |
 | `ENGINE_BLOCK_SIGMA_CAP_CM` | `10` | Depth sigma cap in the blocking rule |
 | `ENGINE_BLOCK_VELOCITY_SIGMA_CAP_MPS` | `0.5` | Velocity sigma cap in the blocking rule |
@@ -309,14 +458,14 @@ The road graph loads in the background; `/readyz` returns 503 with a reason unti
 | `ENGINE_MAX_OBSERVATION_SKEW_HOURS` | `24` | How old `observed_at` may be; at most 5 minutes ahead is always allowed |
 | `ENGINE_BODY_LIMIT_BYTES` | `16384` | Request body limit |
 | `ENGINE_REQUEST_TIMEOUT_SECS` | `15` | Timeout for non-streaming requests |
-| `ENGINE_MAX_CELLS` | `20000` | Most features one `/v1/cells` call returns |
+| `ENGINE_MAX_CELLS` | `20000` | Most features one `/v1/cells` call returns, and most rows one export returns |
 | `ENGINE_LOG_FORMAT` | `json` | `json` or `pretty`; filter with `RUST_LOG` |
 
 ## Tests
 
 ```sh
 cd engine
-cargo test                                   # unit, HTTP and real-graph tests
+cargo test                                   # 96 tests: unit, HTTP and real-graph
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
@@ -324,6 +473,9 @@ cargo fmt --check
 - Unit tests cover the fusion maths, holding the level and the opt-in recession, expiry, conflicting readings and how a conflict clears, measurement sigma, out-of-order readings, neighbour inflation, trust, the unknown rules, the monotonic blocking rule and its bounded growth, neighbour-only blocking, the hazard formula against cells of Table 4 of the 2008 note, class boundaries, the FD2321 debris table, OSM access and one-way rules, snapping, and snapshot round trips.
 - Routing tests on a synthetic street grid show the route bending around a flooded cell, a bus crossing water that blocks a car, and the least-bad fallback when every path is flooded.
 - `tests/chennai.rs` loads the real extract, routes Velachery railway station (12.9791, 80.2209) to Guindy (13.0067, 80.2206), seeds 50 cm of water at the middle of the shortest path and checks the new route avoids it. It takes about 0.4 s. When the extract is missing the test prints how to build it and passes; set `NEERMATTAM_REQUIRE_OSM=1` to make that a failure.
+- `tests/multicity.rs` loads all six real extracts in parallel, checks every city reports ready, routes a car across each city through the HTTP API (Chennai Central to Velachery, CSMT to Bandra, Majestic to MG Road, Secunderabad to Charminar, Howrah to Sealdah, New Delhi station to India Gate), seeds 50 cm of water at the middle of each shortest path and checks each route goes around it, and checks a Mumbai to Kolkata request is refused. It takes about 2.5 s. A missing extract is skipped with a message unless `NEERMATTAM_REQUIRE_OSM=1`.
+- `tests/cities.rs` covers multi-city behaviour and the control-room endpoints on synthetic street grids: city tagging, cross-city and out-of-coverage routes, loading and failed graphs, city-scoped cells, stream and export, hotspot ordering and reasons, summary counts, the recession history and drain rate, and every new 400 and 404.
+- Unit tests in `analytics.rs` pin the hotspot ordering (deep and fresh first, more reports higher, deep water hours old above fresh shallow water), summary counts, and the drain-rate fit (exact rate and error on a clean line, refusals on thin data, scatter widening the error). `persist.rs` checks the version 3 migration and refuses version 2; `fusion.rs` checks the history is bounded and in time order; `config.rs` checks the city variables.
 - `tests/http.rs` drives the full router with `tower::ServiceExt`: health, readiness, validation messages, body limit, duplicates, GeoJSON cells, routes, the SSE stream and its shutdown, and a snapshot restart.
 
 ## Benchmarks
