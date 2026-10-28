@@ -4,12 +4,10 @@ Neermattam (Tamil: water level) measures how deep and how fast floodwater is on 
 
 ## Hard rules
 1. **Languages:** Go, Rust and Python only. Browser pages are server-rendered HTML and CSS templates. The only browser script allowed is a vendored copy of MapLibre GL JS plus the smallest possible inline glue. No TypeScript, no Node toolchain, no frontend framework.
-2. **Models:** Meta models only.
-   - **Muse Spark 1.3** is the one reasoning model, for scene reading, the second waterline, report parsing and verification.
-   - **SAM 3.1** is used only for masks and tracking.
-   - **Muse Voice Transcribe** is used only for audio.
-   - The open-weight path uses the same models' open weights: SAM 3.1 and Muse Spark Open or Muse Glimmer.
-   - No other provider's model, anywhere.
+2. **Models:** Meta models only, no other provider's model anywhere.
+   - **Muse Spark Open** (Meta open weights, served by Baseten) is the one reasoning model: scene reading, the second waterline, mask verification and voice reports.
+   - **SAM 2.1** (Meta open weights, on Modal or locally) is used only for masks and tracking. SAM 3.1 replaces it by configuration once its gated weights are available to us.
+   - The hosted Meta Model API path (Muse Spark 1.3, SAM 3.1, Muse Voice Transcribe) is implemented behind the same interfaces and switches on when that account can make calls.
 3. **Honest numbers.** Every accuracy, latency or cost figure in docs or the UI comes from a script in `eval/` that anyone can rerun. Never invent a number.
 4. **Safety.**
    - A route is always labelled advisory.
