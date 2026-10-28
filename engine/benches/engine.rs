@@ -1,4 +1,5 @@
-//! Benchmarks: reading ingestion and routing on the real Chennai graph.
+//! Benchmarks: reading ingestion, control-room analytics on a full map, and
+//! routing on the real Chennai graph.
 //!
 //! Run with `cargo bench --bench engine`. The routing benchmarks need the
 //! extract at `../data/osm/chennai-roads.osm.pbf` (or `ENGINE_OSM_PATH`) and
@@ -9,6 +10,7 @@ use axum::http::Request;
 use chrono::Utc;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use h3o::Resolution;
+use neermattam_engine::analytics;
 use neermattam_engine::api::{router, AppState};
 use neermattam_engine::config::Config;
 use neermattam_engine::fusion::{FusionParams, Grid, Observation, WaterMap};
@@ -184,5 +186,49 @@ fn routing(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, ingest, routing);
+/// Analytics on the worst case for one city: a reading every 0.001 degrees
+/// over the whole Chennai box, so every cell in it holds state.
+fn analytics_full_map(c: &mut Criterion) {
+    let b = BBox::CHENNAI;
+    let now = Utc::now();
+    let mut grid = Grid::new(FusionParams::default(), Resolution::Ten);
+    let mut n = 0u32;
+    let mut lat = b.min_lat;
+    while lat < b.max_lat {
+        let mut lon = b.min_lon;
+        while lon < b.max_lon {
+            grid.ingest(&Observation {
+                lat,
+                lon,
+                depth_cm: f64::from(n % 80),
+                depth_sigma_cm: 3.0,
+                velocity_mps: None,
+                velocity_sigma_mps: None,
+                observed_at: now,
+                trust: 1.0,
+            })
+            .unwrap();
+            n += 1;
+            lon += 0.001;
+        }
+        lat += 0.001;
+    }
+    println!("full Chennai map: {n} readings, {} cells", grid.len());
+    let (p, f) = (RoutePolicy::default(), FusionParams::default());
+    let views: Vec<_> = grid.views(now).collect();
+    let mut group = c.benchmark_group("analytics_full_chennai");
+    group.sample_size(10);
+    group.bench_function("views", |bch| {
+        bch.iter(|| black_box(grid.views(now).count()));
+    });
+    group.bench_function("hotspots_top20", |bch| {
+        bch.iter(|| black_box(analytics::hotspots(views.clone(), &p, &f, now, 20)));
+    });
+    group.bench_function("summary", |bch| {
+        bch.iter(|| black_box(analytics::summarise(views.clone(), &p, &f, now)));
+    });
+    group.finish();
+}
+
+criterion_group!(benches, ingest, analytics_full_map, routing);
 criterion_main!(benches);

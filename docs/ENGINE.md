@@ -57,6 +57,8 @@ Either way the cell counts a conflict (`conflicts`), `delta^2 / 4` becomes a flo
 
 **History.** Each cell keeps its latest 48 direct readings (`ENGINE_HISTORY_POINTS`, 0 to 1000), each with the cell's direct estimate just after it, for the recession view. Neighbour evidence is not recorded there, and routing never reads the history.
 
+The whole map keeps at most 250,000 history points (`ENGINE_HISTORY_MAX_TOTAL_POINTS`). A point takes 48 bytes in memory, so the cap is about 12 MB, up to about twice that while the per-cell queues hold spare capacity; on disk each point is a JSON object of roughly 150 bytes, so a full history file is about 37 MB. When the total goes over the cap it is trimmed to 90 percent of the cap: the oldest points over all cells go first, ties going to the cell whose latest reading is oldest, and a cell's most recent reading is never removed. Trimming sorts the candidates (24 bytes each, about 6 MB at the default cap) and runs once per 25,000 new points; it also runs after the snapshots are loaded. `/v1/summary` reports the current total and the cap as `history_points`. The history is saved in its own file on a slower cadence (see [Persistence](#persistence)).
+
 **Expiry.** Each track (the cell's own readings, and the readings from each adjacent cell) expires 12 hours after its latest reading and then stops counting. When every track has expired the cell is `expired`: unknown, never blocking, and still reporting `last_depth_cm` (the direct level just after the latest direct reading) and `last_reading_age_h`, so a map can say "last report 40 cm, 13 h ago". Cells with no evidence for 48 hours are dropped from memory.
 
 The noise rates, neighbour offset, thresholds and windows are engineering assumptions for Chennai street flooding. They are not fitted to data and are all configurable.
@@ -147,9 +149,10 @@ Speeds used for `eta_min` (pedestrian 4, two-wheeler 20, auto 18, car 20, bus 15
 The engine covers a list of cities, each with an id, a display name, a metro bounding box and a road extract. The H3 grid is global, so readings from every city share one map; a city scopes queries and chooses the road graph.
 
 - A reading is accepted when it falls inside any city's box.
-- A route is planned on the graph of the city whose box holds both ends. An end outside every box, or ends in two different cities, is a 400 that says which.
-- `/v1/cells`, `/v1/stream`, `/v1/hotspots` and `/v1/summary` take an optional `city`; `/v1/export` requires one. A cell belongs to the city that holds its centre.
-- All graphs load in parallel at start. A city whose graph fails still accepts readings and shows its map; only its routes answer 503, and `/readyz` stays 503 with the reason until the configuration is fixed.
+- A route is planned on the graph of a city whose box holds both ends (with custom boxes that overlap, the first that holds both). An end outside every box, or ends in two different cities, is a 400 that says which.
+- `/v1/cells`, `/v1/stream`, `/v1/hotspots` and `/v1/summary` take an optional `city`; `/v1/export` requires one. A cell is on a city's map when its centre lies in the city's box widened by three cell edge lengths (about 200 m at resolution 10). A reading is accepted anywhere inside the box, but its cell's centre can lie up to one edge length outside it and the six neighbours it informs up to about 2.7, so without the margin a deep report just inside the edge was fused and closed roads yet never reached that city's map, stream, summary, hotspots or export. A cell's `city` property is the city holding its centre, else the city whose widened box holds it. `/v1/cells` with an explicit `bbox` still selects cells by centre.
+- All graphs load in parallel at start. A city whose graph fails still accepts readings and shows its map; only its routes answer 503, naming the city. The failure is logged as an error at start.
+- `/readyz` answers 200 once the primary city's graph is loaded (`ENGINE_PRIMARY_CITY`, Chennai by default, else the first city listed). Its body lists every city's graph. When another city is still loading or has failed, the status is `degraded` and `reason` says which, but the service stays ready, so one bad extract cannot take every city offline. While the primary graph is loading or has failed, `/readyz` is 503.
 
 **Metro boxes.** Each box covers the continuously built-up area that floods together, not the administrative district, and was drawn by hand from OpenStreetMap. The boxes do not overlap, and each fits in one `/v1/cells` request (at most 1 square degree).
 
@@ -319,9 +322,14 @@ Health:
 curl -s http://127.0.0.1:8302/readyz
 ```
 
+With every graph loaded the status is `ready`. Started with Delhi's extract missing, the release binary answered 200 with (trimmed to two cities):
+
 ```json
-{"status":"ready","cells":0,"graph":{"ways":83902,"nodes":316734,"edges":709504,"segments":355037,
- "segment_cell_refs":470587,"memory_bytes":18407658,"parse_ms":125,"build_ms":214}}
+{"status":"degraded","primary_city":"chennai","cells":0,
+ "reason":"road graphs failed, so routes there answer 503: delhi: cannot read OSM extract /nonexistent/delhi.pbf: No such file or directory (os error 2)",
+ "cities":{"chennai":{"status":"ready","ways":83902,"nodes":316734,"edges":709504,"segments":355037,
+   "segment_cell_refs":470587,"memory_bytes":18407658,"memory_mib":17.6,"parse_ms":166,"build_ms":315},
+  "delhi":{"status":"failed","error":"cannot read OSM extract /nonexistent/delhi.pbf: No such file or directory (os error 2)"},"...":"..."}}
 ```
 
 ## Control-room analytics
@@ -378,7 +386,8 @@ Depth and hazard carry 70 of the 100 points, so a fresh report of a dry street (
 - `cells_in_conflict` (a conflict in force) and `conflicting_readings` (all conflicts counted);
 - `blocked`: cells closed to each vehicle under rule 2;
 - `needs_fresh_report`: stale or expired cells whose last direct level was deeper than 15 cm, the lowest vehicle limit, with the 50 deepest listed (cells are forgotten after 48 hours, so these are all recent);
-- `readings` and `newest_reading_at`.
+- `readings` and `newest_reading_at`;
+- `history_points`: `total` and `max`, the depth history held over the whole map (all cities, not just this one) and its cap.
 
 ### Recession
 
@@ -405,11 +414,20 @@ cell,city,lat,lon,depth_cm,depth_sigma_cm,depth_upper_cm,depth_sigma_meas_cm,con
 8a608b0a69b7fff,mumbai,19.017386,72.85518,48.0,8.6,48.0,8.6,,,,true,1.72,danger_most,danger_most,1.0,false,false,0,1,0,2026-10-28T16:22:57Z,,
 ```
 
-Exports are capped at `ENGINE_MAX_CELLS` rows; the `X-Neermattam-Truncated` header says whether the cap was reached.
+Exports are capped at `ENGINE_MAX_CELLS` rows. Under the cap, rows are in cell-index order. When the cap applies, the cells are first sorted by hotspot score, highest first (then by blocking depth, then cell index, with cells whose evidence has expired last), so the deepest and most dangerous cells are always kept, and the rows come out in that order. The `X-Neermattam-Truncated` and `X-Neermattam-Total-Cells` headers say whether the cap was reached and how many cells the city has; the GeoJSON also carries `truncated` and `total_cells` members. The CSV header line is always just the column names.
+
+**Cost.** Hotspots, the summary, the export and the city list run on the blocking thread pool, so a large map never stalls the workers that take readings and plan routes. Hotspots score every cell but write the explanation only for the cells returned. On a worst-case Chennai map, with a reading every 0.001 degrees so that all 68,295 cells in the box hold state, building the views took about 23 ms, ranking the top 20 hotspots about 7 ms (about 140 ms before the explanation was limited to the cells returned) and the summary about 3 ms (`cargo bench --bench engine -- analytics_full`, measured with other work running, load average about 10, so indicative only).
 
 ## Persistence
 
-Cell state is written to `data/engine/cells.json` (set `ENGINE_SNAPSHOT_PATH`; empty disables it) at most once every 5 seconds and only when something changed, plus once on shutdown. Each write goes to a temporary file in the same directory, is flushed to disk and is renamed over the old file, so a crash never leaves a half-written snapshot. The snapshot holds every cell of every city, including each cell's depth history. The current format is version 4. A version 3 snapshot (from before the history existed) is migrated on load: each cell keeps its state and gets one history point, marked `migrated`, from the latest direct level and time that version 3 kept; migrated points are shown but left out of drain rates, because version 3 did not keep the reading itself. On start the snapshot is loaded; a snapshot written at a different H3 resolution or by a version older than 3, one that cannot be parsed, or one holding a cell with no evidence or a number that is not finite, is moved aside and the engine starts with an empty map.
+The map is saved as two files, each written to a temporary file in the same directory, flushed to disk and renamed over the old one, so a crash mid-write never leaves a half-written file.
+
+- **Cell snapshot**, `data/engine/cells.json` (set `ENGINE_SNAPSHOT_PATH`; empty disables persistence). Every cell of every city with its full state, which is what routing reads. Written at most once every 5 seconds (`ENGINE_SNAPSHOT_INTERVAL_SECS`), only when something changed. Format version 5.
+- **History file**, next to it with `.history.json` in place of `.json` (`data/engine/cells.history.json`). Every cell's depth history for the recession view. It can be many times larger than the cell snapshot, so it is written on its own slower cadence, at most once every 60 seconds (`ENGINE_HISTORY_SNAPSHOT_SECS`), only when the history changed. Format `neermattam-engine-history` version 1, with the same format, version and resolution checks as the cell snapshot.
+
+Both are written once more on shutdown, cell state first. A crash therefore loses at most one minute of history and at most one snapshot interval of cell state. On start the cell snapshot is loaded first, then the history file. Any cell whose history does not reach its latest direct reading (the readings made after the last history save, or a missing history file) gets that reading back as one history point marked `migrated`, rebuilt from the level and time the cell state keeps; migrated points are shown but left out of drain rates, so a crash costs the recession view at most a minute of readings and never its latest level. History for a cell the map no longer holds is skipped.
+
+Older cell snapshots are migrated: version 4 kept the history inline and is read with it (the next history save moves it to the history file); version 3 had no history, so each cell gets one migrated point from its latest direct level. A cell snapshot written at a different H3 resolution or by a version older than 3, one that cannot be parsed, or one holding a cell with no evidence or a number that is not finite, is moved aside and the engine starts with an empty map. A history file that is invalid in the same ways is moved aside on its own: the cell state is kept, and each cell keeps its latest level as its only history point.
 
 Shutdown on SIGTERM or Ctrl-C is graceful: open SSE streams are closed, in-flight requests finish (up to 10 seconds), and the final snapshot is written.
 
@@ -421,7 +439,7 @@ cargo run --release                      # listens on 127.0.0.1:8302
 ENGINE_LOG_FORMAT=pretty RUST_LOG=debug cargo run --release
 ```
 
-The road graphs load in the background, all cities in parallel; `/readyz` returns 503 with a reason until every one is ready, and `/v1/cities` shows each city's progress. Logs are structured JSON by default.
+The road graphs load in the background, all cities in parallel; `/readyz` returns 503 with a reason until the primary city's graph is ready, then 200 (`degraded` while any other city is loading or has failed), and `/v1/cities` shows each city's progress. Logs are structured JSON by default.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -446,6 +464,9 @@ The road graphs load in the background, all cities in parallel; `/readyz` return
 | `ENGINE_EXPIRE_HOURS` | `12` | Hours after its latest reading that evidence stops counting |
 | `ENGINE_FORGET_HOURS` | `48` | Hours without evidence before a cell is dropped |
 | `ENGINE_HISTORY_POINTS` | `48` | Direct readings kept per cell for `/v1/recession` (0 to 1000) |
+| `ENGINE_HISTORY_MAX_TOTAL_POINTS` | `250000` | History points kept over the whole map |
+| `ENGINE_HISTORY_SNAPSHOT_SECS` | `60` | Minimum seconds between history file writes |
+| `ENGINE_PRIMARY_CITY` | `chennai` (else the first city) | City whose graph `/readyz` waits for |
 | `ENGINE_SAFETY_SIGMAS` | `1.5` | k in the blocking rule |
 | `ENGINE_BLOCK_SIGMA_CAP_CM` | `10` | Depth sigma cap in the blocking rule |
 | `ENGINE_BLOCK_VELOCITY_SIGMA_CAP_MPS` | `0.5` | Velocity sigma cap in the blocking rule |
@@ -465,7 +486,7 @@ The road graphs load in the background, all cities in parallel; `/readyz` return
 
 ```sh
 cd engine
-cargo test                                   # 96 tests: unit, HTTP and real-graph
+cargo test                                   # 112 tests: unit, HTTP and real-graph
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
@@ -474,8 +495,8 @@ cargo fmt --check
 - Routing tests on a synthetic street grid show the route bending around a flooded cell, a bus crossing water that blocks a car, and the least-bad fallback when every path is flooded.
 - `tests/chennai.rs` loads the real extract, routes Velachery railway station (12.9791, 80.2209) to Guindy (13.0067, 80.2206), seeds 50 cm of water at the middle of the shortest path and checks the new route avoids it. It takes about 0.4 s. When the extract is missing the test prints how to build it and passes; set `NEERMATTAM_REQUIRE_OSM=1` to make that a failure.
 - `tests/multicity.rs` loads all six real extracts in parallel, checks every city reports ready, routes a car across each city through the HTTP API (Chennai Central to Velachery, CSMT to Bandra, Majestic to MG Road, Secunderabad to Charminar, Howrah to Sealdah, New Delhi station to India Gate), seeds 50 cm of water at the middle of each shortest path and checks each route goes around it, and checks a Mumbai to Kolkata request is refused. It takes about 2.5 s. A missing extract is skipped with a message unless `NEERMATTAM_REQUIRE_OSM=1`.
-- `tests/cities.rs` covers multi-city behaviour and the control-room endpoints on synthetic street grids: city tagging, cross-city and out-of-coverage routes, loading and failed graphs, city-scoped cells, stream and export, hotspot ordering and reasons, summary counts, the recession history and drain rate, and every new 400 and 404.
-- Unit tests in `analytics.rs` pin the hotspot ordering (deep and fresh first, more reports higher, deep water hours old above fresh shallow water), summary counts, and the drain-rate fit (exact rate and error on a clean line, refusals on thin data, scatter widening the error). `persist.rs` checks the version 3 migration and refuses version 2; `fusion.rs` checks the history is bounded and in time order; `config.rs` checks the city variables.
+- `tests/cities.rs` covers multi-city behaviour and the control-room endpoints on synthetic street grids: city tagging, cross-city and out-of-coverage routes, loading and failed graphs, city-scoped cells, stream and export, a deep reading on a city's edge reaching every city-scoped view, readiness following the primary city, a capped export keeping the most dangerous cells, the global history total in the summary, hotspot ordering and reasons, summary counts, the recession history and drain rate, and every new 400 and 404.
+- Unit tests in `analytics.rs` pin the hotspot ordering (deep and fresh first, more reports higher, deep water hours old above fresh shallow water), summary counts, and the drain-rate fit (exact rate and error on a clean line, refusals on thin data, scatter widening the error). `persist.rs` checks the round trip of both files, a crash between history saves (cell state intact, the lost readings' latest level recovered), a bad history file never costing the cell state, the version 4 and version 3 migrations, refuses version 2, refuses truncated and corrupt cell snapshots whole, and orders and bounds a loaded history; `tests/http.rs` checks the two cadences; `fusion.rs` checks the history is bounded and in time order; `config.rs` checks the city variables.
 - `tests/http.rs` drives the full router with `tower::ServiceExt`: health, readiness, validation messages, body limit, duplicates, GeoJSON cells, routes, the SSE stream and its shutdown, and a snapshot restart.
 
 ## Benchmarks

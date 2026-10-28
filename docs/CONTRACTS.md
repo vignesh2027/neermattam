@@ -93,14 +93,14 @@ The engine covers a configured list of cities (by default `chennai`, `mumbai`, `
 Accepted when `lat`,`lon` fall inside any covered city's box. Returns `{"cell": "8a61...", "city": "chennai", "depth_cm": 21.0, "depth_sigma_cm": 2.4, "hazard": {...}}`.
 
 ### GET /v1/cells?bbox=minLon,minLat,maxLon,maxLat&city=<id>
-At least one of `bbox` and `city`; with both, a cell must be in both. Returns a GeoJSON FeatureCollection of hex cells, each with these properties:
-- `city` (the city holding the cell's centre, or null)
+At least one of `bbox` and `city`; with both, a cell must be in both. `bbox` selects by cell centre; `city` selects the cells on the city's map (centre in the box widened by three cell edge lengths). Returns a GeoJSON FeatureCollection of hex cells, each with these properties:
+- `city` (the city holding the cell's centre, else the city whose box widened by three cell edge lengths holds it, or null)
 - `depth_cm`, `depth_sigma_cm`, `velocity_mps`
 - `hazard_rating`, `hazard_class` (`low`, `danger_some`, `danger_most`, `danger_all`, `unknown`)
 - `n_readings`, `updated_at`
 
 ### GET /v1/route?from=lat,lon&to=lat,lon&vehicle=pedestrian|two_wheeler|auto|car|bus
-Planned on the graph of the city whose box holds both ends. A request with an end outside every city, or with ends in two different cities, is a 400 saying so. Returns a GeoJSON LineString Feature with these properties:
+Planned on the graph of a city whose box holds both ends. A request with an end outside every city, or with ends in two different cities, is a 400 saying so. Returns a GeoJSON LineString Feature with these properties:
 - `city`, `distance_m`, `eta_min`
 - `max_depth_cm_on_route`, `cells_avoided`, `unknown_cells_crossed`
 - `advisory: true`, `explanation`
@@ -108,7 +108,7 @@ Planned on the graph of the city whose box holds both ends. A request with an en
 The baseline shortest route (ignoring water) is returned alongside it for comparison.
 
 ### GET /v1/stream?city=<id>
-Server-sent events. Each event is a changed cell: `event: cell`, with data the same as one feature above. With `city`, only cells whose centre is in that city are sent.
+Server-sent events. Each event is a changed cell: `event: cell`, with data the same as one feature above. With `city`, only cells on that city's map are sent: those whose centre lies in its box widened by three cell edge lengths, so every cell a reading inside the city touches is included.
 
 ### GET /v1/cities
 `{"cities": [{"id": "chennai", "name": "Chennai", "bbox": [80.10, 12.85, 80.33, 13.24], "centre": {"lat": 13.045, "lon": 80.215}, "cells": 120, "graph": {"status": "ready|loading|failed", "nodes": 316734, "edges": 709504, "memory_mib": 17.6, ...}}]}`. A failed graph carries `error` instead of the counts.
@@ -117,13 +117,16 @@ Server-sent events. Each event is a changed cell: `event: cell`, with data the s
 Cells with evidence in force, ranked by a 0 to 100 score (`city` optional, `limit` default 20). Returns `{"city", "advisory": true, "score": "<formula>", "count", "hotspots": [...]}`; each hotspot has `cell`, `lat`, `lon`, `score`, `parts` (`depth`, `hazard`, `freshness`, `reports`), `depth_block_cm`, `depth_cm`, `depth_sigma_cm`, `hazard_class_upper`, `age_h`, `independent_reports`, `unknown`, `blocks` (vehicles the cell is closed to) and `reasons` (plain-English sentences, one per part plus notes). The formula is in docs/ENGINE.md.
 
 ### GET /v1/summary?city=<id>
-`city` optional. Returns `cells`, `by_class` (`low`, `danger_some`, `danger_most`, `danger_all`, `unknown`), `unknown`, `stale`, `expired`, `cells_in_conflict`, `conflicting_readings`, `blocked` (cells closed to each vehicle), `needs_fresh_report` with `needs_fresh_report_cells` (stale or expired cells last seen deeper than 15 cm; at most 50, deepest first, each with `cell`, `lat`, `lon`, `last_depth_cm`, `last_reading_age_h`, `expired`), `readings` and `newest_reading_at`.
+`city` optional. Returns `cells`, `by_class` (`low`, `danger_some`, `danger_most`, `danger_all`, `unknown`), `unknown`, `stale`, `expired`, `cells_in_conflict`, `conflicting_readings`, `blocked` (cells closed to each vehicle), `needs_fresh_report` with `needs_fresh_report_cells` (stale or expired cells last seen deeper than 15 cm; at most 50, deepest first, each with `cell`, `lat`, `lon`, `last_depth_cm`, `last_reading_age_h`, `expired`), `readings`, `newest_reading_at`, and `history_points` (`total` and `max`: depth history points held over the whole map and the cap).
 
 ### GET /v1/recession?cell=<H3 index>
 A cell's depth history: `history` (its latest direct readings, oldest first, each with `at`, `reading_cm`, `reading_sigma_cm`, `fused_cm`, `fused_sigma_cm`, `migrated`), `current` (the cell's properties as in `/v1/cells`), `drain` (`rate_cm_per_h`, `rate_sigma_cm_per_h`, `trend` of `falling|rising|steady`, `points_used`, `from`, `to`, `hours_to_15_cm`) or null, `drain_note` (how it was fitted, or why there is none), and `advisory: true`. 404 when no report has touched the cell. The drain rate never changes routing.
 
 ### GET /v1/export?city=<id>&format=geojson|csv
-`city` required, `format` default `geojson`. GeoJSON is the `/v1/cells` collection for the city; CSV has one row per cell with the columns `cell,city,lat,lon,depth_cm,depth_sigma_cm,depth_upper_cm,depth_sigma_meas_cm,conflict_high_mean_cm,velocity_mps,velocity_sigma_mps,velocity_assumed,hazard_rating,hazard_class,hazard_class_upper,debris_factor,unknown,expired,n_readings,n_neighbour,conflicts,updated_at,last_depth_cm,last_reading_age_h` (empty for null). Sent as an attachment; the `X-Neermattam-Truncated` header says whether the cell cap cut it short.
+`city` required, `format` default `geojson`. GeoJSON is the `/v1/cells` collection for the city; CSV has one row per cell with the columns `cell,city,lat,lon,depth_cm,depth_sigma_cm,depth_upper_cm,depth_sigma_meas_cm,conflict_high_mean_cm,velocity_mps,velocity_sigma_mps,velocity_assumed,hazard_rating,hazard_class,hazard_class_upper,debris_factor,unknown,expired,n_readings,n_neighbour,conflicts,updated_at,last_depth_cm,last_reading_age_h` (empty for null). Sent as an attachment; the `X-Neermattam-Truncated` header says whether the cell cap cut it short and `X-Neermattam-Total-Cells` gives the city's cell count. When the cap applies, the cells kept are the highest by hotspot score, in that order. The GeoJSON also carries top-level `truncated` and `total_cells`.
+
+### GET /readyz (engine)
+200 once the primary city's road graph (`ENGINE_PRIMARY_CITY`, default chennai) is loaded, with `status` `ready`, or `degraded` when another city's graph is loading or has failed (named in `reason`). 503 with a reason while the primary graph is loading or has failed. The body lists every city's graph status under `cities`.
 
 ## 3. Gateway (Go, port 8080, the only public service)
 - `GET /`: the live map page.

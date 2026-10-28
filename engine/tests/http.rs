@@ -476,14 +476,79 @@ async fn snapshot_survives_restart() {
         post_json("/v1/readings", &reading("p", 12.9791, 80.2209, 30.0)),
     )
     .await;
+    send(
+        &app,
+        post_json("/v1/readings", &reading("q", 12.9791, 80.2209, 28.0)),
+    )
+    .await;
     assert_eq!(first.save_snapshot().unwrap(), 7);
+    assert_eq!(first.save_history().unwrap(), 2);
+    let hpath = persist::history_path(&path);
+    assert!(hpath.exists());
 
     let second = AppState::new(cfg);
     assert_eq!(persist::load(&path, &mut second.grid.write()).unwrap(), 7);
-    let (_, b) = send(
-        &app_with(&second),
-        get("/v1/cells?bbox=80.20,12.96,80.24,12.99"),
+    assert_eq!(
+        persist::load_history(&hpath, &mut second.grid.write()).unwrap(),
+        2
+    );
+    let app2 = app_with(&second);
+    let (_, b) = send(&app2, get("/v1/cells?bbox=80.20,12.96,80.24,12.99")).await;
+    assert_eq!(b["features"].as_array().unwrap().len(), 7);
+    let cell = b["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["properties"]["n_readings"] == 2)
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (_, r) = send(&app2, get(&format!("/v1/recession?cell={cell}"))).await;
+    assert_eq!(r["history"].as_array().unwrap().len(), 2);
+    assert!(r["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|p| p["migrated"] == false));
+}
+
+#[tokio::test]
+async fn history_is_saved_on_its_own_slower_cadence() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cells.json");
+    let hpath = persist::history_path(&path);
+    let state = AppState::new(Config {
+        snapshot_path: Some(path.clone()),
+        snapshot_interval: Duration::from_millis(50),
+        history_snapshot_interval: Duration::from_secs(3),
+        ..config()
+    });
+    let looping = tokio::spawn(Arc::clone(&state).snapshot_loop());
+    // Let both intervals take their immediate first tick on an empty map.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let app = app_with(&state);
+    send(
+        &app,
+        post_json("/v1/readings", &reading("c1", 12.9791, 80.2209, 30.0)),
     )
     .await;
-    assert_eq!(b["features"].as_array().unwrap().len(), 7);
+    // The cell snapshot follows within its 50 ms cadence...
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !path.exists() {
+        assert!(tokio::time::Instant::now() < deadline, "no cell snapshot");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // ...while the history waits for its own, slower one.
+    assert!(!hpath.exists(), "history written on the cell cadence");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !hpath.exists() {
+        assert!(tokio::time::Instant::now() < deadline, "no history file");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    state.begin_shutdown();
+    looping.await.unwrap();
+    let text = std::fs::read_to_string(&hpath).unwrap();
+    assert!(text.contains("neermattam-engine-history"));
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("history"));
 }

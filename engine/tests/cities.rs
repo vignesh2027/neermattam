@@ -112,13 +112,72 @@ async fn cities_are_listed_with_their_graphs() {
     assert!(c["graph"]["memory_mib"].is_number());
     assert_eq!(cities[1]["graph"]["status"], "failed");
     assert_eq!(cities[1]["graph"]["error"], "file not found");
-    // A failed city keeps readiness down, with the reason.
+    // A failed city other than the primary degrades readiness but does not
+    // take the service down; the body says which city and why.
+    let (s, b) = send(&app, get("/readyz")).await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(b["status"], "degraded");
+    assert_eq!(b["primary_city"], "chennai");
+    assert_eq!(b["cities"]["mumbai"]["status"], "failed");
+    assert!(b["reason"]
+        .as_str()
+        .unwrap()
+        .contains("mumbai: file not found"));
+}
+
+#[tokio::test]
+async fn readiness_follows_the_primary_city() {
+    // Loading primary: not ready, even when another city is loaded.
+    let state = AppState::new(config());
+    let app = router(Arc::clone(&state));
+    state.set_graph("mumbai", town(MUMBAI.0, MUMBAI.1));
+    let (s, b) = send(&app, get("/readyz")).await;
+    assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE, "{b}");
+    assert_eq!(b["status"], "not_ready");
+    assert!(b["reason"].as_str().unwrap().contains("loading: chennai"));
+    // Failed primary: not ready, with the reason.
+    state.set_graph_error("chennai", "cannot read OSM extract".into());
     let (s, b) = send(&app, get("/readyz")).await;
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
     assert!(b["reason"]
         .as_str()
         .unwrap()
-        .contains("mumbai: file not found"));
+        .contains("chennai: cannot read"));
+    // Everything loaded: plain ready, no reason.
+    let state = AppState::new(config());
+    let app = router(Arc::clone(&state));
+    state.set_graph("chennai", town(CHENNAI.0, CHENNAI.1));
+    let (s, b) = send(&app, get("/readyz")).await;
+    assert_eq!(
+        (s, b["status"].as_str()),
+        (StatusCode::OK, Some("degraded"))
+    );
+    state.set_graph("mumbai", town(MUMBAI.0, MUMBAI.1));
+    let (s, b) = send(&app, get("/readyz")).await;
+    assert_eq!((s, b["status"].as_str()), (StatusCode::OK, Some("ready")));
+    assert!(b.get("reason").is_none());
+    // A configured primary of Mumbai: Chennai failing does not matter.
+    let state = AppState::new(Config {
+        primary_city: "mumbai".into(),
+        ..config()
+    });
+    let app = router(Arc::clone(&state));
+    state.set_graph_error("chennai", "file not found".into());
+    state.set_graph("mumbai", town(MUMBAI.0, MUMBAI.1));
+    let (s, b) = send(&app, get("/readyz")).await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(b["status"], "degraded");
+    // Routing in the failed city is still a clear 503 naming it.
+    let (s, b) = send(
+        &app,
+        get("/v1/route?from=12.97,80.21&to=12.98,80.22&vehicle=car"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(b["error"]
+        .as_str()
+        .unwrap()
+        .contains("Chennai is unavailable"));
 }
 
 #[tokio::test]
@@ -493,4 +552,178 @@ async fn recession_reports_history_and_drain_rate() {
     let (s, b) = send(&app, get(&format!("/v1/recession?cell={far}"))).await;
     assert_eq!(s, StatusCode::NOT_FOUND, "{b}");
     assert!(b["error"].as_str().unwrap().contains("no reports"));
+}
+
+/// A point just inside Chennai's north edge whose cell centre lies outside
+/// the box: (13.2399, 80.2030) is one, as found by probing the live engine.
+const CHENNAI_EDGE: (f64, f64) = (13.2399, 80.2030);
+
+#[tokio::test]
+async fn a_reading_on_the_city_edge_stays_on_the_city_map() {
+    // Regression: cells belonged to a city only when their centre was in its
+    // box. A 60 cm reading accepted just inside Chennai's edge was fused and
+    // blocked routes, but its cell, tagged with no city, was missing from
+    // /v1/cells?city=chennai, the Chennai stream, the summary, the hotspots
+    // and the export.
+    let state = AppState::new(config());
+    let app = router(Arc::clone(&state));
+    let resp = app
+        .clone()
+        .oneshot(get("/v1/stream?city=chennai"))
+        .await
+        .unwrap();
+    let mut body = resp.into_body();
+    let (s, r) = send(
+        &app,
+        reading_at("edge", CHENNAI_EDGE.0, CHENNAI_EDGE.1, 60.0, 0.0),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{r}");
+    assert_eq!(r["city"], "chennai");
+    let cell = r["cell"].as_str().unwrap().to_string();
+    let centre = h3o::LatLng::from(cell.parse::<h3o::CellIndex>().unwrap());
+    assert!(
+        centre.lat() > 13.24,
+        "the probe point no longer tests the edge"
+    );
+
+    // All seven events reach the Chennai stream.
+    let mut text = String::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while text.matches("event: cell").count() < 7 {
+        let frame = tokio::time::timeout_at(deadline, body.frame())
+            .await
+            .expect("fewer than 7 Chennai events")
+            .expect("stream ended")
+            .unwrap();
+        if let Some(d) = frame.data_ref() {
+            text.push_str(&String::from_utf8_lossy(d));
+        }
+    }
+    assert!(text.contains(&cell));
+    state.begin_shutdown();
+
+    let (_, cells) = send(&app, get("/v1/cells?city=chennai")).await;
+    let ids: Vec<&str> = cells["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 7, "{ids:?}");
+    assert!(ids.contains(&cell.as_str()));
+    assert!(cells["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|f| f["properties"]["city"] == "chennai"));
+    let (_, summary) = send(&app, get("/v1/summary?city=chennai")).await;
+    assert_eq!(summary["cells"], 7);
+    assert_eq!(summary["blocked"]["car"], 7);
+    let (_, hot) = send(&app, get("/v1/hotspots?city=chennai&limit=200")).await;
+    assert_eq!(hot["count"], 7);
+    assert_eq!(hot["hotspots"][0]["cell"], cell.as_str());
+    let (_, cities) = send(&app, get("/v1/cities")).await;
+    assert_eq!(cities["cities"][0]["cells"], 7);
+    let export = app
+        .clone()
+        .oneshot(get("/v1/export?city=chennai&format=csv"))
+        .await
+        .unwrap();
+    let csv = export.into_body().collect().await.unwrap().to_bytes();
+    let csv = String::from_utf8_lossy(&csv);
+    assert_eq!(csv.lines().count(), 8, "{csv}");
+    assert!(csv.contains(&cell));
+    // Nothing of it leaks into Mumbai.
+    let (_, m) = send(&app, get("/v1/summary?city=mumbai")).await;
+    assert_eq!(m["cells"], 0);
+}
+
+#[tokio::test]
+async fn a_capped_export_keeps_the_most_dangerous_cells() {
+    // Regression: the row cap cut cells in index order, so the deepest
+    // water could be the part left out.
+    let state = AppState::new(Config {
+        max_cells: 10,
+        ..config()
+    });
+    let app = router(Arc::clone(&state));
+    // Eight shallow reports and one 70 cm report, each about 1 km apart, so
+    // each makes 7 cells: 63 in all.
+    for i in 0..8 {
+        let lat = CHENNAI.0 + 0.01 * f64::from(i);
+        send(&app, reading_at(&format!("s{i}"), lat, CHENNAI.1, 2.0, 0.0)).await;
+    }
+    let (_, deep) = send(
+        &app,
+        reading_at("deep", CHENNAI.0 + 0.09, CHENNAI.1, 70.0, 0.0),
+    )
+    .await;
+    let deep_cell = deep["cell"].as_str().unwrap().to_string();
+
+    let resp = app
+        .clone()
+        .oneshot(get("/v1/export?city=chennai&format=csv"))
+        .await
+        .unwrap();
+    let h = resp.headers().clone();
+    assert_eq!(h["x-neermattam-truncated"], "true");
+    assert_eq!(h["x-neermattam-total-cells"], "63");
+    let csv = resp.into_body().collect().await.unwrap().to_bytes();
+    let csv = String::from_utf8_lossy(&csv).to_string();
+    let lines: Vec<&str> = csv.lines().collect();
+    // A clean header, then 10 rows, the deep cell first and its six
+    // neighbours (70 cm next door) right after it.
+    assert_eq!(lines[0], EXPORT_CSV_COLUMNS.join(","));
+    assert_eq!(lines.len(), 11);
+    assert!(lines[1].starts_with(&deep_cell), "{}", lines[1]);
+    let depth_col = EXPORT_CSV_COLUMNS
+        .iter()
+        .position(|c| *c == "depth_cm")
+        .unwrap();
+    let depths: Vec<f64> = lines[1..]
+        .iter()
+        .map(|l| l.split(',').nth(depth_col).unwrap().parse().unwrap())
+        .collect();
+    assert!(depths[..7].iter().all(|d| *d >= 69.9), "{depths:?}");
+
+    let (s, g) = send(&app, get("/v1/export?city=chennai")).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(g["truncated"], true);
+    assert_eq!(g["total_cells"], 63);
+    let features = g["features"].as_array().unwrap();
+    assert_eq!(features.len(), 10);
+    assert_eq!(features[0]["id"], deep_cell.as_str());
+
+    // Uncapped exports report the total too.
+    let resp = app
+        .clone()
+        .oneshot(get("/v1/export?city=mumbai&format=csv"))
+        .await
+        .unwrap();
+    assert_eq!(resp.headers()["x-neermattam-total-cells"], "0");
+    assert_eq!(resp.headers()["x-neermattam-truncated"], "false");
+}
+
+#[tokio::test]
+async fn summary_reports_the_global_history_total() {
+    let app = router(AppState::new(config()));
+    for i in 0..3 {
+        send(
+            &app,
+            reading_at(
+                &format!("h{i}"),
+                CHENNAI.0,
+                CHENNAI.1,
+                20.0,
+                0.1 * f64::from(i),
+            ),
+        )
+        .await;
+    }
+    send(&app, reading_at("m", MUMBAI.0, MUMBAI.1, 20.0, 0.0)).await;
+    let (_, s) = send(&app, get("/v1/summary?city=chennai")).await;
+    // Global: Chennai's three points and Mumbai's one.
+    assert_eq!(s["history_points"]["total"], 4);
+    assert_eq!(s["history_points"]["max"], 250_000);
 }

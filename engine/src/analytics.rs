@@ -132,14 +132,27 @@ fn hazard_points(class: HazardClass) -> f64 {
     }
 }
 
-/// Score one cell, or `None` when it has no evidence in force.
-#[must_use]
-pub fn hotspot(
+/// The numbers behind one cell's score.
+struct Scored {
+    parts: ScoreParts,
+    score: f64,
+    depth_block: f64,
+    velocity: f64,
+    assumed: bool,
+    class: HazardClass,
+    age_h: f64,
+    direct: u32,
+    independent: u32,
+}
+
+/// The score alone, without the explanation, or `None` when the cell has no
+/// evidence in force.
+fn score(
     v: &CellView,
     policy: &RoutePolicy,
     params: &FusionParams,
     now: DateTime<Utc>,
-) -> Option<Hotspot> {
+) -> Option<Scored> {
     if v.expired {
         return None;
     }
@@ -151,14 +164,47 @@ pub fn hotspot(
         policy.debris_rule,
     );
     let age_h = hours_between(v.updated_at, now).max(0.0);
-    let independent = v.n_readings + v.neighbour_sources;
+    // Direct readings count only while the cell's own track is in force.
+    let direct = if v.neighbour_only { 0 } else { v.n_readings };
+    let independent = direct + v.neighbour_sources;
     let parts = ScoreParts {
         depth: DEPTH_POINTS * (depth_block / DEPTH_SATURATION_CM).clamp(0.0, 1.0),
         hazard: hazard_points(hazard.class),
         freshness: FRESHNESS_POINTS * (1.0 - age_h / params.expire_after_h).clamp(0.0, 1.0),
         reports: REPORT_POINTS * (f64::from(independent) / REPORT_SATURATION).min(1.0),
     };
-    let score = parts.depth + parts.hazard + parts.freshness + parts.reports;
+    Some(Scored {
+        score: round1(parts.depth + parts.hazard + parts.freshness + parts.reports),
+        parts,
+        depth_block,
+        velocity,
+        assumed,
+        class: hazard.class,
+        age_h,
+        direct,
+        independent,
+    })
+}
+
+/// Score one cell, or `None` when it has no evidence in force.
+#[must_use]
+pub fn hotspot(
+    v: &CellView,
+    policy: &RoutePolicy,
+    params: &FusionParams,
+    now: DateTime<Utc>,
+) -> Option<Hotspot> {
+    let Scored {
+        parts,
+        score,
+        depth_block,
+        velocity,
+        assumed,
+        class,
+        age_h,
+        direct,
+        independent,
+    } = score(v, policy, params, now)?;
     let blocks: Vec<Vehicle> = Vehicle::ALL
         .into_iter()
         .filter(|veh| {
@@ -176,7 +222,7 @@ pub fn hotspot(
         ),
         format!(
             "At that depth the Defra hazard is {}: {:.0} of 30 points.",
-            hazard.class.describe(),
+            class.describe(),
             parts.hazard
         ),
         format!(
@@ -187,7 +233,7 @@ pub fn hotspot(
             "{} independent report{} ({} in the cell, {} from adjacent cells): {:.0} of 10 points.",
             independent,
             if independent == 1 { "" } else { "s" },
-            v.n_readings,
+            direct,
             v.neighbour_sources,
             parts.reports
         ),
@@ -228,7 +274,7 @@ pub fn hotspot(
         cell: v.cell.to_string(),
         lat: (centre.lat() * 1e6).round() / 1e6,
         lon: (centre.lng() * 1e6).round() / 1e6,
-        score: round1(score),
+        score,
         parts: ScoreParts {
             depth: round1(parts.depth),
             hazard: round1(parts.hazard),
@@ -238,7 +284,7 @@ pub fn hotspot(
         depth_block_cm: round1(depth_block),
         depth_cm: round1(v.depth.mean),
         depth_sigma_cm: round1(v.depth.sigma()),
-        hazard_class_upper: hazard.class,
+        hazard_class_upper: class,
         age_h: (age_h * 100.0).round() / 100.0,
         independent_reports: independent,
         unknown: v.unknown,
@@ -248,6 +294,10 @@ pub fn hotspot(
 }
 
 /// Rank cells by hotspot score, highest first, keeping at most `limit`.
+///
+/// Every cell is scored, but only the `limit` kept are explained: building
+/// the reasons is most of the cost, and a full city has tens of thousands of
+/// cells.
 #[must_use]
 pub fn hotspots(
     views: impl IntoIterator<Item = CellView>,
@@ -256,18 +306,56 @@ pub fn hotspots(
     now: DateTime<Utc>,
     limit: usize,
 ) -> Vec<Hotspot> {
-    let mut all: Vec<Hotspot> = views
+    // Order: score, then blocking depth as shown (to 0.1 cm), then cell id.
+    let mut ranked: Vec<(f64, f64, u64, CellView)> = views
         .into_iter()
-        .filter_map(|v| hotspot(&v, policy, params, now))
+        .filter_map(|v| {
+            score(&v, policy, params, now)
+                .map(|s| (s.score, round1(s.depth_block), u64::from(v.cell), v))
+        })
         .collect();
-    all.sort_by(|a, b| {
-        b.score
-            .total_cmp(&a.score)
-            .then(b.depth_block_cm.total_cmp(&a.depth_block_cm))
-            .then_with(|| a.cell.cmp(&b.cell))
+    let order = |a: &(f64, f64, u64, CellView), b: &(f64, f64, u64, CellView)| {
+        b.0.total_cmp(&a.0)
+            .then(b.1.total_cmp(&a.1))
+            .then(a.2.cmp(&b.2))
+    };
+    if limit == 0 {
+        return Vec::new();
+    }
+    if ranked.len() > limit {
+        ranked.select_nth_unstable_by(limit - 1, order);
+        ranked.truncate(limit);
+    }
+    ranked.sort_by(order);
+    ranked
+        .iter()
+        .filter_map(|r| hotspot(&r.3, policy, params, now))
+        .collect()
+}
+
+/// Order cells most important first: hotspot score descending, then
+/// blocking depth descending, then cell index; cells with no evidence in force
+/// (no score) go last, by cell index. The export uses it so that a row cap
+/// always keeps the deepest and most dangerous cells.
+pub fn sort_by_score(
+    views: Vec<CellView>,
+    policy: &RoutePolicy,
+    params: &FusionParams,
+    now: DateTime<Utc>,
+) -> Vec<CellView> {
+    let mut keyed: Vec<(f64, f64, u64, CellView)> = views
+        .into_iter()
+        .map(|v| match score(&v, policy, params, now) {
+            Some(s) => (s.score, round1(s.depth_block), u64::from(v.cell), v),
+            None => (-1.0, -1.0, u64::from(v.cell), v),
+        })
+        .collect();
+    keyed.sort_by(|a, b| {
+        b.0.total_cmp(&a.0)
+            .then(b.1.total_cmp(&a.1))
+            .then(a.2.cmp(&b.2))
     });
-    all.truncate(limit);
-    all
+    keyed.into_iter().map(|k| k.3).collect()
 }
 
 /// Cell counts by hazard class (the class shown on the map).
@@ -677,6 +765,61 @@ mod tests {
         for text in r.iter().flat_map(|h| h.reasons.iter()) {
             assert!(!text.contains('\u{2014}') && !text.contains("->"), "{text}");
         }
+    }
+
+    #[test]
+    fn a_limited_ranking_is_the_head_of_the_full_one() {
+        // The fast path explains only the kept cells; it must keep the same
+        // cells in the same order as ranking everything.
+        let mut g = grid();
+        for (i, (lat, lon)) in PLACES.iter().enumerate() {
+            for k in 0..=i {
+                g.ingest(&obs(
+                    *lat,
+                    *lon,
+                    10.0 * (i as f64) + 3.0,
+                    t(5.0 - 0.7 * (k as f64)),
+                ))
+                .unwrap();
+            }
+        }
+        let now = t(5.0);
+        let all = ranked(&g, now);
+        assert!(all.len() > 20);
+        for limit in [1, 3, 7, 20, all.len(), all.len() + 5] {
+            let head = hotspots(
+                g.views(now),
+                &RoutePolicy::default(),
+                &FusionParams::default(),
+                now,
+                limit,
+            );
+            assert_eq!(head, all[..limit.min(all.len())].to_vec(), "limit {limit}");
+        }
+    }
+
+    #[test]
+    fn expired_direct_readings_are_not_counted_as_reports() {
+        // Regression: a cell whose own readings had expired still counted
+        // them as independent reports while a neighbour kept it alive.
+        let mut g = grid();
+        let c = g.cell_at(PLACES[0].0, PLACES[0].1).unwrap();
+        for k in 0..5 {
+            g.ingest(&obs(PLACES[0].0, PLACES[0].1, 40.0, t(0.1 * f64::from(k))))
+                .unwrap();
+        }
+        let ring: Vec<CellIndex> = c.grid_disk(1);
+        let n = h3o::LatLng::from(ring.into_iter().find(|x| *x != c).unwrap());
+        g.ingest(&obs(n.lat(), n.lng(), 40.0, t(10.0))).unwrap();
+        let h = hotspot(
+            &g.view(c, t(13.0)).unwrap(),
+            &RoutePolicy::default(),
+            &FusionParams::default(),
+            t(13.0),
+        )
+        .unwrap();
+        assert_eq!(h.independent_reports, 1);
+        assert!(h.reasons[3].contains("(0 in the cell, 1 from adjacent cells)"));
     }
 
     #[test]

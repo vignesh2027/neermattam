@@ -13,6 +13,9 @@
 //! | `ENGINE_SNAPSHOT_INTERVAL_SECS` | `5` | Minimum seconds between snapshots |
 //! | `ENGINE_H3_RESOLUTION` | `10` | H3 resolution (7 to 12) |
 //! | `ENGINE_HISTORY_POINTS` | `48` | Depth history kept per cell for `/v1/recession` (0 to 1000) |
+//! | `ENGINE_HISTORY_MAX_TOTAL_POINTS` | `250000` | Depth history kept over all cells together |
+//! | `ENGINE_HISTORY_SNAPSHOT_SECS` | `60` | Minimum seconds between history snapshots |
+//! | `ENGINE_PRIMARY_CITY` | `chennai` (else the first city) | City whose road graph `/readyz` waits for |
 //! | `ENGINE_HALF_LIFE_HOURS` | `off` | Opt-in recession half-life; `off` holds the level |
 //! | `ENGINE_DEPTH_NOISE_CM_PER_SQRT_HOUR` | `6` | Depth process noise |
 //! | `ENGINE_VELOCITY_NOISE_MPS_PER_SQRT_HOUR` | `0.2` | Velocity process noise |
@@ -69,6 +72,8 @@ pub struct Config {
     pub snapshot_path: Option<PathBuf>,
     /// Minimum time between snapshots.
     pub snapshot_interval: Duration,
+    /// Minimum time between history snapshots.
+    pub history_snapshot_interval: Duration,
     /// H3 resolution.
     pub resolution: Resolution,
     /// Fusion tuning.
@@ -88,6 +93,9 @@ pub struct Config {
     pub log_json: bool,
     /// How many recent reading ids are remembered for de-duplication.
     pub dedupe_capacity: usize,
+    /// The city whose road graph must be loaded for `/readyz` to answer 200.
+    /// Other cities' graphs are reported but do not make the service unready.
+    pub primary_city: String,
 }
 
 impl Default for Config {
@@ -97,6 +105,7 @@ impl Default for Config {
             cities: default_cities(std::path::Path::new("../data/osm")),
             snapshot_path: Some(PathBuf::from("../data/engine/cells.json")),
             snapshot_interval: Duration::from_secs(5),
+            history_snapshot_interval: Duration::from_secs(60),
             resolution: Resolution::Ten,
             fusion: FusionParams::default(),
             policy: RoutePolicy::default(),
@@ -106,6 +115,7 @@ impl Default for Config {
             max_cells: 20_000,
             log_json: true,
             dedupe_capacity: 100_000,
+            primary_city: "chennai".into(),
         }
     }
 }
@@ -169,6 +179,15 @@ impl Config {
         self.cities.city(id)
     }
 
+    /// The history file that goes with the cell snapshot, if persistence is
+    /// on (see [`crate::persist::history_path`]).
+    #[must_use]
+    pub fn history_path(&self) -> Option<PathBuf> {
+        self.snapshot_path
+            .as_deref()
+            .map(crate::persist::history_path)
+    }
+
     /// True when the bind address is loopback or a private (RFC 1918, ULA)
     /// address. The engine has no authentication and trusts the `trust`
     /// field, so it must only be reachable from the gateway.
@@ -190,12 +209,31 @@ impl Config {
         let mut c = Config::default();
         parse(&get, "ENGINE_BIND", &mut c.bind, any)?;
         c.cities = cities_from(&get)?;
+        c.primary_city = match get("ENGINE_PRIMARY_CITY") {
+            Some(raw) => {
+                let id = raw.trim().to_string();
+                if c.city(&id).is_none() {
+                    return Err(ConfigError {
+                        var: "ENGINE_PRIMARY_CITY",
+                        value: id,
+                        reason: format!("must be one of the covered cities: {}", c.cities.ids()),
+                    });
+                }
+                id
+            }
+            // Chennai when it is covered, else the first city listed.
+            None if c.city("chennai").is_some() => "chennai".into(),
+            None => c.cities[0].id.clone(),
+        };
         if let Some(p) = get("ENGINE_SNAPSHOT_PATH") {
             c.snapshot_path = (!p.trim().is_empty()).then(|| PathBuf::from(p.trim()));
         }
         let mut secs = c.snapshot_interval.as_secs_f64();
         parse(&get, "ENGINE_SNAPSHOT_INTERVAL_SECS", &mut secs, positive)?;
         c.snapshot_interval = Duration::from_secs_f64(secs);
+        let mut secs = c.history_snapshot_interval.as_secs_f64();
+        parse(&get, "ENGINE_HISTORY_SNAPSHOT_SECS", &mut secs, positive)?;
+        c.history_snapshot_interval = Duration::from_secs_f64(secs);
         let mut res: u8 = u8::from(c.resolution);
         parse(&get, "ENGINE_H3_RESOLUTION", &mut res, |r| {
             if (7..=12).contains(r) {
@@ -261,6 +299,12 @@ impl Config {
         parse(&get, "ENGINE_STALE_HOURS", &mut f.stale_after_h, positive)?;
         parse(&get, "ENGINE_EXPIRE_HOURS", &mut f.expire_after_h, positive)?;
         parse(&get, "ENGINE_FORGET_HOURS", &mut f.forget_after_h, positive)?;
+        parse(
+            &get,
+            "ENGINE_HISTORY_MAX_TOTAL_POINTS",
+            &mut f.history_max_total,
+            any,
+        )?;
         parse(&get, "ENGINE_HISTORY_POINTS", &mut f.history_len, |n| {
             if *n <= 1000 {
                 Ok(())
@@ -490,6 +534,9 @@ mod tests {
             PathBuf::from("../data/osm/delhi-roads.osm.pbf")
         );
         assert_eq!(c.fusion.history_len, 48);
+        assert_eq!(c.fusion.history_max_total, 250_000);
+        assert_eq!(c.history_snapshot_interval, Duration::from_secs(60));
+        assert_eq!(c.primary_city, "chennai");
         assert_eq!(c.policy.safety_sigmas, 1.5);
     }
 
@@ -525,6 +572,48 @@ mod tests {
         assert_eq!(c.fusion.expire_after_h, 8.0);
         assert_eq!(c.policy.sigma_cap_cm, 12.0);
         assert!(!c.bind_is_internal());
+    }
+
+    #[test]
+    fn primary_city_and_history_cap() {
+        let c = Config::from_lookup(lookup(&[
+            ("ENGINE_PRIMARY_CITY", "mumbai"),
+            ("ENGINE_HISTORY_MAX_TOTAL_POINTS", "5000"),
+        ]))
+        .unwrap();
+        assert_eq!(c.primary_city, "mumbai");
+        assert_eq!(c.fusion.history_max_total, 5000);
+        let c = Config::from_lookup(lookup(&[
+            ("ENGINE_HISTORY_SNAPSHOT_SECS", "120"),
+            ("ENGINE_SNAPSHOT_PATH", "/var/neer/cells.json"),
+        ]))
+        .unwrap();
+        assert_eq!(c.history_snapshot_interval, Duration::from_secs(120));
+        assert_eq!(
+            c.history_path(),
+            Some(PathBuf::from("/var/neer/cells.history.json"))
+        );
+        assert!(Config::from_lookup(lookup(&[("ENGINE_HISTORY_SNAPSHOT_SECS", "0")])).is_err());
+        // Without Chennai the first city is primary.
+        let c = Config::from_lookup(lookup(&[("ENGINE_CITIES", "delhi,kolkata")])).unwrap();
+        assert_eq!(c.primary_city, "delhi");
+        for (pairs, needle) in [
+            (vec![("ENGINE_PRIMARY_CITY", "pune")], "ENGINE_PRIMARY_CITY"),
+            (
+                vec![
+                    ("ENGINE_CITIES", "delhi"),
+                    ("ENGINE_PRIMARY_CITY", "chennai"),
+                ],
+                "covered cities: delhi",
+            ),
+            (
+                vec![("ENGINE_HISTORY_MAX_TOTAL_POINTS", "-1")],
+                "ENGINE_HISTORY_MAX_TOTAL_POINTS",
+            ),
+        ] {
+            let e = Config::from_lookup(lookup(&pairs)).unwrap_err().to_string();
+            assert!(e.contains(needle), "{e}");
+        }
     }
 
     #[test]

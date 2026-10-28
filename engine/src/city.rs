@@ -22,6 +22,7 @@
 //! | delhi | 76.84,28.40,77.35,28.89 | National Capital Territory of Delhi |
 
 use crate::geo::BBox;
+use h3o::{CellIndex, LatLng};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -54,7 +55,36 @@ impl City {
     pub fn contains(&self, lat: f64, lon: f64) -> bool {
         self.bbox.contains(lat, lon)
     }
+
+    /// True when a cell belongs to the city's map: its centre lies in the box
+    /// widened by `CELL_MARGIN_EDGES` cell edge lengths on every side.
+    ///
+    /// A reading is accepted anywhere inside the box, but its cell's centre
+    /// can lie up to one edge length outside it, and the six neighbours it
+    /// informs up to about 2.7 edge lengths. With the margin, every cell a
+    /// reading in the city touches is on that city's map, stream, summary and
+    /// export; without it, deep water reported just inside the box edge was
+    /// fused, blocked routes, and yet never appeared on the city's map.
+    #[must_use]
+    pub fn holds_cell(&self, cell: CellIndex) -> bool {
+        let c = LatLng::from(cell);
+        let margin_m = CELL_MARGIN_EDGES * cell.resolution().edge_length_m();
+        let dlat = margin_m / METRES_PER_DEGREE;
+        let dlon = margin_m / (METRES_PER_DEGREE * c.lat().to_radians().cos().max(0.1));
+        let (lat, lon) = (c.lat(), c.lng());
+        lat >= self.bbox.min_lat - dlat
+            && lat <= self.bbox.max_lat + dlat
+            && lon >= self.bbox.min_lon - dlon
+            && lon <= self.bbox.max_lon + dlon
+    }
 }
+
+/// Edge lengths by which a city's box is widened to decide which cells are
+/// on its map (see [`City::holds_cell`]).
+pub const CELL_MARGIN_EDGES: f64 = 3.0;
+
+/// Metres per degree of latitude (and of longitude at the equator).
+const METRES_PER_DEGREE: f64 = 111_195.0;
 
 /// The built-in cities: id, display name, metro box.
 pub const DEFAULT_CITIES: [(&str, &str, BBox); 6] = [
@@ -141,6 +171,11 @@ pub fn valid_id(id: &str) -> bool {
 pub trait CityLookup {
     /// The first city whose box holds the point.
     fn city_at(&self, lat: f64, lon: f64) -> Option<&City>;
+    /// The city a cell belongs to: the first whose box holds its centre, else
+    /// the first whose widened box does (see [`City::holds_cell`]).
+    fn city_of_cell(&self, cell: CellIndex) -> Option<&City>;
+    /// The first city whose box holds both points.
+    fn city_holding(&self, a: (f64, f64), b: (f64, f64)) -> Option<&City>;
     /// The city with this id.
     fn city(&self, id: &str) -> Option<&City>;
     /// Ids joined for error messages, such as `chennai, mumbai`.
@@ -150,6 +185,17 @@ pub trait CityLookup {
 impl CityLookup for [City] {
     fn city_at(&self, lat: f64, lon: f64) -> Option<&City> {
         self.iter().find(|c| c.contains(lat, lon))
+    }
+
+    fn city_of_cell(&self, cell: CellIndex) -> Option<&City> {
+        let c = LatLng::from(cell);
+        self.city_at(c.lat(), c.lng())
+            .or_else(|| self.iter().find(|city| city.holds_cell(cell)))
+    }
+
+    fn city_holding(&self, a: (f64, f64), b: (f64, f64)) -> Option<&City> {
+        self.iter()
+            .find(|c| c.contains(a.0, a.1) && c.contains(b.0, b.1))
     }
 
     fn city(&self, id: &str) -> Option<&City> {
@@ -209,6 +255,65 @@ mod tests {
         assert_eq!(cities.city("kolkata").unwrap().name, "Kolkata");
         assert!(cities.city("pune").is_none());
         assert!(cities.ids().starts_with("chennai, mumbai"));
+    }
+
+    #[test]
+    fn every_cell_a_reading_in_the_box_touches_is_held() {
+        // Regression: membership by cell centre only. A reading accepted just
+        // inside Chennai's north edge fell in a cell whose centre is outside
+        // the box, and the cell (60 cm of water) never reached the Chennai
+        // map or stream.
+        let cities = default_cities(Path::new("."));
+        let chennai = cities.city("chennai").unwrap();
+        let b = chennai.bbox;
+        let mut outside_centre = 0;
+        for i in 0..400 {
+            let f = f64::from(i) / 400.0;
+            for (lat, lon) in [
+                (b.max_lat, b.min_lon + f * (b.max_lon - b.min_lon)),
+                (b.min_lat, b.min_lon + f * (b.max_lon - b.min_lon)),
+                (b.min_lat + f * (b.max_lat - b.min_lat), b.min_lon),
+                (b.min_lat + f * (b.max_lat - b.min_lat), b.max_lon),
+            ] {
+                let cell = LatLng::new(lat, lon).unwrap().to_cell(h3o::Resolution::Ten);
+                let centre = LatLng::from(cell);
+                if !chennai.contains(centre.lat(), centre.lng()) {
+                    outside_centre += 1;
+                }
+                for c in cell.grid_disk::<Vec<_>>(1) {
+                    assert!(chennai.holds_cell(c), "{c} near ({lat}, {lon})");
+                    assert_eq!(cities.city_of_cell(c).unwrap().id, "chennai");
+                }
+            }
+        }
+        assert!(outside_centre > 100, "{outside_centre}");
+        // Far cells are not held.
+        let far = LatLng::new(13.30, 80.2)
+            .unwrap()
+            .to_cell(h3o::Resolution::Ten);
+        assert!(!chennai.holds_cell(far));
+        assert!(cities.city_of_cell(far).is_none());
+    }
+
+    #[test]
+    fn a_route_city_must_hold_both_ends() {
+        // Two overlapping custom boxes: a point in the overlap and a point
+        // only in the second box share the second city.
+        let mk = |id: &str, min_lon: f64, max_lon: f64| City {
+            id: id.into(),
+            name: id.into(),
+            bbox: BBox {
+                min_lon,
+                min_lat: 18.0,
+                max_lon,
+                max_lat: 19.0,
+            },
+            osm_path: PathBuf::new(),
+        };
+        let cities = [mk("a", 73.0, 73.5), mk("b", 73.3, 74.0)];
+        let both = cities.city_holding((18.5, 73.4), (18.5, 73.8)).unwrap();
+        assert_eq!(both.id, "b");
+        assert!(cities.city_holding((18.5, 73.1), (18.5, 73.8)).is_none());
     }
 
     #[test]

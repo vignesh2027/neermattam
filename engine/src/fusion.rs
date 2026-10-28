@@ -178,6 +178,9 @@ pub struct FusionParams {
     pub forget_after_h: f64,
     /// Depth history points kept per cell (see [`HistoryPoint`]); 0 keeps none.
     pub history_len: usize,
+    /// Depth history points kept over all cells together (see
+    /// [`Grid::enforce_history_cap`]).
+    pub history_max_total: usize,
 }
 
 impl Default for FusionParams {
@@ -194,6 +197,7 @@ impl Default for FusionParams {
             expire_after_h: 12.0,
             forget_after_h: 48.0,
             history_len: 48,
+            history_max_total: 250_000,
         }
     }
 }
@@ -401,7 +405,9 @@ pub struct HistoryPoint {
 }
 
 impl HistoryPoint {
-    fn is_valid(&self) -> bool {
+    /// True when every number is usable.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
         self.reading_cm.is_finite()
             && self.reading_sigma_cm.is_finite()
             && self.reading_sigma_cm > 0.0
@@ -460,8 +466,10 @@ pub struct CellState {
     /// Neighbour readings fused into this cell.
     pub n_neighbour: u32,
     /// The latest direct readings, oldest first, at most
-    /// `FusionParams::history_len` of them.
-    #[serde(default)]
+    /// `FusionParams::history_len` of them. Saved in its own history file on
+    /// a slower cadence, not in the cell snapshot (see [`crate::persist`]);
+    /// read from a version 4 cell snapshot, which held it inline.
+    #[serde(default, skip_serializing)]
     pub history: VecDeque<HistoryPoint>,
 }
 
@@ -499,16 +507,22 @@ impl CellState {
             && self.history.iter().all(HistoryPoint::is_valid)
     }
 
-    /// Give a state loaded from a version 3 snapshot, which had no history,
-    /// one migrated point from what that format kept: the time of the latest
-    /// direct reading and the estimate just after it.
-    pub fn migrate_v3_history(&mut self, p: &FusionParams) {
-        if p.history_len == 0 || !self.history.is_empty() {
+    /// Make sure the history ends with the latest direct reading. A version 3
+    /// snapshot kept no history, and after a crash the history file can be up
+    /// to one history interval older than the cell state. Either way the cell
+    /// state still records the time of the latest direct reading and the level
+    /// just after it, so one point marked `migrated` is added from those. Such
+    /// points are shown but left out of drain rates.
+    pub fn recover_latest_history(&mut self, p: &FusionParams) {
+        if p.history_len == 0 {
             return;
         }
         if let (Some(at), Some(depth), Some(d)) =
             (self.last_direct_at, self.last_depth_cm, self.direct)
         {
+            if self.history.back().is_some_and(|h| h.at >= at) {
+                return;
+            }
             let sigma = d.meas_var.sqrt();
             self.history.push_back(HistoryPoint {
                 at,
@@ -518,6 +532,15 @@ impl CellState {
                 fused_sigma_cm: sigma,
                 migrated: true,
             });
+        }
+    }
+
+    /// Put a loaded history in time order and keep only the newest
+    /// `history_len` points.
+    pub fn normalise_history(&mut self, p: &FusionParams) {
+        self.history.make_contiguous().sort_by_key(|p| p.at);
+        while self.history.len() > p.history_len {
+            self.history.pop_front();
         }
     }
 
@@ -835,6 +858,8 @@ pub struct Grid {
     params: FusionParams,
     resolution: Resolution,
     cells: HashMap<CellIndex, CellState>,
+    /// History points held over all cells.
+    history_total: usize,
 }
 
 impl Grid {
@@ -845,6 +870,7 @@ impl Grid {
             params,
             resolution,
             cells: HashMap::new(),
+            history_total: 0,
         }
     }
 
@@ -883,9 +909,110 @@ impl Grid {
         self.cells.get(&cell)
     }
 
-    /// Replace a cell's stored state (used when loading a snapshot).
+    /// Replace a cell's stored state (used when loading a snapshot). Call
+    /// [`Grid::enforce_history_cap`] once the states are in.
     pub fn insert_state(&mut self, cell: CellIndex, state: CellState) {
-        self.cells.insert(cell, state);
+        self.history_total += state.history.len();
+        if let Some(old) = self.cells.insert(cell, state) {
+            self.history_total -= old.history.len();
+        }
+    }
+
+    /// History points held over all cells.
+    #[must_use]
+    pub fn history_points(&self) -> usize {
+        self.history_total
+    }
+
+    /// Replace one cell's history (used when loading the history file).
+    /// Returns false, and changes nothing, when the cell holds no state.
+    pub fn set_history(&mut self, cell: CellIndex, history: VecDeque<HistoryPoint>) -> bool {
+        let Some(s) = self.cells.get_mut(&cell) else {
+            return false;
+        };
+        self.history_total = self.history_total - s.history.len() + history.len();
+        s.history = history;
+        true
+    }
+
+    /// Finish loading snapshots: put every history in time order within the
+    /// per-cell length, add a recovered point where the latest direct reading
+    /// is missing from it, and apply the global cap. Safe to call more than
+    /// once.
+    pub fn finish_load(&mut self) {
+        let p = self.params;
+        let mut total = 0;
+        for s in self.cells.values_mut() {
+            s.normalise_history(&p);
+            s.recover_latest_history(&p);
+            s.normalise_history(&p);
+            total += s.history.len();
+        }
+        self.history_total = total;
+        self.enforce_history_cap();
+    }
+
+    /// Keep the history within `history_max_total` points over all cells.
+    ///
+    /// When the total goes over the cap it is trimmed to 90 percent of the
+    /// cap, so the work is paid once per many readings rather than on every
+    /// one. The points removed are the oldest over all cells, ties going to
+    /// the cell whose latest reading is oldest, and a cell's most recent
+    /// reading is never removed. Returns the number of points removed.
+    ///
+    /// The trim sorts the candidates (24 bytes each), so with the default
+    /// cap of 250,000 it briefly needs about 6 MB and runs once per 25,000
+    /// new points.
+    pub fn enforce_history_cap(&mut self) -> usize {
+        let max = self.params.history_max_total;
+        if self.history_total <= max {
+            return 0;
+        }
+        let target = max - max / 10;
+        let excess = self.history_total - target;
+        let ms = |t: DateTime<Utc>| t.timestamp_millis();
+        // Every point but each cell's newest: (time, cell's newest time, cell).
+        let mut candidates: Vec<(i64, i64, u64)> = self
+            .cells
+            .iter()
+            .flat_map(|(c, s)| {
+                let newest = s.history.back().map_or(i64::MIN, |p| ms(p.at));
+                let removable = s.history.len().saturating_sub(1);
+                s.history
+                    .iter()
+                    .take(removable)
+                    .map(move |p| (ms(p.at), newest, u64::from(*c)))
+            })
+            .collect();
+        let k = excess.min(candidates.len());
+        if k == 0 {
+            return 0;
+        }
+        if k < candidates.len() {
+            candidates.select_nth_unstable(k - 1);
+            candidates.truncate(k);
+        }
+        // History is in time order, so the chosen points are a prefix of
+        // each cell's history.
+        let mut per_cell: HashMap<u64, usize> = HashMap::new();
+        for (_, _, c) in candidates {
+            *per_cell.entry(c).or_default() += 1;
+        }
+        let mut removed = 0;
+        for (raw, n) in per_cell {
+            let Ok(cell) = CellIndex::try_from(raw) else {
+                continue;
+            };
+            if let Some(s) = self.cells.get_mut(&cell) {
+                for _ in 0..n {
+                    if s.history.len() > 1 && s.history.pop_front().is_some() {
+                        removed += 1;
+                    }
+                }
+            }
+        }
+        self.history_total -= removed;
+        removed
     }
 
     /// The cell containing a point.
@@ -951,15 +1078,20 @@ impl Grid {
             self.apply(n, &neighbour);
             touched.push(n);
         }
+        self.enforce_history_cap();
         Ok(Ingested { cell, touched })
     }
 
     fn apply(&mut self, cell: CellIndex, ev: &Evidence) {
         let params = self.params;
-        self.cells
+        let s = self
+            .cells
             .entry(cell)
-            .or_insert_with(|| CellState::empty(ev.at))
-            .assimilate(ev, &params);
+            .or_insert_with(|| CellState::empty(ev.at));
+        let before = s.history.len();
+        s.assimilate(ev, &params);
+        let after = s.history.len();
+        self.history_total = self.history_total + after - before;
     }
 
     /// The cell as it stands at `now`, or `None` when nothing is known.
@@ -1014,6 +1146,19 @@ impl Grid {
         }
     }
 
+    /// The cells with state that pass `keep`, as they stand at `now`. The
+    /// filter runs before each view is built.
+    pub fn views_where<'a>(
+        &'a self,
+        now: DateTime<Utc>,
+        keep: impl Fn(CellIndex) -> bool + 'a,
+    ) -> impl Iterator<Item = CellView> + 'a {
+        self.cells
+            .iter()
+            .filter(move |(c, _)| keep(**c))
+            .map(move |(c, s)| self.view_state(*c, s, now))
+    }
+
     /// Every cell with state, as it stands at `now`.
     pub fn views(&self, now: DateTime<Utc>) -> impl Iterator<Item = CellView> + '_ {
         self.cells
@@ -1033,8 +1178,15 @@ impl Grid {
     pub fn forget_old(&mut self, now: DateTime<Utc>) -> usize {
         let before = self.cells.len();
         let limit = self.params.forget_after_h;
-        self.cells
-            .retain(|_, s| hours_between(s.last_evidence_at, now) <= limit);
+        let mut dropped_points = 0;
+        self.cells.retain(|_, s| {
+            let keep = hours_between(s.last_evidence_at, now) <= limit;
+            if !keep {
+                dropped_points += s.history.len();
+            }
+            keep
+        });
+        self.history_total -= dropped_points;
         before - self.cells.len()
     }
 }
@@ -1420,6 +1572,64 @@ mod tests {
         );
         let r = g0.ingest(&obs(10.0, 3.0, t(0.0))).unwrap();
         assert!(g0.state(r.cell).unwrap().history.is_empty());
+    }
+
+    #[test]
+    fn history_has_a_global_cap_that_trims_oldest_first() {
+        let p = FusionParams {
+            history_max_total: 10,
+            ..FusionParams::default()
+        };
+        let mut g = Grid::new(p, Resolution::Ten);
+        let sum = |g: &Grid| g.states().map(|(_, s)| s.history.len()).sum::<usize>();
+        // Five cells about 1 km apart; cell i reports four times, its readings
+        // starting i hours later than cell i - 1's.
+        let places: Vec<(f64, f64)> = (0..5).map(|i| (13.0 + 0.01 * f64::from(i), 80.2)).collect();
+        let mut cells = Vec::new();
+        for (i, (lat, lon)) in places.iter().enumerate() {
+            for k in 0..4 {
+                let mut o = obs(40.0, 3.0, t(i as f64 + 0.1 * f64::from(k)));
+                o.lat = *lat;
+                o.lon = *lon;
+                let r = g.ingest(&o).unwrap();
+                if k == 0 {
+                    cells.push(r.cell);
+                }
+                assert_eq!(g.history_points(), sum(&g), "total drifted");
+                assert!(g.history_points() <= 10);
+            }
+        }
+        // Every cell keeps its most recent reading.
+        for (i, c) in cells.iter().enumerate() {
+            let h = &g.state(*c).unwrap().history;
+            assert!(!h.is_empty());
+            assert!(close(
+                hours_between(t(0.0), h.back().unwrap().at),
+                i as f64 + 0.3,
+                1e-6
+            ));
+        }
+        // The newest cell keeps all four; the oldest cells were trimmed first.
+        assert_eq!(g.state(cells[4]).unwrap().history.len(), 4);
+        assert_eq!(g.state(cells[0]).unwrap().history.len(), 1);
+        // docs/ENGINE.md sizes the cap at 48 bytes a point.
+        assert_eq!(std::mem::size_of::<HistoryPoint>(), 48);
+        // A cap of zero keeps exactly one point per cell with readings.
+        let mut z = Grid::new(
+            FusionParams {
+                history_max_total: 0,
+                ..FusionParams::default()
+            },
+            Resolution::Ten,
+        );
+        for k in 0..5 {
+            z.ingest(&obs(40.0, 3.0, t(f64::from(k)))).unwrap();
+        }
+        assert_eq!(z.history_points(), 1);
+        // Forgetting cells takes their points off the total.
+        g.forget_old(t(100.0));
+        assert_eq!(g.history_points(), 0);
+        assert!(g.is_empty());
     }
 
     #[test]

@@ -72,6 +72,20 @@ fn load_snapshot(state: &AppState) {
         }
         Err(e) => warn!(error = %e, "snapshot not loaded; starting with an empty map"),
     }
+    // The history file is loaded after the cell state, and a bad one never
+    // costs the cell state: it is moved aside and each cell keeps only its
+    // latest reading as history.
+    let hpath = persist::history_path(path);
+    match persist::load_history(&hpath, &mut grid) {
+        Ok(n) => info!(points = n, path = %hpath.display(), "history loaded"),
+        Err(e @ (PersistError::Resolution { .. } | PersistError::Invalid { .. })) => {
+            let aside =
+                hpath.with_extension(format!("rejected-{}.json", chrono::Utc::now().timestamp()));
+            let moved = std::fs::rename(&hpath, &aside);
+            warn!(error = %e, moved_to = %aside.display(), moved_ok = moved.is_ok(), "history not loaded; cell state kept");
+        }
+        Err(e) => warn!(error = %e, "history not loaded; cell state kept"),
+    }
 }
 
 #[tokio::main]
@@ -93,6 +107,9 @@ async fn main() -> ExitCode {
 
     let state = AppState::new(config);
     load_snapshot(&state);
+    if state.grid.read().history_points() > 0 {
+        state.mark_history_dirty();
+    }
 
     // Load every city's road graph in the background, in parallel; /readyz
     // and /v1/cities report progress. A city whose graph fails still accepts
@@ -130,6 +147,7 @@ async fn main() -> ExitCode {
                 }
             });
         }
+        let st = Arc::clone(&state);
         tokio::spawn(async move {
             let (mut ok, mut failed, mut bytes) = (0, 0, 0usize);
             while let Some(r) = loads.join_next().await {
@@ -140,6 +158,16 @@ async fn main() -> ExitCode {
                     }
                     _ => failed += 1,
                 }
+            }
+            if failed > 0 {
+                let primary_ok = st.graph(&st.config.primary_city).is_some();
+                error!(
+                    failed,
+                    primary_city = %st.config.primary_city,
+                    primary_ok,
+                    "ROAD GRAPHS FAILED TO LOAD: routes in those cities answer 503 until the extracts are fixed; /readyz lists them{}",
+                    if primary_ok { "" } else { ", and stays 503 because the primary city is among them" }
+                );
             }
             info!(
                 loaded = ok,
@@ -191,10 +219,17 @@ async fn main() -> ExitCode {
 
     state.begin_shutdown();
     let _ = snapshots.await;
-    match tokio::task::spawn_blocking(move || state.save_snapshot()).await {
+    // Cell state first: it is what routing needs after a restart.
+    let st = Arc::clone(&state);
+    match tokio::task::spawn_blocking(move || st.save_snapshot()).await {
         Ok(Ok(n)) => info!(cells = n, "final snapshot saved"),
         Ok(Err(e)) => error!(error = %e, "final snapshot failed"),
         Err(e) => error!(error = %e, "final snapshot task failed"),
+    }
+    match tokio::task::spawn_blocking(move || state.save_history()).await {
+        Ok(Ok(n)) => info!(points = n, "final history saved"),
+        Ok(Err(e)) => error!(error = %e, "final history snapshot failed"),
+        Err(e) => error!(error = %e, "final history task failed"),
     }
     ExitCode::SUCCESS
 }

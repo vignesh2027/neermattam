@@ -106,8 +106,8 @@ impl RecentIds {
 /// One changed cell, as broadcast to `/v1/stream` subscribers.
 #[derive(Debug)]
 struct CellEvent {
-    /// The city the cell's centre lies in, if any.
-    city: Option<String>,
+    /// The cell, so a city filter can use [`City::holds_cell`].
+    cell: h3o::CellIndex,
     /// The GeoJSON Feature, serialised.
     data: String,
 }
@@ -140,6 +140,8 @@ pub struct AppState {
     graphs: Vec<GraphSlot>,
     events: broadcast::Sender<Arc<CellEvent>>,
     dirty: AtomicBool,
+    /// The history changed since the history file was last written.
+    history_dirty: AtomicBool,
     recent_ids: Mutex<RecentIds>,
     shutdown_tx: watch::Sender<bool>,
 }
@@ -158,6 +160,7 @@ impl AppState {
             grid: RwLock::new(grid),
             events,
             dirty: AtomicBool::new(false),
+            history_dirty: AtomicBool::new(false),
             shutdown_tx,
         })
     }
@@ -228,16 +231,52 @@ impl AppState {
         Ok(n)
     }
 
+    /// Ask for the history file to be written at the next history tick (used
+    /// after start-up, so history read from an older snapshot, or recovered
+    /// after a crash, reaches the history file without waiting for a reading).
+    pub fn mark_history_dirty(&self) {
+        self.history_dirty.store(true, Ordering::SeqCst);
+    }
+
+    /// Write the history file now if persistence is on. The history is copied
+    /// under the read lock and encoded outside it. Returns points written.
+    pub fn save_history(&self) -> Result<usize, persist::PersistError> {
+        let Some(path) = self.config.history_path() else {
+            return Ok(0);
+        };
+        self.history_dirty.store(false, Ordering::SeqCst);
+        let snap = persist::copy_history(&self.grid.read(), Utc::now());
+        persist::write_atomic(&path, &snap.encode()).inspect_err(|_| {
+            self.history_dirty.store(true, Ordering::SeqCst);
+        })?;
+        Ok(snap.points())
+    }
+
     /// Run until shutdown: every snapshot interval, drop forgotten cells and
-    /// save the map if it changed. Saves once more on the way out.
+    /// save the cell snapshot if it changed; every history interval, save the
+    /// history file if it changed. `main` saves both once more on the way out.
     pub async fn snapshot_loop(self: Arc<Self>) {
         let mut tick = tokio::time::interval(self.config.snapshot_interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut history_tick = tokio::time::interval(self.config.history_snapshot_interval);
+        history_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut stop = self.shutdown_tx.subscribe();
         loop {
-            tokio::select! {
-                _ = tick.tick() => {}
+            let history_due = tokio::select! {
+                _ = tick.tick() => false,
+                _ = history_tick.tick() => true,
                 _ = stop.wait_for(|v| *v) => break,
+            };
+            if history_due {
+                if self.history_dirty.load(Ordering::SeqCst) {
+                    let st = Arc::clone(&self);
+                    match tokio::task::spawn_blocking(move || st.save_history()).await {
+                        Ok(Ok(n)) => tracing::debug!(points = n, "history saved"),
+                        Ok(Err(e)) => warn!(error = %e, "history snapshot failed"),
+                        Err(e) => warn!(error = %e, "history snapshot task failed"),
+                    }
+                }
+                continue;
             }
             let forgotten = self.grid.write().forget_old(Utc::now());
             if forgotten > 0 {
@@ -246,6 +285,7 @@ impl AppState {
                     "dropped cells with no evidence for the forget window"
                 );
                 self.dirty.store(true, Ordering::SeqCst);
+                self.history_dirty.store(true, Ordering::SeqCst);
             }
             if self.dirty.load(Ordering::SeqCst) {
                 let st = Arc::clone(&self);
@@ -355,10 +395,9 @@ fn coverage(cfg: &Config) -> String {
         .join("; ")
 }
 
-/// The id of the city holding a cell's centre.
+/// The id of the city a cell belongs to (see [`City::holds_cell`]).
 fn city_of_cell(cfg: &Config, cell: h3o::CellIndex) -> Option<String> {
-    let c = h3o::LatLng::from(cell);
-    cfg.city_at(c.lat(), c.lng()).map(|c| c.id.clone())
+    cfg.cities.city_of_cell(cell).map(|c| c.id.clone())
 }
 
 /// Check a reading against the contract. Returns the observation to fuse or a
@@ -684,6 +723,7 @@ async fn post_reading(
         ingested
     };
     st.dirty.store(true, Ordering::SeqCst);
+    st.history_dirty.store(true, Ordering::SeqCst);
 
     // Publish every changed cell. The events are sent while the read lock is
     // held, so no later write can slip in between building a cell's view and
@@ -693,7 +733,7 @@ async fn post_reading(
         for v in ingested.touched.iter().filter_map(|c| g.view(*c, now)) {
             // No subscribers is fine.
             let _ = st.events.send(Arc::new(CellEvent {
-                city: city_of_cell(&st.config, v.cell),
+                cell: v.cell,
                 data: cell_feature(&v, &st.config).to_string(),
             }));
         }
@@ -711,6 +751,18 @@ async fn post_reading(
         "reading fused"
     );
     Ok(Json(out))
+}
+
+/// Run CPU-heavy work (building views of a whole city, scoring, exporting)
+/// on the blocking pool, so a large map never stalls the async workers that
+/// serve readings and routes.
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, ApiError> {
+    tokio::task::spawn_blocking(f).await.map_err(|e| ApiError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: format!("task failed: {e}"),
+    })
 }
 
 /// The optional `city` query parameter, checked against the configuration.
@@ -745,13 +797,13 @@ fn cell_in(bbox: &crate::geo::BBox, cell: h3o::CellIndex) -> bool {
     bbox.contains(c.lat(), c.lng())
 }
 
-/// Every cell with state whose centre is in the city's box (all cells when
-/// `city` is `None`), sorted by index.
+/// Every cell with state on the city's map (all cells when `city` is
+/// `None`), sorted by index. Cells are filtered before their views are built,
+/// so the read lock is held only as long as the city needs.
 fn city_views(st: &AppState, city: Option<&City>, now: DateTime<Utc>) -> Vec<CellView> {
     let mut views: Vec<CellView> = {
         let g = st.grid.read();
-        g.views(now)
-            .filter(|v| city.is_none_or(|c| cell_in(&c.bbox, v.cell)))
+        g.views_where(now, |cell| city.is_none_or(|c| c.holds_cell(cell)))
             .collect()
     };
     views.sort_unstable_by_key(|v| u64::from(v.cell));
@@ -783,9 +835,10 @@ async fn get_cells(
         ));
     }
     let now = Utc::now();
+    // An explicit box selects by cell centre; a city alone selects its map.
     let mut views: Vec<CellView> = city_views(&st, city, now)
         .into_iter()
-        .filter(|v| cell_in(&area, v.cell))
+        .filter(|v| bbox.is_none() || cell_in(&area, v.cell))
         .collect();
     let truncated = views.len() > st.config.max_cells;
     views.truncate(st.config.max_cells);
@@ -889,13 +942,13 @@ async fn get_route(
         .city_at(from.0, from.1)
         .ok_or_else(|| outside("from", from))?;
     let to_city = cfg.city_at(to.0, to.1).ok_or_else(|| outside("to", to))?;
-    if from_city.id != to_city.id {
-        return Err(ApiError::bad_request(format!(
+    // Where custom boxes overlap, use a city that holds both ends.
+    let city = cfg.cities.city_holding(from, to).ok_or_else(|| {
+        ApiError::bad_request(format!(
             "from is in {} and to is in {}; a route must start and end in the same city",
             from_city.name, to_city.name
-        )));
-    }
-    let city = from_city;
+        ))
+    })?;
     let graph = match st.graph_status(&city.id) {
         GraphStatus::Ready(_) => st.graph(&city.id).expect("ready graph"),
         GraphStatus::Loading => {
@@ -956,7 +1009,7 @@ async fn stream(
     q: Result<Query<HashMap<String, String>>, QueryRejection>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let Query(q) = q?;
-    let only: Option<String> = city_param(&q, &st.config)?.map(|c| c.id.clone());
+    let only: Option<City> = city_param(&q, &st.config)?.cloned();
     let rx = st.events.subscribe();
     let mut stop = st.shutdown_tx.subscribe();
     let stopped = async move {
@@ -965,7 +1018,7 @@ async fn stream(
     let events = BroadcastStream::new(rx)
         .filter_map(move |item| {
             let out = match item {
-                Ok(ev) if only.is_none() || ev.city == only => {
+                Ok(ev) if only.as_ref().is_none_or(|c| c.holds_cell(ev.cell)) => {
                     Some(Ok(Event::default().event("cell").data(&ev.data)))
                 }
                 Ok(_) => None,
@@ -997,16 +1050,28 @@ fn graph_json(status: &GraphStatus) -> Value {
     }
 }
 
-async fn get_cities(State(st): State<Arc<AppState>>) -> Json<Value> {
+async fn get_cities(State(st): State<Arc<AppState>>) -> Result<Json<Value>, ApiError> {
     let now = Utc::now();
-    let views: Vec<CellView> = st.grid.read().views(now).collect();
+    // Counting needs only the cell ids, not their views.
+    let counts: Vec<usize> = {
+        let st = Arc::clone(&st);
+        blocking(move || {
+            let g = st.grid.read();
+            st.config
+                .cities
+                .iter()
+                .map(|c| g.states().filter(|(cell, _)| c.holds_cell(**cell)).count())
+                .collect()
+        })
+        .await?
+    };
     let cities: Vec<Value> = st
         .config
         .cities
         .iter()
-        .map(|c| {
+        .zip(counts)
+        .map(|(c, cells)| {
             let (lat, lon) = c.centre();
-            let cells = views.iter().filter(|v| cell_in(&c.bbox, v.cell)).count();
             json!({
                 "id": c.id,
                 "name": c.name,
@@ -1017,7 +1082,7 @@ async fn get_cities(State(st): State<Arc<AppState>>) -> Json<Value> {
             })
         })
         .collect();
-    Json(json!({ "cities": cities, "generated_at": now }))
+    Ok(Json(json!({ "cities": cities, "generated_at": now })))
 }
 
 /// Default and largest `limit` for `/v1/hotspots`.
@@ -1044,9 +1109,15 @@ async fn get_hotspots(
             })?,
     };
     let now = Utc::now();
-    let views = city_views(&st, city, now);
-    let cfg = &st.config;
-    let ranked = analytics::hotspots(views, &cfg.policy, &cfg.fusion, now, limit);
+    let ranked = {
+        let (st, city) = (Arc::clone(&st), city.cloned());
+        blocking(move || {
+            let views = city_views(&st, city.as_ref(), now);
+            let cfg = &st.config;
+            analytics::hotspots(views, &cfg.policy, &cfg.fusion, now, limit)
+        })
+        .await?
+    };
     Ok(Json(json!({
         "city": city.map(|c| &c.id),
         "generated_at": now,
@@ -1064,12 +1135,28 @@ async fn get_summary(
     let Query(q) = q?;
     let city = city_param(&q, &st.config)?;
     let now = Utc::now();
-    let views = city_views(&st, city, now);
-    let cfg = &st.config;
-    let summary = analytics::summarise(views, &cfg.policy, &cfg.fusion, now);
+    let summary = {
+        let (st, city) = (Arc::clone(&st), city.cloned());
+        blocking(move || {
+            let views = city_views(&st, city.as_ref(), now);
+            let cfg = &st.config;
+            let history_points = st.grid.read().history_points();
+            (
+                analytics::summarise(views, &cfg.policy, &cfg.fusion, now),
+                history_points,
+            )
+        })
+        .await?
+    };
+    let (summary, history_points) = summary;
     let mut out = serde_json::to_value(&summary).expect("summary serialises");
     out["city"] = json!(city.map(|c| &c.id));
     out["generated_at"] = json!(now);
+    // Global, not per city: the cap applies to the whole map.
+    out["history_points"] = json!({
+        "total": history_points,
+        "max": st.config.fusion.history_max_total,
+    });
     Ok(Json(out))
 }
 
@@ -1221,28 +1308,48 @@ async fn get_export(
         )));
     }
     let now = Utc::now();
-    let mut views = city_views(&st, Some(city), now);
-    let truncated = views.len() > cfg.max_cells;
-    views.truncate(cfg.max_cells);
     let stamp = now.format("%Y%m%dT%H%M%SZ");
-    let (body, content_type, ext) = if format == "csv" {
-        let mut out = EXPORT_CSV_COLUMNS.join(",");
-        out.push('\n');
-        for v in &views {
-            out.push_str(&csv_row(v, cfg));
-            out.push('\n');
-        }
-        (out, "text/csv; charset=utf-8", "csv")
+    let csv = format == "csv";
+    let (body, truncated, total_cells) = {
+        let (st, city) = (Arc::clone(&st), city.clone());
+        blocking(move || {
+            let cfg = &st.config;
+            let mut views = city_views(&st, Some(&city), now);
+            let total_cells = views.len();
+            let truncated = total_cells > cfg.max_cells;
+            if truncated {
+                // Keep the most important cells, not the lowest indexes.
+                views = analytics::sort_by_score(views, &cfg.policy, &cfg.fusion, now);
+                views.truncate(cfg.max_cells);
+            }
+            let body = if csv {
+                let mut out = EXPORT_CSV_COLUMNS.join(",");
+                out.push('\n');
+                for v in &views {
+                    out.push_str(&csv_row(v, cfg));
+                    out.push('\n');
+                }
+                out
+            } else {
+                let features: Vec<Value> = views.iter().map(|v| cell_feature(v, cfg)).collect();
+                json!({
+                    "type": "FeatureCollection",
+                    "city": city.id,
+                    "features": features,
+                    "truncated": truncated,
+                    "total_cells": total_cells,
+                    "generated_at": now,
+                })
+                .to_string()
+            };
+            (body, truncated, total_cells)
+        })
+        .await?
+    };
+    let (content_type, ext) = if csv {
+        ("text/csv; charset=utf-8", "csv")
     } else {
-        let features: Vec<Value> = views.iter().map(|v| cell_feature(v, cfg)).collect();
-        let doc = json!({
-            "type": "FeatureCollection",
-            "city": city.id,
-            "features": features,
-            "truncated": truncated,
-            "generated_at": now,
-        });
-        (doc.to_string(), "application/geo+json", "geojson")
+        ("application/geo+json", "geojson")
     };
     let mut resp = body.into_response();
     let h = resp.headers_mut();
@@ -1257,6 +1364,7 @@ async fn get_export(
         "x-neermattam-truncated",
         HeaderValue::from_static(if truncated { "true" } else { "false" }),
     );
+    h.insert("x-neermattam-total-cells", HeaderValue::from(total_cells));
     Ok(resp)
 }
 
@@ -1264,8 +1372,13 @@ async fn healthz() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
+/// `/readyz`: 200 once the primary city's road graph is loaded. The body
+/// lists every city's graph. Another city's graph that is still loading or
+/// has failed is reported (`status: degraded`) but does not make the service
+/// unready: its readings and map still work, and only its routes answer 503.
 async fn readyz(State(st): State<Arc<AppState>>) -> Response {
     let cells = st.grid.read().len();
+    let primary = st.config.primary_city.clone();
     let mut loading = Vec::new();
     let mut failed = Vec::new();
     let mut per_city = serde_json::Map::new();
@@ -1278,27 +1391,34 @@ async fn readyz(State(st): State<Arc<AppState>>) -> Response {
         }
         per_city.insert(c.id.clone(), graph_json(&status));
     }
-    if loading.is_empty() && failed.is_empty() {
-        return Json(json!({ "status": "ready", "cities": per_city, "cells": cells }))
-            .into_response();
-    }
+    let primary_status = st.graph_status(&primary);
     let mut reasons = Vec::new();
     if !loading.is_empty() {
         reasons.push(format!("road graphs still loading: {}", loading.join(", ")));
     }
     if !failed.is_empty() {
-        reasons.push(format!("road graphs failed: {}", failed.join("; ")));
+        reasons.push(format!(
+            "road graphs failed, so routes there answer 503: {}",
+            failed.join("; ")
+        ));
     }
-    (
-        StatusCode::SERVICE_UNAVAILABLE,
-        Json(json!({
-            "status": "not_ready",
-            "reason": reasons.join(". "),
-            "cities": per_city,
-            "cells": cells,
-        })),
-    )
-        .into_response()
+    let (code, status) = match primary_status {
+        GraphStatus::Ready(_) if reasons.is_empty() => (StatusCode::OK, "ready"),
+        GraphStatus::Ready(_) => (StatusCode::OK, "degraded"),
+        GraphStatus::Loading | GraphStatus::Failed(_) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "not_ready")
+        }
+    };
+    let mut body = json!({
+        "status": status,
+        "primary_city": primary,
+        "cities": per_city,
+        "cells": cells,
+    });
+    if !reasons.is_empty() {
+        body["reason"] = json!(reasons.join(". "));
+    }
+    (code, Json(body)).into_response()
 }
 
 async fn method_not_allowed() -> ApiError {
