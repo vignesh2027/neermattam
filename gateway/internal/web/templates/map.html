@@ -1,6 +1,7 @@
 {{define "content"}}
 <section class="map-page" aria-label="Live flood depth map of Chennai">
   <div id="map" class="map-full" role="region" aria-label="Map. Click a hex cell for its depth, uncertainty, hazard and reports."></div>
+  {{if .CellsJSON}}<script type="application/json" id="cells-data" data-etag="{{.CellsETag}}">{{.CellsJSON}}</script>{{end}}
 
   <div class="overlay glass status-card">
     <h1><span class="live-dot" id="live-dot" aria-hidden="true"></span>Chennai flood depth, live</h1>
@@ -76,12 +77,17 @@ document.addEventListener("DOMContentLoaded", function () {
   if (mobile) document.getElementById("legend").removeAttribute("open");
   var dot = document.getElementById("live-dot"), feedState = document.getElementById("feed-state");
 
-  map.on("load", function () {
+  // Cells go on as soon as the style is parsed, before base map tiles load.
+  map.once("style.load", function () {
     NM.addCells(map, { showReal: {{.Demo}} });
     NM.popups(map);
     if (focus) new maplibregl.Marker({ color: "#2563EB" }).setLngLat(focus).addTo(map);
     var framed = !!focus;
+    var inline = document.getElementById("cells-data"), initial = null;
+    if (inline) { try { initial = JSON.parse(inline.textContent); } catch (e) { initial = null; } }
     NM.live(map, {
+      initial: initial,
+      etag: inline ? inline.getAttribute("data-etag") : "",
       onData: function (list) {
         if (!framed && list.length) {
           framed = true;

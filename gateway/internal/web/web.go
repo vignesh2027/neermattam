@@ -30,15 +30,20 @@ var staticFS embed.FS
 
 // Page is the data every page template receives.
 type Page struct {
+	// Request is the request being answered (for content negotiation).
+	Request    *http.Request
 	Title      string
 	Active     string
 	Nonce      string
 	CSSVersion string
+	PublicURL  string
 	NeedsMap   bool
 	Footer     bool
 	Demo       bool
 
 	Stats     MapStats
+	CellsJSON template.JS // initial cells, inlined so the map paints without a second request
+	CellsETag string
 	Feed      []live.FeedItem
 	Limits    Limits
 	Report    ReportForm
@@ -131,12 +136,12 @@ func NewRenderer() (*Renderer, error) {
 
 // Render writes a full page. Rendering goes to a buffer first so a
 // template error becomes a clean 500 rather than half a page.
-func (r *Renderer) Render(w http.ResponseWriter, status int, name string, p *Page) error {
-	t, ok := r.pages[name]
+func (rd *Renderer) Render(w http.ResponseWriter, r *http.Request, status int, name string, p *Page) error {
+	t, ok := rd.pages[name]
 	if !ok {
 		return fmt.Errorf("no page %q", name)
 	}
-	p.CSSVersion = r.cssVersion
+	p.CSSVersion = rd.cssVersion
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "layout", p); err != nil {
 		http.Error(w, "page could not be rendered", http.StatusInternalServerError)
@@ -144,7 +149,16 @@ func (r *Renderer) Render(w http.ResponseWriter, status int, name string, p *Pag
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	gz := r != nil && AcceptsGzip(r) && buf.Len() > 1024
+	if gz {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+	}
 	w.WriteHeader(status)
+	if gz {
+		_, err := w.Write(Compress(buf.Bytes()))
+		return err
+	}
 	_, err := buf.WriteTo(w)
 	return err
 }

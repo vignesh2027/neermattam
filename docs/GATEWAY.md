@@ -59,6 +59,8 @@ The same `report.Pipeline` runs for `POST /api/report` (JSON), `POST /report` (t
 
 **Voice notes.** An Ogg, WAV, M4A or MP3 voice note goes to `/v1/transcribe`. The page shows the transcript, the place said, the depth words, the language and the model. The depth is the voice model's own reading when it gives one, with sigma at least 10 cm or 30 percent; otherwise the gateway reads the depth words itself. The reading is fused with source `voice` at the map pin, never at the place said, since nothing geocodes it.
 
+**Overlay.** Perception's overlay arrives as a base64 PNG, often 1 to 2 MB, which made a report reply about 1.9 MB and took 137 seconds to reach a phone against 47 seconds of server time. The gateway now decodes it, flattens it onto white, shrinks it to at most 1280 pixels on the long side by area averaging, and encodes it as a JPEG at quality 82, all with the Go standard library. The JPEG is kept for an hour in a bounded in-memory LRU (300 overlays or 96 MB) and served from `GET /api/overlay/{measurement_id}`; the reply carries `overlay_url` instead of the base64. A test checks that a reply with a multi-megabyte overlay stays under 30 KB.
+
 **Duplicates.** The exact bytes (SHA-256) and the 64-bit difference hash of each photo are kept for 24 hours. An exact copy, or a photo within 5 bits of an earlier one (a re-encode, resize or screenshot), is refused with 409. Fusing the same water twice would make the engine overconfident. The reading id sent to the engine is derived from the SHA-256, so a retry is also ignored by the engine.
 
 **Progress and the agent trace.** `POST /report` with `Accept: text/event-stream` answers with server-sent events (the browser posts the form and reads the response, because `EventSource` cannot upload a file):
@@ -91,7 +93,27 @@ When the voice model gives no depth, words such as "ankle", "knee" or "waist" (a
 
 ## Live map and the cell proxy
 
-`GET /api/cells` proxies `/v1/cells` for the whole service area (or a `bbox`), caches each answer for 2 seconds and serves it gzipped, so a crowd opening the map costs the engine one query every 2 seconds.
+`GET /api/cells` proxies `/v1/cells` for the whole service area (or a `bbox`), caches each answer for 2 seconds, and serves it gzipped at the best ratio with an `ETag`; a matching `If-None-Match` gets 304 with no body. A crowd opening the map costs the engine one query every 2 seconds.
+
+The payload is compacted for the map: coordinates are rounded to 5 decimals (about a metre, against a 66 m cell), and only the fields the map and its popup use are kept (depth, sigma and upper estimate, velocity and its sigma, whether velocity was assumed, hazard rating and class, unknown, report counts, update time, origin). Debris factor, the upper hazard class and the duplicate top-level id stay in the engine's API. Measured locally with the 1,325-cell demo map:
+
+| | Plain | Gzipped |
+|---|---|---|
+| Engine `/v1/cells` | 955,803 bytes | |
+| Gateway before this change | 982,051 bytes | 115,026 bytes |
+| Gateway now | 691,283 bytes | 59,375 bytes |
+| Revalidation with a matching ETag | 0 bytes, 304 | |
+
+**First paint.** The map page carries the same cells inline, as a JSON script element rendered on the server from the 2-second cache, so the hexagons need no second round trip; the HTML is gzipped (about 92 KB with the demo map). The cells are added as soon as the base style is parsed, before its tiles arrive, and a loading veil over the map lifts the moment they are drawn. The page then opens the live stream and revalidates the cells in the background, usually a 304. Measured with headless Chrome (software rendering, cache disabled) against a local engine, as the time until the first cells are drawn:
+
+| | Local | Throttled: 250 ms latency, 5 Mbit/s |
+|---|---|---|
+| Before (fetch after map load) | 3.5 to 7.6 s | 6.1 to 6.2 s |
+| Now (inline, at style load) | 1.6 to 1.9 s to the veil lifting | 3.4 to 4.0 s |
+
+The rest is MapLibre and the base map, which come from OpenFreeMap. These are two runs each on one machine; they show the direction, not a benchmark.
+
+**Style warnings.** Every value the map's own layers read from a cell is coalesced, and the base style's numeric filters that test fields many tiles lack (road shields compare `ref_length`) are rewritten at load so a missing number fails the comparison quietly, as intended, instead of logging "Expected value to be of type number, but found null" for every tile.
 
 `GET /api/stream` is served from one upstream connection to the engine's `/v1/stream`, reconnected with capped backoff. Up to 200 browsers can subscribe (`MAX_SSE_CLIENTS`); the next gets 503 with `Retry-After`. Each browser has a 256-event buffer; one that falls behind is disconnected, and its `EventSource` reconnects and refetches. Events:
 
@@ -113,7 +135,18 @@ Simulated and real evidence are never mixed unlabelled:
 - The map shows a "Simulated scenario" banner, outlines real cells, tags the ticker, and the popup, result card and route summary all say when simulated water is involved.
 - Verification never compares a real report with simulated cells.
 
-Every cell already in the engine when demo mode starts is labelled simulated, which errs on the safe side. Point a demo gateway at an engine with its own snapshot file, not a production one.
+### Provenance survives restarts
+
+Labels come from an explicit record, never from what happens to be in the engine when the gateway starts, so the engine's snapshot can be kept across restarts and real reports keep their label:
+
+- A simulated reading has an id starting `sim_`. After each seed the gateway reads the whole map once and marks every cell within 160 m of a simulated reading (its own cell and the ring of six) as simulated; each drip marks the cells around it.
+- A real report is recorded when the engine fuses it: reading id, cell, place, depth, sigma, source, trust, capture and arrival time. Its cell and the ring around it are marked real. A `sim_` id is never recorded as real.
+- Both sets and the records are saved to `provenance.json` in `GATEWAY_DATA_DIR` (default `../data/gateway`; empty turns persistence off). Saves happen at most every 3 seconds when something changed, and once at shutdown, through a temporary file and a rename, so a crash never leaves half a file. A file that cannot be read is moved aside and the gateway starts with an empty record.
+- Entries older than 48 hours are dropped, matching the engine, which forgets cells after 48 hours without evidence. At most 2,000 real reports are kept.
+- After a restart the real reports reappear in the live ticker, and their cells read `reported` or `mixed`.
+- In demo mode a cell with no record at all reads `simulated`, so a gap in the record can only ever understate real evidence, never pass simulated water off as real. Without demo mode such a cell reads `reported`.
+
+On Modal, point `GATEWAY_DATA_DIR` at a Volume so the record outlives the container.
 
 ## WhatsApp
 
@@ -131,8 +164,21 @@ Every cell already in the engine when demo mode starts is labelled simulated, wh
 - `GET /readyz`: 200 only when the engine and perception both answer their `/readyz`; otherwise 503 with each one's state, plus whether the engine stream is connected and whether WhatsApp is enabled.
 - `GET /metrics`: Prometheus text format from a small built-in exporter (`internal/metrics`; the official client would add a dozen modules for counters, gauges and histograms). Requests by route and status, request and upstream latency, report outcomes, verification rule outcomes, trust, rate-limit refusals, cache hits, live clients and dropped clients.
 - Logs are JSON from `log/slog`: one line per request (method, route pattern, status, duration, bytes, never client addresses), one per verification rule and one per report. Tokens and secrets are never logged.
-- Timeouts: engine 5 s, routes 20 s, perception 180 s (a photo with wheels to check took up to 110 s in `eval/RESULTS_REAL.md`), Open-Meteo 4 s, Graph API 30 s, request headers 10 s, request body 3 minutes, response write 4 minutes (except the live stream).
+- Timeouts: engine 5 s, routes 20 s, perception 240 s (a photo with wheels to check took up to 110 s in `eval/RESULTS_REAL.md`), Open-Meteo 4 s, Graph API 30 s, request headers 10 s. Every non-streaming reply, and reading the request body, must finish within `REPLY_DEADLINE` (default 4 minutes 30 seconds) of the request starting; the gateway refuses to start if that is not longer than the perception timeout. The live stream has no deadline.
 - Shutdown on SIGINT or SIGTERM closes the live streams, drains requests for up to 15 seconds and lets WhatsApp replies finish.
+
+## Brand
+
+The logo is the user's design: `gateway/brand-src/neermattam-logo-original.png` (1254 by 1254). `gateway/brand-src/make_brand.py` (Python with Pillow and NumPy: `cd gateway/brand-src && uv run --with pillow --with numpy python make_brand.py`) makes every derivative in `internal/web/static/brand/`:
+
+- the mark alone, the wave N and the drop with the background removed, at 64, 128 and 512 pixels. The backdrop is removed by growing a region from the image border across the smooth light-blue background; the artwork's edges stop it, so pale parts of the N survive;
+- `favicon.ico` (16, 32 and 48), `favicon-32.png` and a 180-pixel `apple-touch-icon.png` on the theme background;
+- `logo-full.png`, the mark and wordmark, shown on the About page;
+- `og-card.png`, a 1200 by 630 Open Graph card with the tagline "Street-level flood depth for Chennai, from one photo" and the depth scale.
+
+The header shows the mark (64 or 128 pixels for high-density screens) beside the existing "Neermattam / நீர்மட்டம் · water level" text. Every page links the favicons and carries Open Graph and Twitter card tags; the image URL is built from `PUBLIC_URL`, so set that to the public address.
+
+![Header at twice the density](img/gateway-header.png)
 
 ## Configuration
 
@@ -143,7 +189,9 @@ Every cell already in the engine when demo mode starts is labelled simulated, wh
 | `ENGINE_URL` | `http://127.0.0.1:8302` | Engine |
 | `PERCEPTION_URL` | `http://127.0.0.1:8301` | Perception |
 | `OPEN_METEO_URL` | `https://api.open-meteo.com` | Rainfall API |
-| `ENGINE_TIMEOUT`, `ROUTE_TIMEOUT`, `PERCEPTION_TIMEOUT`, `WEATHER_TIMEOUT` | `5s`, `20s`, `180s`, `4s` | Upstream timeouts |
+| `ENGINE_TIMEOUT`, `ROUTE_TIMEOUT`, `PERCEPTION_TIMEOUT`, `WEATHER_TIMEOUT` | `5s`, `20s`, `240s`, `4s` | Upstream timeouts |
+| `REPLY_DEADLINE` | `4m30s` | Deadline for every non-streaming reply, from the start of the request |
+| `GATEWAY_DATA_DIR` | `../data/gateway` | Where `provenance.json` is kept; empty disables it |
 | `GATEWAY_BBOX` | `80.10,12.85,80.33,13.24` | Service area, same as the engine |
 | `MAX_IMAGE_BYTES`, `MAX_VIDEO_BYTES`, `MAX_AUDIO_BYTES` | 12 MiB, 40 MiB, 8 MiB | Upload sizes |
 | `MAX_VIDEO_SECONDS` | `30` | Video length |
@@ -189,4 +237,4 @@ go vet ./...
 gofmt -l .
 ```
 
-The tests use `httptest` fakes for the engine (including its SSE stream) and perception, a fake Graph API and a fake rainfall source. They cover the stage and live step events in order, the fallback when perception has no stream (and that it is probed once), the model-estimate card and its trust, both readings beside a measurement, perception's `captured_at` winning over the photo's own EXIF and an explicit null meaning none, voice reports end to end with a Tamil transcript, trace step classification, upload limits (size, video length, missing header, disguised files, location, area), rate limiting and `Retry-After`, exact and near duplicates, the full report path with the reading the engine receives, the NDJSON stages, every verification rule, Open-Meteo summing and caching, WhatsApp signatures (good, tampered, missing, wrong secret), the handshake, pairing and the pairing window, template rendering of every page (no rejected values, no em dashes or arrows, every inline script carrying the CSP nonce), the cell cache and origin labels, the SSE fan-out with its client limit and resync, readiness, metrics format, gzip of static files, MP4 duration parsing, EXIF capture times and the demo scenario's validity.
+The tests use `httptest` fakes for the engine (including its SSE stream) and perception, a fake Graph API and a fake rainfall source. They cover a fixed clock for every check of capture times (no test depends on today's date), the overlay re-encode and its LRU, a report reply under 30 KB with a multi-megabyte overlay, compact cells with ETag and 304, the cells inlined in the map page, provenance surviving a restart in demo mode, the stage and live step events in order, the fallback when perception has no stream (and that it is probed once), the model-estimate card and its trust, both readings beside a measurement, perception's `captured_at` winning over the photo's own EXIF and an explicit null meaning none, voice reports end to end with a Tamil transcript, trace step classification, upload limits (size, video length, missing header, disguised files, location, area), rate limiting and `Retry-After`, exact and near duplicates, the full report path with the reading the engine receives, the NDJSON stages, every verification rule, Open-Meteo summing and caching, WhatsApp signatures (good, tampered, missing, wrong secret), the handshake, pairing and the pairing window, template rendering of every page (no rejected values, no em dashes or arrows, every inline script carrying the CSP nonce), the cell cache and origin labels, the SSE fan-out with its client limit and resync, readiness, metrics format, gzip of static files, MP4 duration parsing, EXIF capture times and the demo scenario's validity.

@@ -4,13 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
 	"io"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -158,9 +163,15 @@ type harness struct {
 
 func newHarness(t *testing.T, env map[string]string, usable bool) *harness {
 	t.Helper()
+	return newHarnessAt(t, env, usable, nil)
+}
+
+// newHarnessAt runs the gateway with a fixed clock when now is not nil.
+func newHarnessAt(t *testing.T, env map[string]string, usable bool, now func() time.Time) *harness {
+	t.Helper()
 	e := newFakeEngine(t)
 	p := newFakePerception(t, usable)
-	m := map[string]string{"ENGINE_URL": e.srv.URL, "PERCEPTION_URL": p.srv.URL, "REPORT_BURST": "50", "REPORT_RATE_PER_MIN": "600"}
+	m := map[string]string{"ENGINE_URL": e.srv.URL, "PERCEPTION_URL": p.srv.URL, "REPORT_BURST": "50", "REPORT_RATE_PER_MIN": "600", "GATEWAY_DATA_DIR": t.TempDir()}
 	for k, v := range env {
 		m[k] = v
 	}
@@ -170,7 +181,7 @@ func newHarness(t *testing.T, env map[string]string, usable bool) *harness {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	a, err := New(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Rainfall: noRain{}})
+	a, err := New(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Rainfall: noRain{}, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +412,7 @@ func TestFormStreamsStagesAndLiveAgentSteps(t *testing.T) {
 	}
 	last := data[len(data)-1]
 	card := last["html"].(string)
-	for _, w := range []string{"23<small>cm</small>", "± 3.1 cm", "Measured from a two-wheeler wheel", "Two independent readings", "30 ± 20 cm", "muse-spark-open", "Trust 0.90", "data:image/png;base64,", "Advisory only"} {
+	for _, w := range []string{"23<small>cm</small>", "± 3.1 cm", "Measured from a two-wheeler wheel", "Two independent readings", "30 ± 20 cm", "muse-spark-open", "Trust 0.90", `src="/api/overlay/m_1"`, "Advisory only"} {
 		if !strings.Contains(card, w) {
 			t.Errorf("result card lacks %q", w)
 		}
@@ -442,7 +453,10 @@ func TestStreamFallsBackToPlainMeasure(t *testing.T) {
 }
 
 func TestModelEstimateIsLabelledAndCountsForLess(t *testing.T) {
-	h := newHarness(t, nil, true)
+	// The photo below was taken at 10:00 UTC; the gateway's clock says it
+	// arrived 20 minutes later, whatever today's date is.
+	arrived := time.Date(2026, 10, 27, 10, 20, 0, 0, time.UTC)
+	h := newHarnessAt(t, nil, true, func() time.Time { return arrived })
 	h.perc.body = `{"measurement_id":"m_e","usable":true,"reasons":["no wheel could be measured"],"depth_cm":23.0,"depth_sigma_cm":20.0,"reference":null,"waterline":null,"confidence":0.62,"models":{"scene":"muse-spark-open","masks":"sam-2.1-hiera-small"},"method":"model_estimate","model_estimate":{"depth_cm":23.0,"depth_sigma_cm":20.0,"basis":"the lower third of the tyres is under water","model":"muse-spark-open"},"agent_trace":[{"step":"scene","target":"photo","model":"muse-spark-open","input":"photo","output":"water visible","decision":"segment and verify 1 wheel","latency_ms":15000},{"step":"verify","target":"two wheeler wheel 1","model":"muse-spark-open","input":"crop","output":"view head_on","decision":"give up: tyre seen head-on, its outline cannot be measured","latency_ms":5861},{"step":"estimate","target":"photo","model":"muse-spark-open","input":"no measurable wheel","output":"23 cm, sigma 20 cm","decision":"report model estimate","latency_ms":0}],"captured_at":"2026-10-27T10:00:00Z"}`
 	r := h.post(t, "/report", loc, map[string][]byte{"media": photo(40)}, "text/event-stream")
 	_, data := sseEvents(t, r.Body)
@@ -462,10 +476,8 @@ func TestModelEstimateIsLabelledAndCountsForLess(t *testing.T) {
 	h.engine.mu.Lock()
 	defer h.engine.mu.Unlock()
 	rd := h.engine.readings[0]
-	// Confidence 0.62 passes and an estimate counts 0.7. The capture time
-	// may be stale or fresh depending on today's date, so only the ceiling
-	// is checked.
-	if rd["trust"].(float64) > 0.7 || rd["source"] != "photo" {
+	// Confidence 0.62 passes, the photo is fresh, and an estimate counts 0.7.
+	if rd["trust"] != 0.7 || rd["source"] != "photo" || rd["observed_at"] != "2026-10-27T10:00:00Z" {
 		t.Fatalf("reading %v", rd)
 	}
 }
@@ -520,7 +532,7 @@ func TestPagesRender(t *testing.T) {
 		"/report": {"Measure the water from one photo", "Use my location", "12 MB", "30 seconds"},
 		"/route":  {"Route around the water", "Velachery station", "Chennai Central", "Two-wheeler"},
 		"/route?from=12.9791,80.2209&to=13.0067,80.2206&vehicle=car": {"Water-aware route for a Car", "4.2 km", "37 of 37", "Simulated scenario", `id="route-data"`},
-		"/about": {"Muse Spark 1.3", "SAM 3.1", "Muse Voice Transcribe", "ODbL", "OpenFreeMap", "Limitations"},
+		"/about": {"Muse Spark Open", "SAM 3.1", "Voice reports", "ODbL", "OpenFreeMap", "Limitations"},
 	}
 	for path, wants := range pages {
 		resp, err := http.Get(h.srv.URL + path)
@@ -738,5 +750,104 @@ func TestNullCapturedAtMeansNoCaptureTime(t *testing.T) {
 	out := decode(t, h.post(t, "/api/report", loc, map[string][]byte{"image": jpg}, ""))
 	if v := out["verification"].(map[string]any); v["time_source"] != "received" || out["status"] != "fused" {
 		t.Fatalf("perception said there is no capture time; got %v, %v", v["time_source"], out["status"])
+	}
+}
+
+func TestReportReplyIsSmallAndOverlayHasAURL(t *testing.T) {
+	h := newHarness(t, nil, true)
+	big := testmedia.Scene(2048, 1536, 5)
+	seed := uint32(11)
+	for i := 0; i < len(big.Pix); i += 4 {
+		seed = seed*1664525 + 1013904223
+		big.Pix[i] = uint8(int(big.Pix[i]) + int(seed>>28)) // noise, so the PNG is large like a real overlay
+	}
+	b64 := base64.StdEncoding.EncodeToString(testmedia.PNG(big))
+	h.perc.body = strings.Replace(h.perc.body, `"overlay_png_b64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="`, `"overlay_png_b64":"`+b64+`"`, 1)
+	if len(h.perc.body) < 1<<20 {
+		t.Fatalf("the test overlay should be over a megabyte, is %d bytes", len(h.perc.body))
+	}
+	resp := h.post(t, "/api/report", loc, map[string][]byte{"image": photo(50)}, "")
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || len(raw) > 30_000 {
+		t.Fatalf("status %d, reply %d bytes, want under 30 KB", resp.StatusCode, len(raw))
+	}
+	var out map[string]any
+	json.Unmarshal(raw, &out)
+	if out["measurement"].(map[string]any)["overlay_png_b64"] != nil {
+		t.Fatal("the base64 overlay must not be in the reply")
+	}
+	url, _ := out["overlay_url"].(string)
+	if url != "/api/overlay/m_1" {
+		t.Fatalf("overlay_url %q", url)
+	}
+	img, err := http.Get(h.srv.URL + url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jpg, _ := io.ReadAll(img.Body)
+	img.Body.Close()
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(jpg))
+	if img.StatusCode != 200 || img.Header.Get("Content-Type") != "image/jpeg" || err != nil || format != "jpeg" || max(cfg.Width, cfg.Height) != 1280 {
+		t.Fatalf("overlay: %d %s %v %s %dx%d", img.StatusCode, img.Header.Get("Content-Type"), err, format, cfg.Width, cfg.Height)
+	}
+	if r, _ := http.Get(h.srv.URL + "/api/overlay/nope"); r.StatusCode != 404 {
+		t.Fatalf("unknown overlay: %d", r.StatusCode)
+	}
+}
+
+func TestCellsAreCompactWithETagAndInlinedInThePage(t *testing.T) {
+	h := newHarness(t, nil, true)
+	resp, _ := http.Get(h.srv.URL + "/api/cells")
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	etag := resp.Header.Get("ETag")
+	if etag == "" || strings.Contains(string(body), "debris_factor") || strings.Contains(string(body), "hazard_class_upper") || strings.Contains(string(body), "80.218229") {
+		t.Fatalf("etag %q, body %s", etag, body)
+	}
+	for _, want := range []string{`"depth_upper_cm"`, `"origin"`, `[80.21823,12.99153]`, `"n_neighbour"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("compact cells lack %s", want)
+		}
+	}
+	req, _ := http.NewRequest("GET", h.srv.URL+"/api/cells", nil)
+	req.Header.Set("If-None-Match", etag)
+	r2, _ := http.DefaultClient.Do(req)
+	if r2.StatusCode != http.StatusNotModified {
+		t.Fatalf("revalidation: %d", r2.StatusCode)
+	}
+	page, _ := http.Get(h.srv.URL + "/")
+	html, _ := io.ReadAll(page.Body)
+	if !strings.Contains(string(html), `id="cells-data"`) || !strings.Contains(string(html), `"8a618c4e2d47fff"`) {
+		t.Fatal("the map page should carry the initial cells")
+	}
+	if n := h.engine.cellsCalls.Load(); n != 1 {
+		t.Fatalf("engine queried %d times for the page and the API within the cache window", n)
+	}
+}
+
+func TestRealReportsKeepTheirLabelAcrossARestart(t *testing.T) {
+	dir := t.TempDir()
+	env := map[string]string{"DEMO": "1", "GATEWAY_DATA_DIR": dir}
+	h := newHarness(t, env, true)
+	if r := h.post(t, "/api/report", loc, map[string][]byte{"image": photo(60)}, ""); r.StatusCode != 200 {
+		t.Fatalf("report: %d", r.StatusCode)
+	}
+	h.app.Shutdown() // saves the provenance record
+	if _, err := os.Stat(filepath.Join(dir, "provenance.json")); err != nil {
+		t.Fatal(err)
+	}
+	// A new gateway in demo mode, on the same data directory and engine.
+	h2 := newHarness(t, env, true)
+	h2.engine.srv.Close()
+	h2.app.Engine = h.app.Engine
+	if got := h2.app.Origins.Label("8a618c4e2d47fff", 12.9912, 80.2176); got != "reported" {
+		t.Fatalf("after a restart the real cell reads %q, want reported", got)
+	}
+	if got := h2.app.Origins.Label("8a61aaaaaaaaaaa", 13.05, 80.25); got != "simulated" {
+		t.Fatalf("in a demo a cell with no record reads %q, want simulated", got)
+	}
+	feed := h2.app.Hub.Feed()
+	if len(feed) == 0 || feed[0].Simulated || feed[0].DepthCm != 23.4 {
+		t.Fatalf("the real report should be back in the ticker: %+v", feed)
 	}
 }

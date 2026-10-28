@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -118,12 +117,8 @@ func NewResultView(o *report.Outcome) *ResultView {
 		MapLink:  fmt.Sprintf("/?at=%.5f,%.5f", o.Lat, o.Lon),
 	}
 	m := o.Measurement
-	if m != nil && m.OverlayPNGB64 != "" {
-		if raw, err := base64.StdEncoding.DecodeString(m.OverlayPNGB64); err == nil && len(raw) > 8 && string(raw[1:4]) == "PNG" {
-			// Only a verified PNG becomes a data URL; html/template would
-			// otherwise refuse it, and rightly.
-			v.Overlay = template.URL("data:image/png;base64," + m.OverlayPNGB64)
-		}
+	if strings.HasPrefix(o.OverlayURL, "/api/overlay/") {
+		v.Overlay = template.URL(o.OverlayURL)
 	}
 	if o.DepthCm != nil && o.DepthSigmaCm != nil {
 		v.HasDepth = true

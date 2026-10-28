@@ -94,6 +94,13 @@ type Config struct {
 	RouteTimeout      time.Duration
 	PerceptionTimeout time.Duration
 	WeatherTimeout    time.Duration
+	// ReplyDeadline bounds every non-streaming response, from the start of
+	// the request; it must leave room for a slow perception call.
+	ReplyDeadline time.Duration
+
+	// DataDir holds the gateway's small persisted state (report
+	// provenance). Empty disables persistence.
+	DataDir string
 
 	ServiceArea BBox
 
@@ -141,7 +148,9 @@ func fromLookup(lookup func(string) (string, bool)) (Config, error) {
 
 		EngineTimeout:     r.dur("ENGINE_TIMEOUT", 5*time.Second),
 		RouteTimeout:      r.dur("ROUTE_TIMEOUT", 20*time.Second),
-		PerceptionTimeout: r.dur("PERCEPTION_TIMEOUT", 180*time.Second),
+		PerceptionTimeout: r.dur("PERCEPTION_TIMEOUT", 240*time.Second),
+		ReplyDeadline:     r.dur("REPLY_DEADLINE", 270*time.Second),
+		DataDir:           r.str("GATEWAY_DATA_DIR", "../data/gateway"),
 		WeatherTimeout:    r.dur("WEATHER_TIMEOUT", 4*time.Second),
 
 		MaxImageBytes:   r.int64("MAX_IMAGE_BYTES", 12<<20),
@@ -184,6 +193,9 @@ func fromLookup(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if r.err == nil && c.MaxSSEClients < 1 {
 		r.err = fmt.Errorf("MAX_SSE_CLIENTS must be at least 1")
+	}
+	if r.err == nil && c.ReplyDeadline <= c.PerceptionTimeout {
+		r.err = fmt.Errorf("REPLY_DEADLINE (%s) must be longer than PERCEPTION_TIMEOUT (%s)", c.ReplyDeadline, c.PerceptionTimeout)
 	}
 	if r.err == nil && c.MaxInflight < 1 {
 		r.err = fmt.Errorf("MAX_INFLIGHT_REPORTS must be at least 1")

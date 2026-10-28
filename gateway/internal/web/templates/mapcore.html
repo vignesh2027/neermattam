@@ -4,8 +4,11 @@ window.NM = (function () {
   "use strict";
   var maps = [];
   var STYLE = "https://tiles.openfreemap.org/styles/positron";
-  var DEPTH = ["step", ["get", "depth_cm"], "#BAE6FD", 15, "#38BDF8", 30, "#2563EB", 50, "#4C1D95", 80, "#9F1239"];
-  var HAZARD = ["match", ["get", "hazard_class"], "low", "#BAE6FD", "danger_some", "#38BDF8", "danger_most", "#4C1D95", "danger_all", "#9F1239", "#CBD5E1"];
+  // Every value read from a feature is coalesced, so a cell with a missing
+  // or null field never makes an expression warn or fail.
+  var DEPTH_VALUE = ["to-number", ["coalesce", ["get", "depth_cm"], 0], 0];
+  var DEPTH = ["step", DEPTH_VALUE, "#BAE6FD", 15, "#38BDF8", 30, "#2563EB", 50, "#4C1D95", 80, "#9F1239"];
+  var HAZARD = ["match", ["coalesce", ["get", "hazard_class"], "unknown"], "low", "#BAE6FD", "danger_some", "#38BDF8", "danger_most", "#4C1D95", "danger_all", "#9F1239", "#CBD5E1"];
   var HAZ_TEXT = { low: "Caution", danger_some: "Danger for some", danger_most: "Danger for most", danger_all: "Danger for all", unknown: "Unknown" };
   var HAZ_CHIP = { low: "chip", danger_some: "chip", danger_most: "chip chip-violet", danger_all: "chip chip-danger", unknown: "chip chip-grey" };
 
@@ -45,6 +48,30 @@ window.NM = (function () {
     });
     ["highway-name-minor", "highway-name-major", "highway-name-path"].forEach(function (id) { set(id, "text-color", "#56698A"); });
     ["water_name_point_label", "water_name_line_label"].forEach(function (id) { set(id, "text-color", "#3A5C9C"); });
+    tidy(m);
+  }
+
+  // The base style compares some numeric tile fields that many features
+  // lack (road shields test ref_length <= 6), so MapLibre warns about nulls
+  // on every tile. A missing number now simply fails the comparison, which
+  // is what the style intends, without the warning.
+  var FAIL = { "<": 1e9, "<=": 1e9, ">": -1e9, ">=": -1e9 };
+  function guard(x) {
+    if (!Array.isArray(x)) return x;
+    if (FAIL[x[0]] !== undefined && x.length === 3) {
+      return [x[0]].concat(x.slice(1).map(function (a) {
+        return Array.isArray(a) && a[0] === "get" ? ["coalesce", a, FAIL[x[0]]] : guard(a);
+      }));
+    }
+    return x.map(guard);
+  }
+  function tidy(m) {
+    m.getStyle().layers.forEach(function (l) {
+      var f = m.getFilter(l.id);
+      if (!f) return;
+      var g = guard(f);
+      if (JSON.stringify(g) !== JSON.stringify(f)) m.setFilter(l.id, g);
+    });
   }
 
   function hatch(m) {
@@ -79,6 +106,24 @@ window.NM = (function () {
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     m.touchZoomRotate.disableRotation();
     m.on("style.load", function () { tint(m); });
+    // A quiet loading veil until the first frame with data is drawn.
+    var veil = el("div", "map-loading");
+    veil.setAttribute("role", "status");
+    veil.appendChild(el("span", "map-spinner"));
+    veil.appendChild(el("span", null, "Loading the live map"));
+    m.getContainer().appendChild(veil);
+    var lifted = false;
+    function lift() {
+      if (lifted) return;
+      lifted = true;
+      api.firstPaintMs = Math.round(performance.now());
+      veil.classList.add("is-gone");
+      setTimeout(function () { veil.remove(); }, 400);
+    }
+    m.on("load", function () { m.once("idle", lift); });
+    m._nmLift = lift;
+    setTimeout(lift, 15000);
+    m.on("error", function (e) { if (!m.loaded() && e && e.error) veil.lastChild.textContent = "The base map is slow to load. The flood cells will appear when it does."; });
     maps.push(m);
     return m;
   }
@@ -88,13 +133,13 @@ window.NM = (function () {
     hatch(m);
     m.addSource("cells", { type: "geojson", data: { type: "FeatureCollection", features: [] }, promoteId: "cell" });
     var before = firstSymbol(m);
-    m.addLayer({ id: "cells-fill", type: "fill", source: "cells", filter: ["!", ["get", "unknown"]],
+    m.addLayer({ id: "cells-fill", type: "fill", source: "cells", filter: ["!", ["coalesce", ["get", "unknown"], false]],
       paint: { "fill-color": DEPTH, "fill-opacity": opts.opacity || 0.8 } }, before);
-    m.addLayer({ id: "cells-unknown", type: "fill", source: "cells", filter: ["get", "unknown"],
+    m.addLayer({ id: "cells-unknown", type: "fill", source: "cells", filter: ["coalesce", ["get", "unknown"], false],
       paint: { "fill-pattern": "hatch", "fill-opacity": 0.95 } }, before);
     m.addLayer({ id: "cells-line", type: "line", source: "cells",
       paint: { "line-color": "#FFFFFF", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.15, 15, 1.2], "line-opacity": 0.75 } }, before);
-    m.addLayer({ id: "cells-real", type: "line", source: "cells", filter: ["!=", ["get", "origin"], "simulated"],
+    m.addLayer({ id: "cells-real", type: "line", source: "cells", filter: ["!=", ["coalesce", ["get", "origin"], "simulated"], "simulated"],
       paint: { "line-color": "#0B1B33", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1, 15, 2.4] } }, before);
     m.addLayer({ id: "cells-flash", type: "line", source: "cells",
       paint: { "line-color": "#FFFFFF", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1.5, 15, 4],
@@ -110,19 +155,40 @@ window.NM = (function () {
   /* Keeps the cells source in step with /api/cells and /api/stream. */
   function live(m, hooks) {
     hooks = hooks || {};
-    var feats = {}, timer = null, es = null;
+    var feats = {}, timer = null, es = null, etag = hooks.etag || "";
+    var first = true;
     function push() {
       timer = null;
       var list = Object.keys(feats).map(function (k) { return feats[k]; });
+      if (first) {
+        // Lift the loading veil as soon as the cells are on screen, even if
+        // base map tiles are still arriving.
+        first = false;
+        var onData = function (e) {
+          if (e.sourceId === "cells" && e.isSourceLoaded) {
+            m.off("sourcedata", onData);
+            requestAnimationFrame(function () { requestAnimationFrame(function () { if (m._nmLift) m._nmLift(); }); });
+          }
+        };
+        m.on("sourcedata", onData);
+      }
       m.getSource("cells").setData({ type: "FeatureCollection", features: list });
       if (hooks.onData) hooks.onData(list);
     }
     function schedule() { if (!timer) timer = setTimeout(push, 200); }
     function key(f) { return (f.properties && f.properties.cell) || f.id; }
+    function take(fc) { feats = {}; (fc.features || []).forEach(function (f) { feats[key(f)] = f; }); push(); }
     function load() {
-      return fetch("/api/cells", { headers: { Accept: "application/json" } })
-        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .then(function (fc) { feats = {}; (fc.features || []).forEach(function (f) { feats[key(f)] = f; }); push(); })
+      var h = { Accept: "application/json" };
+      if (etag) h["If-None-Match"] = etag;
+      return fetch("/api/cells", { headers: h })
+        .then(function (r) {
+          if (r.status === 304) return null;
+          if (!r.ok) throw new Error(r.status);
+          etag = r.headers.get("ETag") || "";
+          return r.json();
+        })
+        .then(function (fc) { if (fc) take(fc); })
         .catch(function () { if (hooks.onStatus) hooks.onStatus("down"); });
     }
     function flash(id) {
@@ -144,7 +210,15 @@ window.NM = (function () {
       es.addEventListener("resync", function () { load(); });
       es.addEventListener("report", function (e) { if (hooks.onReport) hooks.onReport(JSON.parse(e.data)); });
     }
-    load().then(connect);
+    if (hooks.initial) {
+      // Cells came inline with the page: draw them now, then open the live
+      // stream and revalidate in the background (usually a 304).
+      take(hooks.initial);
+      connect();
+      load();
+    } else {
+      load().then(connect);
+    }
     return { reload: load };
   }
 
@@ -194,6 +268,7 @@ window.NM = (function () {
     });
   }
 
-  return { maps: maps, create: create, addCells: addCells, live: live, popups: popups, colourBy: colourBy, depthColor: depthColor, el: el, ago: ago };
+  var api = { maps: maps, create: create, addCells: addCells, live: live, popups: popups, colourBy: colourBy, depthColor: depthColor, el: el, ago: ago, firstPaintMs: null };
+  return api;
 })();
 </script>{{end}}

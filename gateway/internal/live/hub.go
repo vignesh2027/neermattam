@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -165,6 +166,20 @@ func (h *Hub) PublishFeed(item FeedItem) {
 	h.Broadcast(Message{Event: "report", Data: b})
 }
 
+// RestoreFeed adds a past item without broadcasting it.
+func (h *Hub) RestoreFeed(item FeedItem) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if item.Simulated {
+		h.feed = append([]FeedItem{item}, h.feed...)
+		return
+	}
+	h.real = append([]FeedItem{item}, h.real...)
+	if len(h.real) > 8 {
+		h.real = h.real[:8]
+	}
+}
+
 // Feed returns ticker items: real reports first (newest first), then
 // simulated ones.
 func (h *Hub) Feed() []FeedItem {
@@ -224,44 +239,84 @@ func (h *Hub) handle(ev upstream.Event) {
 	h.Broadcast(Message{Event: "cell", Data: data})
 }
 
-// DecorateFeature adds properties.origin to one GeoJSON cell feature.
+// keptProps are the cell properties the map and its popup use. The rest
+// (debris factor, upper hazard class, the duplicate top-level id) stay in
+// the engine's own API.
+var keptProps = []string{
+	"cell", "depth_cm", "depth_sigma_cm", "depth_upper_cm",
+	"velocity_mps", "velocity_sigma_mps", "velocity_assumed",
+	"hazard_rating", "hazard_class", "unknown", "n_readings", "n_neighbour", "updated_at",
+}
+
+// DecorateFeature compacts one GeoJSON cell feature and adds
+// properties.origin.
 func DecorateFeature(raw []byte, o *Origins) ([]byte, error) {
 	var f map[string]any
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return nil, err
 	}
-	decorate(f, o)
-	return json.Marshal(f)
+	return json.Marshal(compact(f, o))
 }
 
-// DecorateCollection adds properties.origin to every feature.
+// DecorateCollection compacts every feature, adds properties.origin, and
+// says whether the map holds simulated water.
 func DecorateCollection(raw []byte, o *Origins) ([]byte, error) {
 	var fc map[string]any
 	if err := json.Unmarshal(raw, &fc); err != nil {
 		return nil, err
 	}
 	feats, _ := fc["features"].([]any)
+	out := make([]any, 0, len(feats))
 	for _, x := range feats {
 		if f, ok := x.(map[string]any); ok {
-			decorate(f, o)
+			out = append(out, compact(f, o))
 		}
 	}
-	fc["simulated_scenario"] = o.HasSimulated()
-	return json.Marshal(fc)
+	return json.Marshal(map[string]any{
+		"type":               "FeatureCollection",
+		"features":           out,
+		"truncated":          fc["truncated"],
+		"generated_at":       fc["generated_at"],
+		"simulated_scenario": o.HasSimulated(),
+	})
 }
 
-func decorate(f map[string]any, o *Origins) {
+// compact keeps the properties the map uses and rounds coordinates to five
+// decimals (about a metre, far finer than a 66 m hexagon).
+func compact(f map[string]any, o *Origins) map[string]any {
 	props, _ := f["properties"].(map[string]any)
 	if props == nil {
 		props = map[string]any{}
-		f["properties"] = props
 	}
 	id, _ := f["id"].(string)
 	if id == "" {
 		id, _ = props["cell"].(string)
 	}
 	lat, lon := featureCentroid(f)
-	props["origin"] = o.Label(id, lat, lon)
+	kept := make(map[string]any, len(keptProps)+1)
+	for _, k := range keptProps {
+		if v, ok := props[k]; ok {
+			kept[k] = v
+		}
+	}
+	kept["cell"] = id
+	kept["origin"] = o.Label(id, lat, lon)
+	geom, _ := f["geometry"].(map[string]any)
+	if rings, ok := geom["coordinates"].([]any); ok {
+		for _, ring := range rings {
+			pts, _ := ring.([]any)
+			for _, p := range pts {
+				if xy, ok := p.([]any); ok {
+					for i, c := range xy {
+						if v, ok := c.(float64); ok {
+							xy[i] = math.Round(v*1e5) / 1e5
+						}
+					}
+				}
+			}
+		}
+	}
+	return map[string]any{"type": "Feature", "geometry": geom, "properties": kept}
 }
 
 func featureCentroid(f map[string]any) (float64, float64) {

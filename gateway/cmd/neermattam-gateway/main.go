@@ -73,7 +73,7 @@ func run() error {
 		Addr:              cfg.Addr,
 		Handler:           a.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       3 * time.Minute, // a 40 MB video on a slow phone link
+		ReadTimeout:       cfg.ReplyDeadline, // a 40 MB video on a slow phone link
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    32 << 10,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),

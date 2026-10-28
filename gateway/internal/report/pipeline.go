@@ -6,6 +6,7 @@ package report
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"neermattam/gateway/internal/live"
 	"neermattam/gateway/internal/media"
 	"neermattam/gateway/internal/metrics"
+	"neermattam/gateway/internal/overlay"
 	"neermattam/gateway/internal/places"
 	"neermattam/gateway/internal/upstream"
 	"neermattam/gateway/internal/verify"
@@ -99,6 +101,8 @@ type Outcome struct {
 	DepthCm      *float64                `json:"depth_cm"`
 	DepthSigmaCm *float64                `json:"depth_sigma_cm"`
 	Cell         *upstream.ReadingResult `json:"cell,omitempty"`
+	// OverlayURL serves perception's overlay as a small JPEG for an hour.
+	OverlayURL string `json:"overlay_url,omitempty"`
 	// CellHasSimulated is true when the fused cell also holds readings from
 	// the simulated demo scenario.
 	CellHasSimulated bool      `json:"cell_has_simulated,omitempty"`
@@ -118,6 +122,7 @@ type Pipeline struct {
 	Verifier   *verify.Verifier
 	Dedupe     *Dedupe
 	Origins    *live.Origins
+	Overlays   *overlay.Store
 	Hub        *live.Hub
 	Log        *slog.Logger
 	Metrics    *metrics.Set
@@ -125,6 +130,10 @@ type Pipeline struct {
 	sem chan struct{}
 	now func() time.Time
 }
+
+// SetClock replaces the clock, for tests: it decides the time a report is
+// received, which the freshness rule compares capture times with.
+func (p *Pipeline) SetClock(now func() time.Time) { p.now = now }
 
 // Init prepares the concurrency limit. Call once before Run.
 func (p *Pipeline) Init() {
@@ -318,6 +327,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 			return nil, p.upstreamFail("perception", err)
 		}
 		out.Measurement = m
+		p.attachOverlay(out, m)
 		if !m.Usable {
 			out.Status = StatusUnusable
 			out.Summary = "The photo could not be measured."
@@ -398,7 +408,11 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 	}
 	out.ReadingID = reading.ReadingID
 	out.Cell = cell
-	p.Origins.Mark(cell.Cell, false)
+	p.Origins.Record(live.RealReading{
+		ReadingID: reading.ReadingID, Cell: cell.Cell, Lat: sub.Lat, Lon: sub.Lon,
+		DepthCm: depth, DepthSigmaCm: sigma, Source: out.Source, Trust: verdict.Trust,
+		Place: out.Place, ObservedAt: verdict.ObservedAt, ReceivedAt: start.UTC(),
+	})
 	out.CellHasSimulated = p.Origins.HasSimulatedEvidence(cell.Cell)
 	go p.markNearby(sub.Lat, sub.Lon, false)
 	p.Dedupe.Remember(c.sum, c.dhash, c.hasHash)
@@ -413,6 +427,32 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 	})
 	p.finish(out, start)
 	return out, nil
+}
+
+// attachOverlay re-encodes the overlay PNG as a small JPEG, keeps it for an
+// hour behind /api/overlay/{id}, and drops the base64 from the reply.
+func (p *Pipeline) attachOverlay(out *Outcome, m *upstream.Measurement) {
+	if m.OverlayPNGB64 == "" {
+		return
+	}
+	b64 := m.OverlayPNGB64
+	m.OverlayPNGB64 = ""
+	if p.Overlays == nil {
+		return
+	}
+	id := m.MeasurementID
+	if !overlay.ValidID(id) {
+		var r [9]byte
+		_, _ = rand.Read(r[:])
+		id = "ov_" + hex.EncodeToString(r[:])
+	}
+	jpg, err := overlay.Reencode(b64, overlay.MaxSide, overlay.Quality)
+	if err != nil {
+		p.Log.Warn("overlay could not be re-encoded", "error", err.Error())
+		return
+	}
+	p.Overlays.Put(id, jpg)
+	out.OverlayURL = "/api/overlay/" + id
 }
 
 func (p *Pipeline) finish(out *Outcome, start time.Time) {

@@ -650,3 +650,21 @@ tr:last-child td { border-bottom: 0; }
    and the live agent trace. */
 #process.is-busy .explain { display: none; }
 @media (max-width: 560px) { .tlat::before { content: "· "; color: var(--faint); } }
+
+/* Map loading veil */
+.map-loading {
+  position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; gap: 12px;
+  font-size: 14px; font-weight: 600; color: var(--muted);
+  background:
+    radial-gradient(1200px 600px at 50% 40%, rgba(255, 255, 255, .85), rgba(234, 241, 250, .92)),
+    repeating-linear-gradient(60deg, rgba(37, 99, 235, .04) 0 18px, transparent 18px 36px);
+  transition: opacity .35s ease;
+}
+.map-loading.is-gone { opacity: 0; pointer-events: none; }
+.map-spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--soft); border-top-color: var(--primary); animation: spin .8s linear infinite; }
+.map-page .map-loading { padding-top: 40px; }
+
+/* Brand mark */
+.brand-mark { width: 40px; height: 40px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(37, 99, 235, .18)); }
+@media (max-width: 860px) { .brand-mark { width: 34px; height: 34px; } }
+.about-logo { width: min(320px, 70vw); height: auto; margin: 4px 0 6px; }

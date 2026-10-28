@@ -1,6 +1,7 @@
 {{define "content"}}
 <div class="page">
   <section class="hero">
+    <img class="about-logo" src="/static/brand/logo-full.png" width="720" height="545" alt="Neermattam: a blue wave shaped like the letter N with a water drop, above the word Neermattam">
     <p class="eyebrow">About Neermattam</p>
     <h1>Forecasts say where Chennai will flood. Neermattam measures <em>how deep it is on your street.</em></h1>
     <p>From one photo of a tyre, Neermattam estimates the depth of the water and how fast it moves, fuses every report into a live map with honest uncertainty, and routes your scooter, auto, car, bus or your own two feet around water you should not cross.</p>
@@ -8,7 +9,7 @@
 
   <div class="how">
     <article class="card"><span class="n">1</span><h3>Photograph a wheel</h3><p>A scooter, auto or car wheel has a known size. Standing in water, it becomes a ruler. Send a photo or a short video from the web or WhatsApp.</p></article>
-    <article class="card"><span class="n">2</span><h3>Measure with Meta models</h3><p>Muse Spark 1.3 reads the scene and picks the reference. SAM 3.1 masks the wheel and the water. Geometry turns the hidden part of the wheel into a depth with a plus or minus.</p></article>
+    <article class="card"><span class="n">2</span><h3>Measure with Meta models</h3><p>Muse Spark Open reads the scene and picks the reference. SAM masks the wheel and the water. Geometry turns the hidden part of the wheel into a depth with a plus or minus.</p></article>
     <article class="card"><span class="n">3</span><h3>Fuse, rate and route</h3><p>Each report updates a hex cell about 66 m across with a Kalman filter that ages old water. Cells are rated with the Defra hazard formula and routes avoid what each vehicle cannot cross.</p></article>
   </div>
 
@@ -44,9 +45,9 @@
     <h2>Credits</h2>
   </div>
   <div class="credits">
-    <article class="card"><h3>Muse Spark 1.3</h3><p>Meta's reasoning model. Reads the scene, picks the reference object, gives a second waterline estimate and parses spoken reports.</p></article>
-    <article class="card"><h3>SAM 3.1</h3><p>Meta's Segment Anything model. Masks the wheel and the water and tracks the surface in video, for depth and speed.</p></article>
-    <article class="card"><h3>Muse Voice Transcribe</h3><p>Meta's speech model. Turns WhatsApp voice notes in Tamil and English into text.</p></article>
+    <article class="card"><h3>Muse Spark Open</h3><p>Meta's open-weight reasoning model, served by Baseten. Reads the scene, points at the reference objects, checks every mask the agent proposes, and understands voice notes.</p></article>
+    <article class="card"><h3>SAM 2.1</h3><p>Meta's open-weight Segment Anything model. Outlines the wheel and the water from the boxes and points Muse Spark Open gives it, and tracks floating debris in video for speed. SAM 3.1 drops in when its weights are available to us.</p></article>
+    <article class="card"><h3>Voice reports</h3><p>Muse Spark Open listens to voice notes and pulls out the place and the depth words, in Tamil, English and other Indian languages.</p></article>
     <article class="card"><h3>OpenStreetMap</h3><p>Road network and base map data © OpenStreetMap contributors, available under the Open Database Licence (ODbL).</p></article>
     <article class="card"><h3>OpenFreeMap and OpenMapTiles</h3><p>Free vector tiles and the Positron style, rendered with MapLibre GL JS (BSD licence).</p></article>
     <article class="card"><h3>Open-Meteo</h3><p>Modelled hourly rainfall for report checks, used under CC BY 4.0 with caching to respect its fair use terms.</p></article>

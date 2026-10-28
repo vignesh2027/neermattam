@@ -55,3 +55,17 @@ func TestWhatsAppEnabledOnlyWithAllSecrets(t *testing.T) {
 		t.Fatal("should be enabled")
 	}
 }
+
+func TestReplyDeadlineCoversPerception(t *testing.T) {
+	c, _ := FromMap(nil)
+	if c.PerceptionTimeout != 240*time.Second || c.ReplyDeadline != 270*time.Second {
+		t.Fatalf("defaults %v %v", c.PerceptionTimeout, c.ReplyDeadline)
+	}
+	if _, err := FromMap(map[string]string{"REPLY_DEADLINE": "200s"}); err == nil {
+		t.Fatal("a reply deadline shorter than the perception timeout must be refused")
+	}
+	c, err := FromMap(map[string]string{"REPLY_DEADLINE": "6m", "PERCEPTION_TIMEOUT": "5m"})
+	if err != nil || c.ReplyDeadline != 6*time.Minute {
+		t.Fatalf("%v %v", c.ReplyDeadline, err)
+	}
+}

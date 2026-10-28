@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 
 	"neermattam/gateway/internal/config"
 	"neermattam/gateway/internal/live"
+	"neermattam/gateway/internal/overlay"
 	"neermattam/gateway/internal/report"
 	"neermattam/gateway/internal/upstream"
 	"neermattam/gateway/internal/web"
@@ -146,69 +149,73 @@ func (a *App) apiReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// cellsCache holds decorated cell collections for a short time, so a burst
-// of page loads costs the engine one query.
-type cellsCache struct {
-	ttl   time.Duration
-	mu    sync.Mutex
-	m     map[string]cachedCells
-	gz    []byte
-	gzFor []byte
+// apiOverlay serves a report's overlay JPEG for an hour after the report.
+func (a *App) apiOverlay(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	data, ok := a.Overlays.Get(id)
+	if !overlay.ValidID(id) || !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "this overlay has expired or never existed; overlays are kept for an hour"})
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=3600, immutable")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
 }
 
-type cachedCells struct {
+// cellsCache holds compacted cell collections for a short time, with their
+// gzip form and an ETag, so a burst of page loads costs the engine one
+// query and a browser that already has the data gets a 304.
+type cellsCache struct {
+	ttl time.Duration
+	mu  sync.Mutex
+	m   map[string]*cellsEntry
+}
+
+type cellsEntry struct {
 	body []byte
+	gz   []byte
+	etag string
 	at   time.Time
 }
 
 func newCellsCache(ttl time.Duration) *cellsCache {
-	return &cellsCache{ttl: ttl, m: map[string]cachedCells{}}
+	return &cellsCache{ttl: ttl, m: map[string]*cellsEntry{}}
 }
 
-func (c *cellsCache) get(key string) ([]byte, bool) {
+func (c *cellsCache) get(key string) (*cellsEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.m[key]
 	if !ok || time.Since(e.at) > c.ttl {
 		return nil, false
 	}
-	return e.body, true
+	return e, true
 }
 
-// gzipped returns a compressed copy of a cached body, made once.
-func (c *cellsCache) gzipped(body []byte) []byte {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(body) > 0 && len(c.gzFor) == len(body) && &c.gzFor[0] == &body[0] {
-		return c.gz
-	}
-	c.gz = web.Compress(body)
-	c.gzFor = body
-	return c.gz
-}
-
-func (c *cellsCache) put(key string, body []byte) {
+func (c *cellsCache) put(key string, e *cellsEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.m) >= 128 {
-		for k, e := range c.m {
-			if time.Since(e.at) > c.ttl {
+		for k, old := range c.m {
+			if time.Since(old.at) > c.ttl {
 				delete(c.m, k)
 			}
 		}
 		if len(c.m) >= 128 {
-			c.m = map[string]cachedCells{}
+			c.m = map[string]*cellsEntry{}
 		}
 	}
-	c.m[key] = cachedCells{body: body, at: time.Now()}
+	c.m[key] = e
 }
 
-// cellsFor returns decorated cells for a bbox, from the cache when fresh.
-func (a *App) cellsFor(ctx context.Context, bbox config.BBox) ([]byte, error) {
+// cellsFor returns compacted, labelled cells for a bbox, from the cache when
+// fresh.
+func (a *App) cellsFor(ctx context.Context, bbox config.BBox) (*cellsEntry, error) {
 	key := fmt.Sprintf("%.4f,%.4f,%.4f,%.4f", bbox.MinLon, bbox.MinLat, bbox.MaxLon, bbox.MaxLat)
-	if body, ok := a.cells.get(key); ok {
+	if e, ok := a.cells.get(key); ok {
 		a.Metrics.CellsCache.Inc("hit")
-		return body, nil
+		return e, nil
 	}
 	a.Metrics.CellsCache.Inc("miss")
 	raw, err := a.Engine.Cells(ctx, key)
@@ -219,8 +226,10 @@ func (a *App) cellsFor(ctx context.Context, bbox config.BBox) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.cells.put(key, body)
-	return body, nil
+	sum := sha256.Sum256(body)
+	e := &cellsEntry{body: body, gz: web.CompressBest(body), etag: `"` + hex.EncodeToString(sum[:12]) + `"`, at: time.Now()}
+	a.cells.put(key, e)
+	return e, nil
 }
 
 // apiCells is GET /api/cells?bbox=minLon,minLat,maxLon,maxLat. Without a
@@ -242,14 +251,31 @@ func (a *App) apiCells(w http.ResponseWriter, r *http.Request) {
 		}
 		bbox = b
 	}
-	body, err := a.cellsFor(r.Context(), bbox)
+	e, err := a.cellsFor(r.Context(), bbox)
 	if err != nil {
 		a.upstreamError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/geo+json")
-	w.Header().Set("Cache-Control", "public, max-age=2")
-	web.WriteBody(w, r, body, a.cells.gzipped(body))
+	h := w.Header()
+	h.Set("ETag", e.etag)
+	h.Set("Cache-Control", "public, max-age=2")
+	h.Set("Vary", "Accept-Encoding")
+	if etagMatch(r.Header.Get("If-None-Match"), e.etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	h.Set("Content-Type", "application/geo+json")
+	web.WriteBody(w, r, e.body, e.gz)
+}
+
+func etagMatch(header, etag string) bool {
+	for _, t := range strings.Split(header, ",") {
+		t = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(t), "W/"))
+		if t == etag || t == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) upstreamError(w http.ResponseWriter, err error) {

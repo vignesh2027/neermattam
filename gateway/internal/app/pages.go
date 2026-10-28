@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"strconv"
@@ -21,12 +22,14 @@ import (
 
 func (a *App) page(r *http.Request, title, active string, needsMap bool) *web.Page {
 	return &web.Page{
-		Title:    title,
-		Active:   active,
-		Nonce:    nonceFrom(r.Context()),
-		NeedsMap: needsMap,
-		Footer:   active == "report" || active == "about",
-		Demo:     a.Cfg.Demo,
+		Request:   r,
+		PublicURL: a.Cfg.PublicURL,
+		Title:     title,
+		Active:    active,
+		Nonce:     nonceFrom(r.Context()),
+		NeedsMap:  needsMap,
+		Footer:    active == "report" || active == "about",
+		Demo:      a.Cfg.Demo,
 		Limits: web.Limits{
 			ImageMB:      int(a.Cfg.MaxImageBytes >> 20),
 			VideoMB:      int(a.Cfg.MaxVideoBytes >> 20),
@@ -37,7 +40,7 @@ func (a *App) page(r *http.Request, title, active string, needsMap bool) *web.Pa
 }
 
 func (a *App) render(w http.ResponseWriter, status int, name string, p *web.Page) {
-	if err := a.Renderer.Render(w, status, name, p); err != nil {
+	if err := a.Renderer.Render(w, p.Request, status, name, p); err != nil {
 		a.Log.Error("render failed", "page", name, "error", err.Error())
 	}
 }
@@ -49,8 +52,13 @@ func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
 	p.Stats = web.MapStats{Cells: "0", Deep: "0", Max: "None"}
 	ctx, cancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
 	defer cancel()
-	if body, err := a.cellsFor(ctx, a.Cfg.ServiceArea); err == nil {
-		if cells, err := upstream.DecodeCells(body); err == nil {
+	if e, err := a.cellsFor(ctx, a.Cfg.ServiceArea); err == nil {
+		// The first paint needs no second round trip: the cells ride in
+		// the page. json.Marshal escapes <, > and &, so the JSON cannot
+		// close its script element.
+		p.CellsJSON = template.JS(e.body)
+		p.CellsETag = e.etag
+		if cells, err := upstream.DecodeCells(e.body); err == nil {
 			deep, maxD, known := 0, 0.0, 0
 			for _, c := range cells {
 				if c.Props.Unknown {

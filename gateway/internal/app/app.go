@@ -6,11 +6,15 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"neermattam/gateway/internal/config"
 	"neermattam/gateway/internal/live"
 	"neermattam/gateway/internal/metrics"
+	"neermattam/gateway/internal/overlay"
 	"neermattam/gateway/internal/ratelimit"
 	"neermattam/gateway/internal/report"
 	"neermattam/gateway/internal/upstream"
@@ -31,16 +35,21 @@ type App struct {
 	Pipeline   *report.Pipeline
 	Renderer   *web.Renderer
 	WhatsApp   *whatsapp.Handler
+	Overlays   *overlay.Store
 
 	reportLimit *ratelimit.Limiter
 	apiLimit    *ratelimit.Limiter
 	cells       *cellsCache
 	started     time.Time
+	saveMu      sync.Mutex
+	saveErr     string
 }
 
 // Options let tests replace external dependencies.
 type Options struct {
 	Rainfall verify.Rainfall // nil uses Open-Meteo
+	// Now replaces the clock the report pipeline uses, for tests.
+	Now func() time.Time
 }
 
 // New builds the gateway. base is cancelled at shutdown and bounds every
@@ -64,7 +73,26 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 		cells:       newCellsCache(cfg.CellsCacheTTL),
 		started:     time.Now(),
 	}
+	a.Origins.Demo = cfg.Demo
+	if path := a.provenancePath(); path != "" {
+		n, err := a.Origins.Load(path)
+		if err != nil {
+			// Keep the bad file for inspection and start with no record.
+			aside := path + ".rejected-" + time.Now().UTC().Format("20060102T150405")
+			_ = os.Rename(path, aside)
+			log.Warn("provenance not loaded; starting with an empty record", "error", err.Error(), "moved_to", aside)
+		} else {
+			log.Info("provenance loaded", "cells", n, "real_reports", len(a.Origins.Records()), "path", path)
+		}
+	}
 	a.Hub = live.NewHub(cfg.MaxSSEClients, a.Origins, log, m)
+	// The ticker shows real reports from before a restart.
+	recs := a.Origins.Records()
+	for i := min(len(recs), 8) - 1; i >= 0; i-- {
+		r := recs[i]
+		a.Hub.RestoreFeed(live.FeedItem{Source: r.Source, DepthCm: r.DepthCm, DepthSigmaCm: r.DepthSigmaCm, Place: r.Place, Lat: r.Lat, Lon: r.Lon, At: r.ReceivedAt})
+	}
+	a.Overlays = overlay.NewStore(time.Hour, 300, 96<<20)
 	rain := opts.Rainfall
 	if rain == nil {
 		rain = verify.NewOpenMeteo(cfg.OpenMeteoURL, cfg.WeatherTimeout, m)
@@ -80,11 +108,15 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 			Log:     log,
 			Metrics: m,
 		},
-		Dedupe:  report.NewDedupe(cfg.DuplicateWindow, cfg.NearDuplicateMax),
-		Origins: a.Origins,
-		Hub:     a.Hub,
-		Log:     log,
-		Metrics: m,
+		Dedupe:   report.NewDedupe(cfg.DuplicateWindow, cfg.NearDuplicateMax),
+		Origins:  a.Origins,
+		Overlays: a.Overlays,
+		Hub:      a.Hub,
+		Log:      log,
+		Metrics:  m,
+	}
+	if opts.Now != nil {
+		a.Pipeline.SetClock(opts.Now)
 	}
 	a.Pipeline.Init()
 	if cfg.WhatsApp.Enabled() {
@@ -121,6 +153,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/cells", a.apiCells)
 	mux.HandleFunc("GET /api/route", a.apiRoute)
 	mux.HandleFunc("GET /api/stream", a.apiStream)
+	mux.HandleFunc("GET /api/overlay/{id}", a.apiOverlay)
 
 	if a.WhatsApp != nil {
 		mux.HandleFunc("GET /webhooks/whatsapp", a.WhatsApp.Verify)
@@ -140,7 +173,7 @@ func (a *App) Handler() http.Handler {
 	mux.Handle("GET /metrics", a.Metrics.Registry.Handler())
 	mux.Handle("GET /static/", web.Static())
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/static/favicon.svg", http.StatusMovedPermanently)
+		http.Redirect(w, r, "/static/brand/favicon.ico", http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if wantsHTML(r) {
@@ -155,9 +188,53 @@ func (a *App) Handler() http.Handler {
 	return a.recoverer(a.secure(a.observe(mux)))
 }
 
-// Run starts the background workers: the engine stream fan-out.
+func (a *App) provenancePath() string {
+	if a.Cfg.DataDir == "" {
+		return ""
+	}
+	return filepath.Join(a.Cfg.DataDir, live.FileName)
+}
+
+// SaveProvenance writes the provenance record if it changed. A failure is
+// logged once until it changes, not every few seconds.
+func (a *App) SaveProvenance() {
+	path := a.provenancePath()
+	if path == "" {
+		return
+	}
+	err := a.Origins.Save(path)
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	a.saveMu.Lock()
+	defer a.saveMu.Unlock()
+	if msg != a.saveErr {
+		if msg != "" {
+			a.Log.Warn("provenance not saved; set GATEWAY_DATA_DIR to a writable directory", "error", msg)
+		} else {
+			a.Log.Info("provenance saving again", "path", path)
+		}
+		a.saveErr = msg
+	}
+}
+
+// Run starts the background workers: the engine stream fan-out and the
+// provenance saver.
 func (a *App) Run(ctx context.Context) {
 	go a.Hub.Run(ctx, a.Engine)
+	go func() {
+		t := time.NewTicker(3 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				a.SaveProvenance()
+			}
+		}
+	}()
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
@@ -180,4 +257,5 @@ func (a *App) Shutdown() {
 	if a.WhatsApp != nil {
 		a.WhatsApp.Wait()
 	}
+	a.SaveProvenance()
 }

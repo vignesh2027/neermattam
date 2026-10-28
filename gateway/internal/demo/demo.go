@@ -86,7 +86,7 @@ func (s *Seeder) reading(h Hotspot, lat, lon float64, scale float64, observed ti
 	depth = math.Round(depth*10) / 10
 	sigma := math.Round((3+0.07*depth+s.rng.Float64()*1.5)*10) / 10
 	r := upstream.Reading{
-		ReadingID:    fmt.Sprintf("sim_%x", s.rng.Uint64()),
+		ReadingID:    fmt.Sprintf("%s%x", live.SimulatedPrefix, s.rng.Uint64()),
 		Lat:          lat,
 		Lon:          lon,
 		DepthCm:      depth,
@@ -139,7 +139,7 @@ func (s *Seeder) Plan(now time.Time) []upstream.Reading {
 			lat, lon := offset(p[0], p[1], s.rng.NormFloat64()*120, s.rng.NormFloat64()*120)
 			depth := math.Round(s.rng.Float64()*30) / 10
 			out = append(out, upstream.Reading{
-				ReadingID: fmt.Sprintf("sim_%x", s.rng.Uint64()), Lat: lat, Lon: lon,
+				ReadingID: fmt.Sprintf("%s%x", live.SimulatedPrefix, s.rng.Uint64()), Lat: lat, Lon: lon,
 				DepthCm: depth, DepthSigmaCm: 2.5, ObservedAt: now.Add(-time.Duration(10+s.rng.IntN(50)) * time.Minute).UTC().Truncate(time.Second),
 				Trust: 0.9,
 			})
@@ -147,7 +147,7 @@ func (s *Seeder) Plan(now time.Time) []upstream.Reading {
 	}
 	for _, p := range vaguePoints {
 		out = append(out, upstream.Reading{
-			ReadingID: fmt.Sprintf("sim_%x", s.rng.Uint64()), Lat: p[0], Lon: p[1],
+			ReadingID: fmt.Sprintf("%s%x", live.SimulatedPrefix, s.rng.Uint64()), Lat: p[0], Lon: p[1],
 			DepthCm: math.Round(10 + s.rng.Float64()*20), DepthSigmaCm: 14,
 			ObservedAt: now.Add(-time.Duration(20+s.rng.IntN(60)) * time.Minute).UTC().Truncate(time.Second),
 			Trust:      0.9,
@@ -193,14 +193,21 @@ func (s *Seeder) Seed(ctx context.Context, area string) (int, error) {
 	}
 	close(jobs)
 	wg.Wait()
-	// Label every cell in the service area that exists now. Anything already
-	// in the engine before the seed is labelled simulated too, which errs on
-	// the side of never passing simulated water off as real.
+	// Label the cells these readings touched (each reading's own cell and
+	// its ring of six), found by distance from one query of the whole map.
+	// Cells real reports touched keep their real label too, so they read
+	// "mixed", never "simulated".
 	if raw, err := s.Engine.Cells(ctx, area); err == nil {
 		if cells, err := upstream.DecodeCells(raw); err == nil {
-			for _, c := range cells {
-				s.Origins.Mark(c.ID, true)
+			centres := make([]live.CellCentre, len(cells))
+			for i, c := range cells {
+				centres[i] = live.CellCentre{ID: c.ID, Lat: c.Lat, Lon: c.Lon}
 			}
+			points := make([][2]float64, len(readings))
+			for i, r := range readings {
+				points[i] = [2]float64{r.Lat, r.Lon}
+			}
+			s.Origins.MarkAround(centres, points, true)
 		}
 	}
 	if posted == 0 && firstErr != nil {

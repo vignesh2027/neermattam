@@ -31,10 +31,22 @@ func Compress(b []byte) []byte {
 	return buf.Bytes()
 }
 
+// CompressBest gzips at the best ratio, for bodies made once and served
+// many times.
+func CompressBest(b []byte) []byte {
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	_, _ = zw.Write(b)
+	_ = zw.Close()
+	return buf.Bytes()
+}
+
 // WriteBody writes body, gzipped when the client accepts it and the body is
 // worth compressing. gz may be a precomputed compressed copy, or nil.
 func WriteBody(w http.ResponseWriter, r *http.Request, body, gz []byte) {
-	w.Header().Add("Vary", "Accept-Encoding")
+	if w.Header().Get("Vary") == "" {
+		w.Header().Set("Vary", "Accept-Encoding")
+	}
 	if len(body) > 1024 && AcceptsGzip(r) {
 		if gz == nil {
 			gz = Compress(body)
