@@ -29,8 +29,17 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 NAMESPACE = "vigneshwar234"
-DEFAULT_OSM = [ROOT / "data/osm/chennai-roads.osm.pbf",
-               Path.home() / "neermattam-data/osm/chennai-roads.osm.pbf"]
+CITIES = ("chennai", "mumbai", "bengaluru", "hyderabad", "kolkata", "delhi")
+# Folders searched for <city>-roads.osm.pbf, first match wins.
+DEFAULT_OSM = [ROOT / "data/osm", Path.home() / "neermattam-data/osm"]
+
+
+def find_osm_dir(given: Path | None = None) -> Path | None:
+    """The first folder holding every city's roads extract."""
+    for d in [given] if given else DEFAULT_OSM:
+        if d and all((d / f"{c}-roads.osm.pbf").is_file() for c in CITIES):
+            return d
+    return None
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -80,16 +89,20 @@ def stage(dest: Path, osm: Path) -> None:
     for name in ("Dockerfile", "README.md", "DATA_LICENSE"):
         shutil.copy2(HERE / name, dest / name)
     (dest / "data/osm").mkdir(parents=True)
-    shutil.copy2(osm, dest / "data/osm/chennai-roads.osm.pbf")
+    for city in CITIES:
+        shutil.copy2(osm / f"{city}-roads.osm.pbf", dest / "data/osm" / f"{city}-roads.osm.pbf")
     (dest / ".gitattributes").write_text("*.pbf filter=lfs diff=lfs merge=lfs -text\n")
 
-    head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
-                          capture_output=True, text=True).stdout.strip()
-    dirty = subprocess.run(["git", "status", "--porcelain", "--", "engine", "gateway", "perception"],
-                           cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    git = lambda *a: subprocess.run(["git", *a], cwd=ROOT, capture_output=True, text=True).stdout.strip()  # noqa: E731
+    head = git("rev-parse", "HEAD")
+    dirty = git("status", "--porcelain", "--", "engine", "gateway", "perception")
+    deploy_dirty = git("status", "--porcelain", "--", "deploy")
     (dest / "BUILD_INFO").write_text(
         f"source commit: {head}\n"
-        f"working tree: {'uncommitted changes included' if dirty else 'clean'}\n"
+        f"commit subject: {git('log', '-1', '--format=%s')}\n"
+        f"services (engine, gateway, perception): {'UNCOMMITTED CHANGES INCLUDED' if dirty else 'clean at this commit'}\n"
+        f"deploy files: {'uncommitted changes included' if deploy_dirty else 'clean at this commit'}\n"
+        f"staged at: {__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(timespec='seconds')}\n"
     )
 
 
@@ -99,7 +112,7 @@ def main() -> int:
     ap.add_argument("--hf-env", type=Path, help="file with an HF_TOKEN= line")
     ap.add_argument("--app-env", type=Path, default=ROOT / ".env",
                     help="file with BASETEN_API_KEY, BASETEN_BASE_URL, BASETEN_MODEL")
-    ap.add_argument("--osm", type=Path, help="Chennai roads extract (.osm.pbf)")
+    ap.add_argument("--osm", type=Path, help="folder with every <city>-roads.osm.pbf")
     ap.add_argument("--skip-secrets", action="store_true", help="do not touch secrets or variables")
     ap.add_argument("--dry-run", action="store_true", help="stage and list the files only")
     ap.add_argument("--stage-dir", type=Path,
@@ -110,9 +123,9 @@ def main() -> int:
     if not args.repo.startswith(NAMESPACE + "/"):
         print(f"refusing: only the {NAMESPACE} namespace may be written", file=sys.stderr)
         return 2
-    osm = args.osm or next((p for p in DEFAULT_OSM if p.is_file()), None)
-    if osm is None or not osm.is_file():
-        print("the Chennai roads extract was not found; pass --osm", file=sys.stderr)
+    osm = find_osm_dir(args.osm)
+    if osm is None:
+        print("no folder holds all six city road extracts; pass --osm", file=sys.stderr)
         return 2
 
     if args.stage_dir:

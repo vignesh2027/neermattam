@@ -4,6 +4,8 @@ The public demo runs on Modal as one app, `neermattam-web`, with all three servi
 
 https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run
 
+**Deployed now:** commit `18feddc` ("Perception: vehicle-box wheel search, rim rejection, close-up evaluation"), built on 29 October 2026 from a clean worktree, with the deploy-file changes described here not yet committed. The container's `/opt/neermattam/BUILD_INFO` says the same.
+
 This page explains how the image is built, how the container is configured, how to update it, and the guards that keep its running cost bounded. A Hugging Face Space recipe is kept beside it (see [Hugging Face Space](#hugging-face-space)); both build the same image.
 
 | Path | Purpose |
@@ -12,20 +14,28 @@ This page explains how the image is built, how the container is configured, how 
 | `deploy/hf-space/launcher/` | A small Go program (standard library only, with tests) that starts, restarts and stops the three services, guards the model budget and fronts the gateway. |
 | `deploy/hf-space/push.py` | Lays out the build context from the working tree. Modal reuses its `stage()` function. |
 | `deploy/modal-web/app.py` | The Modal app. |
-| `deploy/hf-space/DATA_LICENSE` | Licence and attribution for the Chennai roads extract and the SAM weights. |
+| `deploy/hf-space/DATA_LICENSE` | Licence and attribution for the road extracts and the SAM weights. |
 
 ## How the image is built
 
-`modal deploy deploy/modal-web/app.py` stages the build context into a temporary folder (the engine, gateway and perception sources as they are in the working tree, the launcher, the Dockerfile cut at the Space-only line, `DATA_LICENSE`, `BUILD_INFO` and the roads extract) and has Modal build it with `Image.from_dockerfile`. Modal caches each step, so a change to one service rebuilds only the steps after it. The stages:
+`modal deploy deploy/modal-web/app.py` stages the build context into a temporary folder (the engine, gateway and perception sources as they are in the checkout it runs from, the launcher, the Dockerfile cut at the Space-only line, `DATA_LICENSE`, `BUILD_INFO` and the six road extracts) and has Modal build it with `Image.from_dockerfile`. Modal caches each step, so a change to one service rebuilds only the steps after it. The stages:
 
 1. **Engine.** `rust:1.97-bookworm` runs `cargo build --release --locked` on `engine/`.
-2. **Gateway and launcher.** `golang:1.26-bookworm` runs `go test ./...` and builds a static binary for each. A failing test fails the build. One gateway test is skipped: `TestModelEstimateIsLabelledAndCountsForLess` pins a photo capture time of 27 October 2026, 10:00 UTC, which the 24 hour freshness rule refuses from 28 October, 10:00 UTC onwards, so it fails on every later date. It should be fixed in `gateway/` and the skip removed.
+2. **Gateway, key tool and launcher.** `golang:1.26-bookworm` runs `go test ./...` and builds static binaries of the gateway, `neermattam-keys` and the launcher. A failing test fails the build. One gateway test is skipped: `TestEmbeddedFactsMatchTheDocs` compares the landing page's numbers with `eval/out/x2.json`, a recorded run that git ignores, so it cannot pass in a clean build context.
 3. **Weights.** `facebook/sam2.1-hiera-small` (Apache-2.0, not gated) is downloaded at one pinned revision, keeping only the four files `transformers` reads. Nothing is downloaded at run time; `HF_HUB_OFFLINE=1` makes sure of it.
-4. **Runtime.** `python:3.12-slim-bookworm`. Perception's dependencies are installed from its `uv.lock` at the locked versions, except that `torch` and `torchvision` come from the PyTorch CPU index at the same versions, without the NVIDIA libraries the PyPI builds pull in. The build ends by importing perception and checking that torch has no CUDA. The binaries, the weights and the roads extract are copied in.
+4. **Runtime.** `python:3.12-slim-bookworm`. Perception's dependencies are installed from its `uv.lock` at the locked versions, except that `torch` and `torchvision` come from the PyTorch CPU index at the same versions, without the NVIDIA libraries the PyPI builds pull in. The build ends by importing perception and checking that torch has no CUDA. The binaries, the weights and the road extracts are copied in.
 
-`BUILD_INFO` in the image records the source commit and whether uncommitted changes were included.
+`BUILD_INFO` in the image records the full source commit, its subject, whether the services or the deploy files had uncommitted changes, and when the context was staged.
 
-The roads extract, `chennai-roads.osm.pbf` (ODbL), is not in the GitHub repository. The staging step takes it from `data/osm/` or `~/neermattam-data/osm/`. The About page credits OpenStreetMap contributors under the ODbL, and `DATA_LICENSE` is in the image at `/opt/neermattam/DATA_LICENSE`.
+**Always deploy from a clean checkout.** Other work may be in progress in the main working tree, and whatever is there is what gets built. Make a worktree of the commit, copy in any deploy-file changes, deploy from it and remove it:
+
+```sh
+git -C /Users/vignesh/neermattam worktree add /Users/vignesh/nm-deploy <commit>
+cd /Users/vignesh/nm-deploy && modal deploy deploy/modal-web/app.py
+git -C /Users/vignesh/neermattam worktree remove /Users/vignesh/nm-deploy
+```
+
+The six road extracts, `<city>-roads.osm.pbf` for Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata and Delhi (ODbL, about 53 MB together), are not in the GitHub repository. The staging step takes them from the first of `data/osm/` and `~/neermattam-data/osm/` that holds all six. The About page credits OpenStreetMap contributors under the ODbL, and `DATA_LICENSE` is in the image at `/opt/neermattam/DATA_LICENSE`.
 
 ## What runs in the container
 
@@ -35,13 +45,22 @@ The roads extract, `chennai-roads.osm.pbf` (ODbL), is not in the GitHub reposito
 |---|---|---|
 | Front proxy | `0.0.0.0:8000` | Inside the launcher. Modal's `@modal.web_server(8000)` routes the public URL here. It rewrites `X-Forwarded-For` (see below) and passes everything else, including server-sent events, straight through. |
 | Gateway | `127.0.0.1:7860` | Answers `/` as soon as it starts, without waiting for perception to load SAM. |
-| Engine | `127.0.0.1:8302` | Loads the Chennai road graph at start. Snapshot in `/tmp`, which does not survive a restart. |
+| Engine | `127.0.0.1:8302` | Loads all six cities' road graphs at start (`ENGINE_OSM_DIR`); ready once Chennai's is loaded. Cell snapshot and history on the Volume. |
 | Perception | `127.0.0.1:8301` | SAM 2.1 small on the CPU, loaded and warmed up before it serves. Muse Spark Open on Baseten for the scene reading and the mask checks. |
 | Budget guard | `127.0.0.1:8300` | Inside the launcher. The gateway's `PERCEPTION_URL` points here; it forwards to perception and counts model calls. |
 
-The launcher restarts any process that exits (after 1 second, doubling up to 30 seconds), tags each output line with the process name, logs `service answering` and `service ready` with the milliseconds since the container started (the cold start), and logs each process's resident memory and the container's total every 2 minutes. On SIGTERM it stops the gateway first so it drains open requests, then the others, and kills anything still running after 25 seconds. The engine and gateway never see `BASETEN_API_KEY` or `MODAL_SAM_TOKEN`.
+The launcher restarts any process that exits (after 1 second, doubling up to 30 seconds), tags each output line with the process name, logs `service answering` and `service ready` with the milliseconds since the container started (the cold start), and logs each process's resident memory and the container's total every 2 minutes. On SIGTERM it stops the gateway first so it drains open requests, then the others, and kills anything still running after 25 seconds. Each service sees only the secrets it uses: perception the model keys, the gateway the control-room key and the Web Push private key, the engine none.
 
 A redeploy starts the new container while the old one keeps serving, so a deploy does not take the site down.
+
+### Durable state
+
+The Modal Volume `neermattam-web-data` is mounted at `/data`:
+
+- `GATEWAY_DATA_DIR=/data/gateway`: which cells hold real reports (`provenance.json`), street alerts, API keys and their daily usage;
+- `ENGINE_SNAPSHOT_PATH=/data/engine/cells.json`: the engine's cell snapshot and, beside it, the depth history.
+
+The services write these files with atomic renames; `app.py` commits the Volume every 30 seconds and once more after the services have stopped. Checked on 29 October 2026: after a redeploy the new container served the same demo API key with its usage count, and the cells of the real report made before it were still labelled `mixed` (real next to simulated). During a redeploy both containers run for a short while and the new one reads the Volume when it starts, so anything the old one writes in its last seconds can be lost.
 
 ## Configuration
 
@@ -52,7 +71,23 @@ python3 -c 'import json; print(json.dumps({k: v for k, v in (l.split("=", 1) for
 modal secret create neermattam-web --from-json /tmp/s.json --force && rm /tmp/s.json
 ```
 
-(`modal secret create --from-dotenv` needs `python-dotenv` in the CLI's environment; the JSON route avoids that.) It holds `BASETEN_API_KEY`, `BASETEN_BASE_URL` and `BASETEN_MODEL`, and also `MODAL_SAM_URL` and `MODAL_SAM_TOKEN`. Those last two reach perception's environment untouched, ready for the adapter that will call the GPU SAM app `neermattam-sam`; perception does not use them yet.
+Leave `DEMO_API_KEY` out of that JSON: it is a client credential, not a server setting. (`modal secret create --from-dotenv` needs `python-dotenv` in the CLI's environment; the JSON route avoids that.) The secret holds:
+
+- `BASETEN_API_KEY`, `BASETEN_BASE_URL`, `BASETEN_MODEL`: Muse Spark Open;
+- `CONTROL_ROOM_KEY`: unlocks `/control` (48 random hex characters, made with `openssl rand -hex 24`); `/control/demo` stays public;
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`: the Web Push key pair for street alerts (P-256, base64url), generated once and kept in `.env` so subscriptions stay valid across redeploys;
+- `MODAL_SAM_URL`, `MODAL_SAM_TOKEN`: for perception's `sam2.1-modal` masks. The image sets `NEERMATTAM_MASKS=sam2.1-local`, so they are not used now.
+
+### The demo API key
+
+One developer key, "Hackathon demo", 120 requests a minute, was made inside the running container so it lands in the Volume, and its secret was written straight into `.env` as `DEMO_API_KEY` without being printed:
+
+```sh
+modal container exec <container-id> -- sh -c 'GATEWAY_DATA_DIR=/data/gateway /opt/neermattam/bin/neermattam-keys create -name "Hackathon demo" -rate 120'
+modal container exec <container-id> -- sh -c 'GATEWAY_DATA_DIR=/data/gateway /opt/neermattam/bin/neermattam-keys list'
+```
+
+The key is printed once by `create`; capture it into `.env` rather than onto the screen. `list`, `usage`, `disable`, `enable` and `delete` work the same way, and the gateway picks up a change within 2 seconds.
 
 Settings read by `app.py` when you run `modal deploy` (export them first to change them):
 
@@ -62,13 +97,13 @@ Settings read by `app.py` when you run `modal deploy` (export them first to chan
 | `NEERMATTAM_WEB_MEMORY_MB`, `NEERMATTAM_WEB_MEMORY_LIMIT_MB` | `4096`, `6144` | Memory request and hard limit |
 | `NEERMATTAM_WEB_PROXY_HOPS` | `1` | Trusted `X-Forwarded-For` entries, counted from the right |
 | `NEERMATTAM_WEB_DAILY_CAP` | `150` | Perception calls per day across all visitors |
-| `NEERMATTAM_WEB_PUBLIC_URL` | empty | Used in WhatsApp replies, which are not configured here |
+| `NEERMATTAM_WEB_PUBLIC_URL` | the Modal URL above | `PUBLIC_URL`: Open Graph tags, the API terms link, the VAPID contact |
 
-Defaults baked into the image (from the shared part of the Dockerfile): `DEMO=1` (the labelled simulated Michaung scenario keeps the map alive; real reports are fused next to it and outlined), `TRUST_PROXY=1`, `REPORT_RATE_PER_MIN=2`, `REPORT_BURST=3`, `MAX_INFLIGHT_REPORTS=2`, `PERCEPTION_TIMEOUT=230s`, `NEERMATTAM_SCENE=muse-spark-open`, `NEERMATTAM_MASKS=sam2.1-local`, `NEERMATTAM_SAM_SIZE=small`, and `OMP_NUM_THREADS=2` (the sandbox reports 18 CPUs, so torch would otherwise start far more threads than the 2 cores it is given).
+Defaults baked into the image (from the shared part of the Dockerfile): `DEMO=1` (the labelled simulated Michaung scenario keeps the map alive; real reports are fused next to it and outlined), `TRUST_PROXY=1`, `REPORT_RATE_PER_MIN=2`, `REPORT_BURST=3`, `MAX_INFLIGHT_REPORTS=2`, `PERCEPTION_TIMEOUT=240s`, `ENGINE_OSM_DIR=/opt/neermattam/data/osm`, `NEERMATTAM_SCENE=muse-spark-open`, `NEERMATTAM_MASKS=sam2.1-local`, `NEERMATTAM_SAM_SIZE=small`, and `OMP_NUM_THREADS=2` (the sandbox reports 18 CPUs, so torch would otherwise start far more threads than the 2 cores it is given).
 
-### Why the perception timeout is 230 seconds
+### The perception timeout
 
-The gateway gives perception 230 seconds, up from the 180 second default. It is not 240 because the gateway also sets a fixed write deadline of 4 minutes from the start of every non-streaming request (`gateway/internal/app/middleware.go`). A report that took the full 240 seconds in perception would reach that deadline before its reply was written, and the visitor would see a dropped connection instead of an error message. That leaves 10 seconds for the upload, verification and fusion; a large photo sent over a slow connection can still run into the deadline. Going to 240 needs a one-line change in the gateway to make that deadline longer than the perception timeout.
+The gateway gives perception 240 seconds. Its reply deadline (`REPLY_DEADLINE`, 4 minutes 30 seconds from the start of the request) leaves 30 seconds after that for the upload, verification and fusion, so a report that runs out of time gets an error message rather than a dropped connection.
 
 Modal does not cut long requests on this endpoint: a live map stream held open for 260 seconds stayed connected.
 
@@ -93,7 +128,7 @@ modal dict clear neermattam-web-state
 
 The gateway rate-limits by the first address in `X-Forwarded-For` when `TRUST_PROXY=1`, so on its own a visitor could send a made-up header and get a fresh allowance each time. The front proxy closes that hole. Each proxy appends the address that connected to it to `X-Forwarded-For`, so only the entries added by the hosting platform can be trusted. The front proxy takes the entry `TRUSTED_PROXY_HOPS` places from the right (one, for Modal), ignores everything a visitor put to the left of it, and sends the gateway a header holding only that address.
 
-On Modal, a plain request arrives with `X-Forwarded-For` holding just the visitor's public address, from a Modal-internal connection, and `X-Real-IP` empty, so one hop is right. This was checked on the live app: six report posts, each with a different forged `X-Forwarded-For`, got 400, 400, 400 (the burst of 3, refused only for having no file), then 429, 429, 429; a forged two-entry chain was refused with 429 too.
+Rechecked on 29 October 2026 after the six-city deploy, with the same result. On Modal, a plain request arrives with `X-Forwarded-For` holding just the visitor's public address, from a Modal-internal connection, and `X-Real-IP` empty, so one hop is right. This was checked on the live app: six report posts, each with a different forged `X-Forwarded-For`, got 400, 400, 400 (the burst of 3, refused only for having no file), then 429, 429, 429; a forged two-entry chain was refused with 429 too.
 
 ### Cancelling a report
 
@@ -101,9 +136,9 @@ When a visitor leaves, or the gateway's perception timeout expires, the gateway 
 
 ### Other limits
 
-- The engine snapshot is in `/tmp`, so real reports do not survive a restart. Restoring it would be wrong in demo mode anyway: the gateway labels every cell present at start as simulated.
 - The site is served from Modal's `us-east` region.
-- Modal bills a container for the larger of what it asks for and what it uses. At the rates Modal published on 28 October 2026 ($0.0473 per core hour and $0.008 per GiB hour), 2 cores and 4 GiB held all day come to 24 x (2 x 0.0473 + 4 x 0.008) = $3.04 a day, before Baseten. One core would bring it to about $1.90 a day, with slower SAM passes. Baseten is billed separately; its cost per report is in each response's `cost_usd`, and the daily cap bounds it.
+- Modal bills a container for the larger of what it asks for and what it uses. At the rates Modal published on 28 October 2026 ($0.0473 per core hour and $0.008 per GiB hour), 2 cores and 4 GiB held all day come to 24 x (2 x 0.0473 + 4 x 0.008) = $3.04 a day, before Baseten. One core would bring it to about $1.90 a day, with slower SAM passes. The Volume holds a few MB, which costs nothing worth counting at $0.09 per GiB a month.
+- Memory, measured in the container on 29 October 2026 with all six graphs loaded: 2.2 GiB idle (engine 0.5 GiB, perception 1.6 GiB, gateway 0.1 GiB), 2.6 GiB after a photo report (perception 2.0 GiB). The 4 GiB request leaves room for the second report that may run at the same time; the hard limit is 6 GiB. Baseten is billed separately; its cost per report is in each response's `cost_usd`, and the daily cap bounds it.
 
 ## Updating
 
@@ -124,7 +159,10 @@ Checking a deployment:
 
 ```sh
 U=https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run
-for p in / /route /report /about /api/cells /readyz; do curl -s -o /dev/null -w "$p %{http_code}\n" $U$p; done
+for p in / /map /report /route /about /alerts /control /control/demo /developers /readyz; do
+  curl -s -o /dev/null -w "$p %{http_code}\n" "$U$p?lang=ta"; done
+curl -s "$U/api/route?from=18.9398,72.8355&to=19.0544,72.8406&vehicle=car" | head -c 300   # one city of six
+curl -s -H "Authorization: Bearer $DEMO_API_KEY" "$U/api/v1/route?from=13.0827,80.2707&to=12.9791,80.2209&vehicle=car" | head -c 300
 curl -s -F image=@photo.jpg -F lat=12.9791 -F lon=80.2209 $U/api/report
 ```
 

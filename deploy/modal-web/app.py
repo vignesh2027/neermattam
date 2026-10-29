@@ -40,12 +40,23 @@ MEMORY_LIMIT_MB = int(os.environ.get("NEERMATTAM_WEB_MEMORY_LIMIT_MB", "6144"))
 # Modal's proxy. Checked against real requests; see docs/DEPLOY.md.
 PROXY_HOPS = os.environ.get("NEERMATTAM_WEB_PROXY_HOPS", "1")
 DAILY_CAP = os.environ.get("NEERMATTAM_WEB_DAILY_CAP", "150")
-PUBLIC_URL = os.environ.get("NEERMATTAM_WEB_PUBLIC_URL", "")
+# The site's own address: Open Graph tags, VAPID contact and WhatsApp replies use it.
+PUBLIC_URL = os.environ.get(
+    "NEERMATTAM_WEB_PUBLIC_URL",
+    "https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run",
+)
 
 FRONT_PORT = 8000
 BUDGET_FILE = "/tmp/neermattam/budget.json"
 BUDGET_KEY = "perception_budget"
 LAUNCHER = "/opt/neermattam/bin/neermattam-launcher"
+# Durable state: the gateway's data directory (real-report provenance, alerts,
+# API keys and their usage, the VAPID pair when not given) and the engine's
+# cell snapshot and history.
+DATA = "/data"
+GATEWAY_DATA_DIR = f"{DATA}/gateway"
+ENGINE_SNAPSHOT_PATH = f"{DATA}/engine/cells.json"
+COMMIT_EVERY_S = 30
 
 
 def stage_context() -> Path:
@@ -54,9 +65,9 @@ def stage_context() -> Path:
     assert spec is not None and spec.loader is not None
     push = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(push)
-    osm = next((p for p in push.DEFAULT_OSM if p.is_file()), None)
+    osm = push.find_osm_dir()
     if osm is None:
-        raise SystemExit("the Chennai roads extract was not found (see docs/DEPLOY.md)")
+        raise SystemExit("no folder holds all six city road extracts (see docs/DEPLOY.md)")
     ctx = Path(tempfile.mkdtemp(prefix="neermattam-modal-"))
     push.stage(ctx, osm)
     full = (ctx / "Dockerfile").read_text()
@@ -75,6 +86,7 @@ else:
 
 app = modal.App(APP_NAME)
 state = modal.Dict.from_name("neermattam-web-state", create_if_missing=True)
+volume = modal.Volume.from_name("neermattam-web-data", create_if_missing=True)
 
 
 def _read_budget() -> dict | None:
@@ -92,6 +104,7 @@ def _read_budget() -> dict | None:
     max_containers=1,
     timeout=24 * 3600,
     secrets=[modal.Secret.from_name("neermattam-web")],
+    volumes={DATA: volume},
 )
 @modal.concurrent(max_inputs=400)
 class Web:
@@ -113,7 +126,11 @@ class Web:
             "BUDGET_FILE": BUDGET_FILE,
             "PERCEPTION_DAILY_CAP": os.environ.get("PERCEPTION_DAILY_CAP_OVERRIDE", DAILY_CAP),
             "MEMORY_LOG_INTERVAL": "2m",
+            "GATEWAY_DATA_DIR": GATEWAY_DATA_DIR,
+            "ENGINE_SNAPSHOT_PATH": ENGINE_SNAPSHOT_PATH,
         }
+        Path(GATEWAY_DATA_DIR).mkdir(parents=True, exist_ok=True)
+        Path(ENGINE_SNAPSHOT_PATH).parent.mkdir(parents=True, exist_ok=True)
         if PUBLIC_URL:
             env["PUBLIC_URL"] = PUBLIC_URL
         self.proc = subprocess.Popen([LAUNCHER], env=env)
@@ -133,11 +150,22 @@ class Web:
         self.synced = cur
 
     def _sync_budget(self) -> None:
+        last_commit = time.monotonic()
         while not self.stopping.wait(5):
             try:
                 self._push_budget()
             except Exception as exc:  # keep syncing; a missed write is retried
                 print(f"[modal] budget sync failed: {type(exc).__name__}", flush=True)
+            if time.monotonic() - last_commit >= COMMIT_EVERY_S:
+                last_commit = time.monotonic()
+                self._commit()
+
+    def _commit(self) -> None:
+        """Persist the data directory; the services write it with atomic renames."""
+        try:
+            volume.commit()
+        except Exception as exc:
+            print(f"[modal] volume commit failed: {type(exc).__name__}", flush=True)
 
     @modal.web_server(FRONT_PORT, startup_timeout=60)
     def serve(self) -> None:
@@ -155,3 +183,5 @@ class Web:
             self._push_budget()
         except Exception as exc:
             print(f"[modal] final budget sync failed: {type(exc).__name__}", flush=True)
+        # The services wrote their final state on SIGTERM; keep it.
+        self._commit()

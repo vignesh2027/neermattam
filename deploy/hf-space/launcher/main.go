@@ -76,7 +76,11 @@ func main() {
 	if frontAddr != "" {
 		gatewayBind = "127.0.0.1:" + port
 	}
-	secrets := []string{"BASETEN_API_KEY", "MODEL_API_KEY", "HF_TOKEN", "MODAL_SAM_TOKEN", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"}
+	// Each service sees only the secrets it uses: perception the model keys,
+	// the gateway the control-room key and the Web Push private key.
+	modelSecrets := []string{"BASETEN_API_KEY", "MODEL_API_KEY", "HF_TOKEN", "MODAL_SAM_TOKEN", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"}
+	gatewaySecrets := []string{"CONTROL_ROOM_KEY", "VAPID_PRIVATE_KEY"}
+	all := append(append([]string{}, modelSecrets...), gatewaySecrets...)
 	bin := env("NEERMATTAM_BIN", "/opt/neermattam/bin")
 
 	percHost, percPort, _ := strings.Cut(percAddr, ":")
@@ -86,10 +90,10 @@ func main() {
 			Path: bin + "/neermattam-engine",
 			Env: map[string]string{
 				"ENGINE_BIND":          engineAddr,
-				"ENGINE_OSM_PATH":      env("ENGINE_OSM_PATH", "/opt/neermattam/data/osm/chennai-roads.osm.pbf"),
+				"ENGINE_OSM_DIR":       env("ENGINE_OSM_DIR", "/opt/neermattam/data/osm"),
 				"ENGINE_SNAPSHOT_PATH": env("ENGINE_SNAPSHOT_PATH", "/tmp/neermattam/engine/cells.json"),
 			},
-			Drop:   secrets,
+			Drop:   all,
 			Health: "http://" + engineAddr + "/healthz",
 			Ready:  "http://" + engineAddr + "/readyz",
 		},
@@ -100,7 +104,7 @@ func main() {
 				"PERCEPTION_HOST": percHost,
 				"PERCEPTION_PORT": percPort,
 			},
-			Drop:   []string{"HF_TOKEN"},
+			Drop:   append([]string{"HF_TOKEN", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"}, gatewaySecrets...),
 			Health: "http://" + percAddr + "/healthz",
 			Ready:  "http://" + percAddr + "/readyz",
 		},
@@ -112,7 +116,7 @@ func main() {
 				"ENGINE_URL":     "http://" + engineAddr,
 				"PERCEPTION_URL": "http://" + guardAddr,
 			},
-			Drop:   secrets,
+			Drop:   modelSecrets,
 			Health: "http://127.0.0.1:" + port + "/healthz",
 			Ready:  "http://127.0.0.1:" + port + "/readyz",
 		},
