@@ -129,8 +129,44 @@ A cell's depth history: `history` (its latest direct readings, oldest first, eac
 200 once the primary city's road graph (`ENGINE_PRIMARY_CITY`, default chennai) is loaded, with `status` `ready`, or `degraded` when another city's graph is loading or has failed (named in `reason`). 503 with a reason while the primary graph is loading or has failed. The body lists every city's graph status under `cities`.
 
 ## 3. Gateway (Go, port 8080, the only public service)
-- `GET /`: the live map page.
-- `GET /report`: the report page.
-- `POST /api/report`: multipart with image, video or audio, plus `lat` and `lon`. It calls perception, verifies the report, then posts to the engine. Returns the measurement and the cell update.
-- `GET /api/cells`, `GET /api/route`, `GET /api/stream`: proxies to the engine with caching and rate limits.
-- `POST /webhooks/whatsapp`: WhatsApp Cloud API webhook (signature checked with `X-Hub-Signature-256`), plus `GET` for the verify handshake.
+
+Every page takes `?lang=` (one of `en`, `ta`, `hi`, `te`, `kn`, `ml`, `bn`, `mr`, remembered in the `nm_lang` cookie) and, where it shows a city, `?city=` (an engine city id, remembered in the `nm_city` cookie; default `chennai`). Every JSON error is `{"error": "...", "code": "..."}` with `code` stable and `error` a plain sentence. Public endpoints are rate limited per client address and answer 429 with `Retry-After`. Everything about water is advisory.
+
+### Pages (HTML, rendered on the server)
+- `GET /`: landing page with a live preview of the selected city.
+- `GET /map?city=&at=lat,lon`: the live map. With `at` and no `city`, the city holding the point is chosen.
+- `GET /report?city=&at=`, `POST /report`: report water. The point must lie in the selected city (or, with no city sent, in any covered city).
+- `GET /route?city=&from=&to=&vehicle=`, `GET /route/plan` (JSON: `summary_html` and `route`): water-aware routes inside one city.
+- `GET /alerts?city=`: "Watch my street": pick a point or the last planned route and a vehicle, then turn on notifications.
+- `GET /control?city=&cell=`: the control room. Needs the `nm_ctl` cookie; without it, `GET /control` shows the key entry page. `POST /control/login` (form field `key`) sets the cookie, `POST /control/logout` clears it. When `CONTROL_ROOM_KEY` is unset the keyed control room is off and only the demo exists.
+- `GET /control/demo?cell=`: the public read-only control room over the simulated Chennai scenario, labelled as such. Only with `DEMO=1`.
+- `GET /control/panel?city=&cell=` (and `/control/demo/panel?cell=`): JSON `{"html": "..."}` with the live parts of the control room re-rendered, for the page's refresh glue. Same access rules as the page.
+- `GET /control/export?city=&format=geojson|csv` (and `/control/demo/export?format=`): the engine's `/v1/export` passed through as an attachment, with `X-Neermattam-Truncated` and `X-Neermattam-Total-Cells`.
+- `GET /developers`: the developer API documentation and terms.
+- `GET /about`.
+- `GET /sw.js`: the service worker that shows push notifications (served from the root so its scope covers the site).
+
+### Public JSON API (rate limited per client address)
+- `GET /api/cities`: `{"cities": [{"id", "name", "bbox", "centre", "cells", "routing": "ready|loading|failed", "simulated_scenario"}], "default": "chennai"}`.
+- `GET /api/cells?city=<id>` or `?bbox=minLon,minLat,maxLon,maxLat` (default: the default city): the engine's cells for the city, compacted, each with `properties.city` and `properties.origin` (`reported`, `simulated` or `mixed`), plus top-level `city` and `simulated_scenario`. 2-second cache, `ETag`, 304.
+- `GET /api/route?from=lat,lon&to=lat,lon&vehicle=pedestrian|walking|two_wheeler|auto|car|bus`: the engine's route Feature with its `baseline`. Both ends must lie in one covered city. Engine 400 and 503 answers are passed on with a plain message and `code` `outside_area`, `different_cities` or `routing_unavailable`.
+- `GET /api/stream?city=<id>`: server-sent events: `hello`, `cell` (one compacted cell on that city's map), `report` (a ticker item with `city`), `resync`, and a ping comment every 20 seconds. Without `city`, every city.
+- `POST /api/report`: multipart with `image`, `video` or `audio`, `lat`, `lon`, optional `city`, `hint_reference`, `hint_diameter_cm`. Runs perception, verification and the engine; returns the measurement, the verification and the cell update.
+- `GET /api/overlay/{measurement_id}`: the report overlay JPEG, kept for an hour.
+- `GET /api/alerts/key`: `{"vapid_public_key": "<base64url P-256 point>"}`, or 404 when push alerts are off.
+- `POST /api/alerts`: JSON `{"subscription": <PushSubscription.toJSON()>, "city", "vehicle", "lang", "point": {"lat","lon"}}` or with `"route": [[lon,lat], ...]` (at most 2,000 points) in place of `point`. Returns 201 `{"id", "token", "status": "over|under|unknown", "expires_at"}`. The `token` is needed to read or delete it. 409 when the endpoint already watches 10 places; 503 when the gateway holds its maximum.
+- `GET /api/alerts/{id}` and `DELETE /api/alerts/{id}`, with header `X-Alert-Token`: read its status or stop it.
+
+### Developer API (API key)
+`Authorization: Bearer <key>` (or `X-API-Key`). Keys are created with `go run ./cmd/neermattam-keys create`; only their SHA-256 is stored. Every answer carries `X-RateLimit-Limit` and `X-RateLimit-Remaining` (requests per minute for that key). 401 `missing_key` or `invalid_key`, 403 `key_disabled`, 429 `rate_limited`.
+- `GET /api/v1/route?from=lat,lon&to=lat,lon&vehicle=`: as `/api/route`, plus top-level `advisory: true` and `terms`. Counted as one route for billing.
+- `GET /api/v1/cells?city=<id>` (or `bbox`): as `/api/cells`, plus `advisory` and `terms`; `ETag` and 304.
+- `GET /api/v1/usage`: this key's own counts: `{"key": "<prefix>", "name", "rate_per_min", "total": {"routes", "cells"}, "days": [{"date", "routes", "cells"}]}` (last 90 UTC days).
+
+### WhatsApp
+- `GET /webhooks/whatsapp`: Meta's verify handshake. `POST /webhooks/whatsapp`: signed with `X-Hub-Signature-256` (HMAC-SHA256 of the raw body with the app secret). A photo, video or voice note plus a location is a report. The text `watch` (optionally with a vehicle, such as `watch car`) followed by a location watches that point, with the same rules as push alerts; `stop` ends every watch for the number. Only when the three WhatsApp variables are set.
+
+### Operations
+- `GET /healthz`: 200 while the process runs.
+- `GET /readyz`: 200 with `status` `ready`, or `degraded` when the engine is degraded (some city's routing is loading or failed, named in `reason`); 503 when the engine or perception is not ready.
+- `GET /metrics`: Prometheus text format.

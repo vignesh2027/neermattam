@@ -18,13 +18,15 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import math
 import os
 import time
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,7 @@ from PIL import Image
 from .adapters import ImageQuality, ModelError, SceneObject, SceneReading
 from .media import ImageInput
 from .references import RefKind, vehicles
+from .voice import depth_from_words, normalise_languages
 
 MODEL_LABEL = "muse-spark-open"
 DEFAULT_MODEL = "meta-models/muse-spark-open"
@@ -191,6 +194,7 @@ class JsonReply:
     latency_ms: int
     reasoning: str
     repaired: bool = False
+    cached: bool = False
 
 
 # --------------------------------------------------------------------------- prompts
@@ -211,6 +215,8 @@ Return one JSON object, nothing else:
       "box": [..] tight box around the visible part above the water of THIS object only (for a wheel: the tyre and rim above the water, not the bodywork, not neighbouring objects),
       "point": [..] a point inside the box on the object itself (for a wheel: on the dark tyre rubber),
       "rim_point": [..] for a wheel, a point on the metal rim or hub, else null,
+      "tyre_points": for a wheel, 3 or 4 points on the black tyre rubber above the water, spread around the visible arc (for example left, top and right), else [],
+      "exclude_points": for a wheel, 1 to 3 points just next to the tyre that are not tyre: the hub, the exhaust, the mudguard, a wall or another vehicle touching it, else [],
       "waterline": [[x, y], [x, y]] where the water surface meets the object's left and right edges, or [] if unsure,
       "visible_fraction": share of the object's full height that is above water, 0 to 1,
       "vehicle": exact model if the bodywork shows it, one of {", ".join(sorted(vehicles()))}, else "unknown",
@@ -225,23 +231,41 @@ Return one JSON object, nothing else:
 Boxes must be tight and must not include neighbouring objects. Omit what you cannot see; never invent hidden objects. If no floodwater is visible, return water_visible false with empty references."""
 
 
-def verify_prompt(kind_text: str) -> str:
-    return f"""This is a crop of a flood photo. A segmentation model was asked for the {kind_text}. Its proposed outline is drawn in bright magenta, and the box it was given is drawn in yellow. Judge strictly: the outline will be used to measure the water depth from the wheel's shape, so an outline that strays onto other parts gives a wrong depth.
+def verify_prompt(kind_text: str, panels: int = 1) -> str:
+    """The check of proposed outlines for a wheel, shown as one panel (A) or two (A and B)."""
+    if panels == 2:
+        intro = (
+            f"The two images above, A (first) and B (second), show the same crop of a flood "
+            f"photo. In each, a segmentation model's proposed outline of the {kind_text} is drawn "
+            "in bright magenta, and the box it was given in yellow. Choose the outline that best "
+            "follows the tyre, then judge that one."
+        )
+        choice = '  "choice": "A" or "B" (the better outline), or "none" if neither is the tyre,\n'
+        grid = "over image A (B shows the same crop, so its grid is the same)"
+    else:
+        intro = (
+            f"This is a crop of a flood photo (panel A). A segmentation model's proposed outline "
+            f"of the {kind_text} is drawn in bright magenta, and the box it was given in yellow."
+        )
+        choice = '  "choice": "A", or "none" if the outline is not the tyre,\n'
+        grid = "over the crop"
+    return f"""{intro} Judge strictly: the outline will be used to measure the water depth from the wheel's shape, so an outline that strays onto other parts gives a wrong depth. A straight lower edge of an outline is where it meets the water; that is expected.
 
-Coordinates in this crop: integers on a 0-1000 grid over the crop, x from the left, y from the top. A box is [x_min, y_min, x_max, y_max].
+Coordinates: integers on a 0-1000 grid {grid}, x from the left, y from the top. A box is [x_min, y_min, x_max, y_max].
 
 Answer with one JSON object, nothing else:
 {{
-  "is_target": true only if the magenta outline is the {kind_text} itself: it follows the round outer edge of the tyre above the water, with the rim inside it. False if it takes in a mudguard, fork, suspension, bodywork, a leg, splash, a reflection or a neighbouring object, or if it covers only the rim,
-  "outline_quality": "good" only if the outline follows the tyre's outer edge closely everywhere above the water; "partial" if it is the right tyre but misses or adds a noticeable part; otherwise "wrong",
+{choice}  "is_target": true only if the chosen outline is the {kind_text} itself: it follows the round outer edge of the tyre above the water, with the rim inside it. False if it takes in a mudguard, fork, suspension, exhaust, bodywork, a leg, splash, a reflection or a neighbouring object, or if it covers only the rim or only part of the tyre,
+  "outline_quality": "good" only if the chosen outline follows the tyre's outer edge closely everywhere above the water; "partial" if it is the right tyre but misses or adds a noticeable part; otherwise "wrong",
   "view": "side" (the tyre's round or oval face is seen), "oblique", or "head_on" (the tyre is seen edge-on, as a narrow upright band),
   "standing": true if the vehicle stands upright on this wheel on the ground under the water (false if it is overturned, lying on its side or lifted),
   "tyre_edge_visible": the share of the tyre's outer edge that is visible above the water and not hidden, 0 to 1,
   "waterline_visible": true if you can see where the water surface cuts across this tyre,
-  "waterline": [[x, y], [x, y]] where the water surface meets the tyre's left and right edges in this crop, or [],
-  "corrected_box": if the outline is wrong or partial and the {kind_text} is visible in this crop, a tight box around the tyre's visible part above the water (tyre only, no mudguard or bodywork), else null,
-  "tyre_points": if the outline is wrong or partial, two points on the black rubber of this tyre above the water (for example its top and one side), else [],
-  "exclude_points": if the outline takes in something that is not the tyre (mudguard, fork, exhaust, bodywork, splash, reflection), up to two points on those parts, else [],
+  "waterline": [[x, y], [x, y]] where the water surface meets the tyre's left and right edges, or [],
+  "tyre_box": a tight box around this tyre's whole visible part above the water (tyre and rim only, no mudguard or bodywork), whatever the outline does, or null if the tyre is not visible,
+  "corrected_box": if the outline is not good and the {kind_text} is visible, the same box as tyre_box, else null,
+  "tyre_points": 3 or 4 points on the black tyre rubber above the water, spread around its visible arc (for example left, top-left, top-right, right),
+  "exclude_points": up to 3 points that are not tyre: the hub, and anything next to the tyre or wrongly inside the outline (mudguard, fork, exhaust, bodywork, wall, splash, reflection),
   "reason": one short sentence
 }}"""
 
@@ -261,14 +285,16 @@ Answer with one JSON object, nothing else:
 }"""
 
 
-TRANSCRIBE_PROMPT = """The audio clip in this message is a voice note from someone reporting street flooding in Chennai. Listen to it. It may mix Tamil and English.
+TRANSCRIBE_PROMPT = """The audio clip in this message is a voice note from someone in India reporting street flooding. Listen to it. It may be in Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Marathi, Gujarati, Punjabi, Odia, Urdu or English, and people often mix two of them (for example Tamil with English words).
 
 Return one JSON object, nothing else:
 {
-  "text": the transcript, in the words spoken (Tamil in Tamil script, English in Latin script),
-  "language": "ta", "en" or "ta+en",
-  "place_text": the place or street named, or "",
-  "depth_words": the words used for how deep the water is (for example "knee deep", "two feet"), or "",
+  "text": the transcript, in the words spoken, each language in its own script (English in Latin script),
+  "language": ISO 639-1 codes of the languages spoken, main one first, joined with "+" (codes: hi, ta, te, kn, ml, bn, mr, gu, pa, or, ur, en), for example "ta+en",
+  "place_spoken": the place or street named, as spoken, or "",
+  "place_text": the same place in its usual English spelling, as on a map (for example "Velachery Main Road"), or "",
+  "depth_words": the words used for how deep the water is, as spoken (for example "घुटने तक", "mutti alavu", "two feet"), or "",
+  "depth_words_en": those words in plain English (for example "knee deep", "two feet"), or "",
   "depth_cm": your estimate of the water depth in centimetres from those words, or null,
   "depth_low_cm": a low bound, or null,
   "depth_high_cm": a high bound, or null
@@ -374,6 +400,16 @@ def parse_open_scene(data: dict[str, Any], width: int, height: int) -> SceneRead
                 position=pos if pos in ("front", "rear") else None,
                 confidence=min(1.0, max(0.0, _num(r.get("confidence")) or 0.5)),
                 waterline_points=wl_px,
+                tyre_points=tuple(
+                    to_px(p, width, height)
+                    for p in (grid_point(q) for q in (r.get("tyre_points") or [])[:4])
+                    if p is not None
+                ),
+                exclude_points=tuple(
+                    to_px(p, width, height)
+                    for p in (grid_point(q) for q in (r.get("exclude_points") or [])[:3])
+                    if p is not None
+                ),
                 visible_fraction=None if vf is None else min(1.0, max(0.0, vf)),
                 depth_cm=_num(r.get("depth_cm")),
                 depth_reason=str(r.get("depth_reason") or "").strip()[:200] or None,
@@ -424,15 +460,22 @@ def parse_open_scene(data: dict[str, Any], width: int, height: int) -> SceneRead
 # --------------------------------------------------------------------------- adapter
 
 
-def jpeg_for_model(image: ImageInput, max_side: int) -> bytes:
-    """The image as sent to the model: the sanitised JPEG, shrunk if it is large."""
-    if max(image.width, image.height) <= max_side:
-        return image.jpeg
+# JPEG quality of images sent to the model. On the development network the
+# request time grew with the upload size (a 1280 px photo took 14 s at quality
+# 95, 552 KB, and 6.8 s at quality 60, 163 KB, for the same one-line answer),
+# so images are sent compressed; boxes are drawn by the model on a 0 to 1000
+# grid, which compression does not move.
+MODEL_JPEG_QUALITY = 75
+
+
+def jpeg_for_model(image: ImageInput, max_side: int, quality: int = MODEL_JPEG_QUALITY) -> bytes:
+    """The image as sent to the model: the sanitised photo, shrunk and compressed."""
     im = Image.fromarray(image.rgb)
-    s = max_side / max(image.width, image.height)
-    im = im.resize((max(1, round(image.width * s)), max(1, round(image.height * s))))
+    if max(image.width, image.height) > max_side:
+        s = max_side / max(image.width, image.height)
+        im = im.resize((max(1, round(image.width * s)), max(1, round(image.height * s))))
     buf = io.BytesIO()
-    im.save(buf, format="JPEG", quality=90)
+    im.save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
 
 
@@ -443,13 +486,19 @@ def data_url(data: bytes, media_type: str) -> str:
 @dataclass(frozen=True, slots=True)
 class TranscriptResult:
     text: str
-    language: str
-    place_text: str
+    language: str  # "+"-joined ISO 639-1 codes, main language first
+    place_text: str  # normalised, Latin script
     depth_words: str
     depth_cm: float | None
     depth_sigma_cm: float | None
     usage: Usage
     latency_ms: int
+    languages: tuple[str, ...] = ()
+    place_spoken: str = ""
+    depth_words_en: str = ""
+    depth_low_cm: float | None = None
+    depth_high_cm: float | None = None
+    depth_basis: str = ""
 
 
 def env_from_dotenv(names: Sequence[str], start: Path | None = None) -> dict[str, str]:
@@ -489,22 +538,30 @@ class MuseSparkOpenAdapter:
     base_url: str = DEFAULT_BASE_URL
     model: str = DEFAULT_MODEL
     transport: httpx.AsyncBaseTransport | None = None
-    timeout_s: float = 180.0
+    timeout_s: float = 120.0  # per attempt (read); connect is 15 s
+    total_timeout_s: float = 240.0  # all attempts of one call, with backoff
     max_retries: int = 3
     backoff_s: float = 2.0
     ipv4: bool = True
-    max_image_side: int = 1280
+    max_image_side: int = 1024
     scene_max_tokens: int = 8000
     verify_max_tokens: int = 4000
     # Reasoning effort per call kind (None: the model's default). The checks of a
     # proposed mask are narrow questions on a crop; "low" gave the same verdicts
     # as the default on the probe crops in about half the time.
-    scene_effort: str | None = None
+    # Baseten's Muse Spark Open accepts low, medium, high and xhigh (the
+    # default); it always reasons (https://docs.baseten.co/inference/model-apis/reasoning).
+    scene_effort: str | None = "low"
     verify_effort: str | None = "low"
     confirm_effort: str | None = None
     audio_attempts: int = 3
     name: str = "baseten-muse-spark-open"
     sleep: Callable[[float], Awaitable[None]] = field(default=asyncio.sleep, repr=False)
+    scene_cache_size: int = 64
+    # When set, scene readings are also kept on disk, so a photo read once is not
+    # read again (evaluation runs, service restarts).
+    scene_cache_dir: Path | None = None
+    _scene_cache: OrderedDict[str, JsonReply] = field(default_factory=OrderedDict, repr=False)
 
     @classmethod
     def from_env(cls, **kw: Any) -> MuseSparkOpenAdapter:
@@ -539,9 +596,15 @@ class MuseSparkOpenAdapter:
     async def ready(self) -> tuple[bool, str]:
         if not self.api_key:
             return False, "BASETEN_API_KEY is not set"
-        try:
+
+        async def get() -> httpx.Response:
             async with self._client() as c:
-                r = await c.get("/models")
+                return await c.get("/models")
+
+        try:
+            r = await asyncio.wait_for(get(), 10.0)  # a readiness probe must answer fast
+        except TimeoutError:
+            return False, "Baseten did not answer within 10 s"
         except httpx.HTTPError as exc:
             return False, f"Baseten unreachable: {type(exc).__name__}"
         if r.status_code in (200, 404, 405):  # reachable and authorised (404: no list route)
@@ -556,7 +619,28 @@ class MuseSparkOpenAdapter:
         what: str,
         effort: str | None = None,
     ) -> ChatReply:
-        """One Chat Completions call with retries on 429, 5xx and transport errors."""
+        """One Chat Completions call with retries, under a total time limit.
+
+        Each attempt has the client timeout; all attempts together, with their
+        backoff, must finish within ``total_timeout_s`` or the call fails with a
+        ModelError (never an unbounded wait).
+        """
+        try:
+            return await asyncio.wait_for(
+                self._chat(messages, max_tokens=max_tokens, what=what, effort=effort),
+                self.total_timeout_s,
+            )
+        except TimeoutError as exc:
+            raise ModelError(f"{what} took longer than {self.total_timeout_s:.0f} s") from exc
+
+    async def _chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_tokens: int,
+        what: str,
+        effort: str | None = None,
+    ) -> ChatReply:
         body: dict[str, Any] = {"model": self.model, "max_tokens": max_tokens, "messages": messages}
         if effort is not None:
             body["reasoning_effort"] = effort
@@ -648,14 +732,44 @@ class MuseSparkOpenAdapter:
     def _image_part(self, jpeg: bytes) -> dict[str, Any]:
         return {"type": "image_url", "image_url": {"url": data_url(jpeg, "image/jpeg")}}
 
+    def _scene_key(self, image: ImageInput) -> str:
+        h = hashlib.sha256()
+        for part in (image.jpeg, SCENE_PROMPT.encode(), self.model.encode()):
+            h.update(part)
+        h.update(f"{self.scene_effort}:{self.max_image_side}".encode())
+        return h.hexdigest()[:32]
+
     async def read_scene_json(self, image: ImageInput) -> JsonReply:
+        """The scene model's answer for this photo, from the cache when it was read before.
+
+        The key covers the photo's bytes, the prompt, the model and its settings,
+        so a changed prompt is never answered from an old reading. A cached
+        answer costs nothing and is marked ``cached``.
+        """
+        key = self._scene_key(image)
+        hit = self._scene_cache.get(key)
+        if hit is None and self.scene_cache_dir is not None:
+            f = self.scene_cache_dir / f"{key}.json"
+            if f.is_file():
+                hit = JsonReply(json.loads(f.read_text(encoding="utf-8")), Usage(), 0, "")
+        if hit is not None:
+            self._scene_cache[key] = hit
+            self._scene_cache.move_to_end(key)
+            return JsonReply(hit.data, Usage(), 0, hit.reasoning, hit.repaired, cached=True)
         jpeg = jpeg_for_model(image, self.max_image_side)
-        return await self.chat_json(
+        reply = await self.chat_json(
             [self._image_part(jpeg), {"type": "text", "text": SCENE_PROMPT}],
             max_tokens=self.scene_max_tokens,
             what="scene model",
             effort=self.scene_effort,
         )
+        self._scene_cache[key] = reply
+        while len(self._scene_cache) > self.scene_cache_size:
+            self._scene_cache.popitem(last=False)
+        if self.scene_cache_dir is not None:
+            self.scene_cache_dir.mkdir(parents=True, exist_ok=True)
+            (self.scene_cache_dir / f"{key}.json").write_text(json.dumps(reply.data), "utf-8")
+        return reply
 
     async def read_scene(self, image: ImageInput) -> SceneReading:
         reply = await self.read_scene_json(image)
@@ -663,14 +777,15 @@ class MuseSparkOpenAdapter:
             reading = parse_open_scene(reply.data, image.width, image.height)
         except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
             raise ModelError("scene model returned an unexpected shape") from exc
-        from dataclasses import replace
+        return replace(reading, cost_usd=reply.usage.cost_usd, cached=reply.cached)
 
-        return replace(reading, cost_usd=reply.usage.cost_usd)
-
-    async def ask_image(self, jpeg: bytes, prompt: str, *, what: str) -> JsonReply:
-        """One image plus one question, answered as JSON (the verifier's call)."""
+    async def ask_image(
+        self, jpeg: bytes | Sequence[bytes], prompt: str, *, what: str
+    ) -> JsonReply:
+        """One or more images plus one question, answered as JSON (the verifier's call)."""
+        images = [jpeg] if isinstance(jpeg, bytes) else list(jpeg)
         return await self.chat_json(
-            [self._image_part(jpeg), {"type": "text", "text": prompt}],
+            [*(self._image_part(j) for j in images), {"type": "text", "text": prompt}],
             max_tokens=self.verify_max_tokens,
             what=what,
             effort=self.verify_effort,
@@ -686,7 +801,12 @@ class MuseSparkOpenAdapter:
         )
 
     async def transcribe(self, audio: bytes, media_type: str) -> TranscriptResult:
-        """Transcript, place and depth words from a voice note (Tamil and English)."""
+        """Transcript, languages, place and depth words from a voice note.
+
+        Any of the major Indian languages, mixed or not (``voice.LANGUAGES``).
+        The depth comes from ``voice.depth_from_words``: a spoken number with
+        a unit, then the phrase table, then the model's own reading.
+        """
         part = {"type": "audio_url", "audio_url": {"url": data_url(audio, media_type)}}
         # On the probe the model sometimes answered as if no audio were attached
         # (an empty transcript, or prose saying so), more often when the audio
@@ -713,25 +833,31 @@ class MuseSparkOpenAdapter:
                 f"the audio model returned no transcript in {self.audio_attempts} attempts "
                 "(it answered as if it had not received the audio)"
             )
-        depth = _num(d.get("depth_cm"))
-        lo, hi = _num(d.get("depth_low_cm")), _num(d.get("depth_high_cm"))
-        sigma = None
-        if depth is not None and depth >= 0:
-            # Spoken depth is vague: at least 30 percent or 10 cm, and at least
-            # half the stated range.
-            sigma = max(10.0, 0.3 * depth)
-            if lo is not None and hi is not None and hi > lo:
-                sigma = max(sigma, (hi - lo) / 2.0)
-        else:
-            depth = None
-        lang = str(d.get("language") or "")
+        words = str(d.get("depth_words") or "").strip()
+        words_en = str(d.get("depth_words_en") or "").strip()
+        reading = depth_from_words(
+            words,
+            words_en,
+            _num(d.get("depth_cm")),
+            _num(d.get("depth_low_cm")),
+            _num(d.get("depth_high_cm")),
+        )
+        langs = normalise_languages(d.get("language"))
+        if not langs:
+            langs = ["en"] if str(d.get("text") or "").isascii() else []
         return TranscriptResult(
             text=str(d.get("text") or "").strip(),
-            language=lang if lang in ("ta", "en", "ta+en") else "ta+en",
-            place_text=str(d.get("place_text") or "").strip(),
-            depth_words=str(d.get("depth_words") or "").strip(),
-            depth_cm=None if depth is None else round(depth, 1),
-            depth_sigma_cm=None if sigma is None else round(sigma, 1),
+            language="+".join(langs) or "unknown",
+            place_text=str(d.get("place_text") or d.get("place_spoken") or "").strip(),
+            depth_words=words,
+            depth_cm=None if reading is None else reading.depth_cm,
+            depth_sigma_cm=None if reading is None else reading.sigma_cm,
+            languages=tuple(langs),
+            place_spoken=str(d.get("place_spoken") or "").strip(),
+            depth_words_en=words_en,
+            depth_low_cm=None if reading is None else round(reading.low_cm, 1),
+            depth_high_cm=None if reading is None else round(reading.high_cm, 1),
+            depth_basis="" if reading is None else reading.basis,
             usage=usage,
             latency_ms=latency,
         )

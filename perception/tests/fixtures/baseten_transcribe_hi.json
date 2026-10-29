@@ -1,0 +1,32 @@
+{
+ "id": "chatcmpl-819c0932f73a4ac5961888bc5db5b145",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "content": "{\"text\":\"वेलाचेरी Main Road पर घुटनों तक पानी भरा है, bike नहीं जा सकती\",\"language\":\"hi+en\",\"place_spoken\":\"वेलाचेरी Main Road\",\"place_text\":\"Velachery Main Road\",\"depth_words\":\"घुटनों तक\",\"depth_words_en\":\"knee deep\",\"depth_cm\":45,\"depth_low_cm\":40,\"depth_high_cm\":60}",
+    "role": "assistant",
+    "reasoning_content": "We need to parse audio clip? But we have text: \"वेलाचेरी मेन रोड पर घुटनों तक पानी भरा है, बाइक नहीं जा सकती\"\n\nWe need to return JSON object. Need to transcribe.\n\nOriginal text: वेलाचेरी मेन रोड पर घुटनों तक पानी भरा है, बाइक नहीं जा सकती\n\nLanguage: Hindi + English? \"वेलाचेरी मेन रोड पर घुटनों तक पानी भरा है, बाइक नहीं जा सकती\" Contains Hindi and English words \"Main Road\", \"bike\". So language hi+en? Or hi? Check codes: hi, ta, te, kn, ml, bn, mr, gu, pa, or, ur, en. So hi+en.\n\nplace_spoken: the place or street named, as spoken, or \"\". As spoken: \"वेलाचेरी मेन रोड\" ?\n\nplace_text: same place in "
+   },
+   "finish_reason": "stop"
+  }
+ ],
+ "created": 1793203512,
+ "model": "meta-models/muse-spark-open-1026",
+ "object": "chat.completion",
+ "usage": {
+  "prompt_tokens": 522,
+  "completion_tokens": 1964,
+  "total_tokens": 2486,
+  "prompt_tokens_details": {
+   "audio_tokens": 0,
+   "cached_tokens": 128
+  },
+  "completion_tokens_details": {
+   "accepted_prediction_tokens": 1457,
+   "audio_tokens": 0,
+   "reasoning_tokens": 1871,
+   "rejected_prediction_tokens": 2092
+  }
+ }
+}

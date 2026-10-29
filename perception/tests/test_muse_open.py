@@ -94,7 +94,7 @@ def test_scene_from_recorded_response() -> None:
     assert seen[0].headers["authorization"] == f"Bearer {KEY}"
     assert seen[0].url.path.endswith("/chat/completions")
     assert body["model"] == "meta-models/muse-spark-open"
-    assert "reasoning_effort" not in body  # the scene read uses the model's default
+    assert body["reasoning_effort"] == "low"
     parts = body["messages"][0]["content"]
     assert parts[0]["type"] == "image_url"
     assert parts[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
@@ -270,8 +270,11 @@ def test_transcribe_sends_audio_and_widens_sigma() -> None:
         == "data:audio/wav;base64," + base64.b64encode(b"RIFFfake").decode()
     )
     assert t.place_text == "Velachery main road" and t.language == "ta+en"
-    assert t.depth_cm == 45.0
-    assert t.depth_sigma_cm == 22.5  # half the stated range beats 30 percent (13.5)
+    # "mutti" (Tamil, knee) is in the phrase table: the table's knee range wins
+    # over the model's own 35 to 80 cm.
+    assert t.depth_cm == 45.0 and t.depth_sigma_cm == 13.5
+    assert (t.depth_low_cm, t.depth_high_cm) == (37.0, 53.0)
+    assert t.depth_basis.startswith("phrase table: knee")
 
 
 def test_transcribe_without_depth_words() -> None:
@@ -288,7 +291,8 @@ def test_transcribe_without_depth_words() -> None:
         ),
     )
     t = asyncio.run(adapter(lambda r: httpx.Response(200, json=rec)).transcribe(b"a", "audio/ogg"))
-    assert t.depth_cm is None and t.depth_sigma_cm is None and t.language == "ta+en"
+    assert t.depth_cm is None and t.depth_sigma_cm is None
+    assert t.language == "en"  # "xx" is not a supported code; the transcript is Latin script
 
 
 def test_transcribe_asks_again_when_the_audio_was_not_heard() -> None:
@@ -324,3 +328,18 @@ def test_transcribe_asks_again_when_the_audio_was_not_heard() -> None:
     with pytest.raises(ModelError, match="no transcript in 3 attempts"):
         asyncio.run(adapter(never).transcribe(b"a", "audio/wav"))
     assert len(calls) == 3
+
+
+def test_every_call_has_a_total_time_limit() -> None:
+    async def slow(req: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(5)
+        return httpx.Response(200, json=recorded("baseten_verify_response.json"))
+
+    a = MuseSparkOpenAdapter(
+        api_key=KEY,
+        base_url="https://inference.example/v1",
+        transport=httpx.MockTransport(slow),
+        total_timeout_s=0.2,
+    )
+    with pytest.raises(ModelError, match="took longer than"):
+        asyncio.run(a.ask_image(b"x", "check", what="verify"))

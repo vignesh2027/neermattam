@@ -68,10 +68,16 @@ class AgentStepOut(_Strict):
 class TranscribeResponse(_Strict):
     text: str
     language: str
+    languages: list[str] = Field(default_factory=list)
     place_text: str
+    place_spoken: str = ""
     depth_words: str
+    depth_words_en: str = ""
     depth_cm: float | None = None
     depth_sigma_cm: float | None = None
+    depth_low_cm: float | None = None
+    depth_high_cm: float | None = None
+    depth_basis: str = ""
     model: str
     cost_usd: float = 0.0
 

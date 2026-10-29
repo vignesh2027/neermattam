@@ -74,3 +74,39 @@ def test_live_sam21_loads_once_and_reuses_the_embedding() -> None:
     assert np.array_equal(m, r2.masks[1].mask)
     inter = m[100:300, 200:400].sum()
     assert inter / m.sum() > 0.8 and inter / (200 * 200) > 0.8
+
+
+VOICE_NOTES = {
+    # language: (macOS voice, what it says, landmark it should map to)
+    "hi": ("Lekha", "वेलाचेरी मेन रोड पर घुटनों तक पानी भरा है, बाइक नहीं जा सकती।", "knee"),
+    "te": ("Geeta", "వేలచేరి మెయిన్ రోడ్ లో నడుము వరకు నీళ్ళు ఉన్నాయి.", "waist"),
+}
+
+
+@pytest.mark.parametrize("lang", sorted(VOICE_NOTES))
+def test_live_voice_note_in_other_languages(lang: str, tmp_path: Path) -> None:
+    voice, text, landmark = VOICE_NOTES[lang]
+    if shutil.which("say") is None or shutil.which("afconvert") is None:
+        pytest.skip("needs macOS say and afconvert")
+    voices = subprocess.run(["say", "-v", "?"], capture_output=True, text=True).stdout
+    if not any(line.split()[:1] == [voice] for line in voices.splitlines()):
+        pytest.skip(f"the macOS voice {voice} is not installed")
+    subprocess.run(["say", "-v", voice, "-o", str(tmp_path / "v.aiff"), text], check=True)
+    subprocess.run(
+        [
+            "afconvert",
+            "-f",
+            "WAVE",
+            "-d",
+            "LEI16@16000",
+            str(tmp_path / "v.aiff"),
+            str(tmp_path / "v.wav"),
+        ],
+        check=True,
+    )
+    t = asyncio.run(
+        MuseSparkOpenAdapter.from_env().transcribe((tmp_path / "v.wav").read_bytes(), "audio/wav")
+    )
+    assert t.languages and t.languages[0] == lang
+    assert "Velachery" in t.place_text
+    assert t.depth_basis.startswith(f"phrase table: {landmark}")

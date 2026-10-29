@@ -1,0 +1,32 @@
+{
+ "id": "chatcmpl-17780981ab0849a79cc9241f9fca1570",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "content": "{\"text\":\"अति नगरे कमर पर्यन्त जल जमेचे\",\"language\":\"hi\",\"place_spoken\":\"अति नगरे\",\"place_text\":\"Ati Nagar\",\"depth_words\":\"कमर पर्यन्त\",\"depth_words_en\":\"up to the waist\",\"depth_cm\":90,\"depth_low_cm\":80,\"depth_high_cm\":100}",
+    "role": "assistant",
+    "reasoning_content": "We need to output JSON object as described. Need to analyze input? The audio clip transcription? The user gave:\n\n\"अति नगरे कमर पर्यन्त जल जमेचे\"\n\nWe need to transcribe exactly? The provided text: \"अति नगरे कमर पर्यन्त जल जमेचे\"\n\nNeed to determine language. That looks like Hindi? Actually \"अति नगरे\" maybe \"इति नगरे\"? Let's see each word:\n\nअति? maybe place name? Could be \"Ati Nagre\"? But place_spoken: place or street named, as spoken. Could be \"??\"\n\nWe need to figure language: The text is in Devanagari. Could be Hindi, Marathi, Bengali? Words: \"कमर पर्यन्त जल जमेचे\" — \"कमर पर्यंत\" is waist deep."
+   },
+   "finish_reason": "stop"
+  }
+ ],
+ "created": 1793203697,
+ "model": "meta-models/muse-spark-open-1026",
+ "object": "chat.completion",
+ "usage": {
+  "prompt_tokens": 500,
+  "completion_tokens": 3000,
+  "total_tokens": 3500,
+  "prompt_tokens_details": {
+   "audio_tokens": 0,
+   "cached_tokens": 384
+  },
+  "completion_tokens_details": {
+   "accepted_prediction_tokens": 2093,
+   "audio_tokens": 0,
+   "reasoning_tokens": 2918,
+   "rejected_prediction_tokens": 4256
+  }
+ }
+}

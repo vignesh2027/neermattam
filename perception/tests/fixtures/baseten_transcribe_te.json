@@ -1,0 +1,32 @@
+{
+ "id": "chatcmpl-4af597aa358040488cd7e20312c6d9a4",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "content": "{\"text\":\"Belacheri Main Road లో నడుము వరకు నీళ్లు ఉన్నాయి\",\"language\":\"te+en\",\"place_spoken\":\"Belacheri Main Road\",\"place_text\":\"Velachery Main Road\",\"depth_words\":\"నడుము వరకు\",\"depth_words_en\":\"waist deep\",\"depth_cm\":90,\"depth_low_cm\":80,\"depth_high_cm\":100}",
+    "role": "assistant",
+    "reasoning_content": "We need to return JSON object. The text given:\n\n\"Belacheri Main Road lo nadumu varaku neellu unnai\"\n\nWait actual text provided: \"Belacheri Main Road lo nadumu varaku neellu unnai\"\n\nGiven prompt: The audio clip in this message is a voice note from someone in India reporting street flooding. Listen to it. It may be in Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Marathi, Gujarati, Punjabi, Odia, Urdu or English, and people often mix two of them (for example Tamil with English words).\n\nReturn one JSON object, nothing else: fields: text, language, place_spoken, place_text, depth_words, depth"
+   },
+   "finish_reason": "stop"
+  }
+ ],
+ "created": 1793203620,
+ "model": "meta-models/muse-spark-open-1026",
+ "object": "chat.completion",
+ "usage": {
+  "prompt_tokens": 509,
+  "completion_tokens": 2059,
+  "total_tokens": 2568,
+  "prompt_tokens_details": {
+   "audio_tokens": 0,
+   "cached_tokens": 384
+  },
+  "completion_tokens_details": {
+   "accepted_prediction_tokens": 1520,
+   "audio_tokens": 0,
+   "reasoning_tokens": 1964,
+   "rejected_prediction_tokens": 2253
+  }
+ }
+}

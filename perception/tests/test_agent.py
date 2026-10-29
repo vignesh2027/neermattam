@@ -101,9 +101,12 @@ class ScriptedVerifier:
     script: Script
     scene_model_name: str = "muse-spark-open"
     calls: list[str] = field(default_factory=list)
+    images: list[int] = field(default_factory=list)
 
     async def ask_image(self, jpeg: bytes, prompt: str, *, what: str) -> JsonReply:
-        assert jpeg[:2] == b"\xff\xd8"  # a real JPEG was rendered
+        images = [jpeg] if isinstance(jpeg, bytes) else list(jpeg)
+        assert images and all(j[:2] == b"\xff\xd8" for j in images)  # real JPEGs
+        self.images.append(len(images))
         n = sum(1 for c in self.calls if c == what)
         self.calls.append(what)
         return JsonReply(self.script(what, n), Usage(1000, 500), 1234, "reasoning")
@@ -292,8 +295,8 @@ def test_open_pipeline_measures_and_traces(easy_case) -> None:  # type: ignore[n
     assert r.model_estimate is not None and r.model_estimate.depth_cm == 20.0
     assert r.model_estimate.depth_sigma_cm == ESTIMATE_MIN_SIGMA_CM
     assert "agent" in r.timings_ms and r.cost_usd == pytest.approx(2 * Usage(1000, 500).cost_usd)
-    # The rim was segmented only after the wheel was accepted, inside it.
-    assert any(o.object_id == 2 for o in sam.prompts)
+    # The accepted wheel is a solid shape; no separate rim mask on this path.
+    assert not any(o.object_id == 2 for o in sam.prompts)
     assert r.captured_at is None
 
 
@@ -401,5 +404,6 @@ def test_squash_correction_adds_its_own_sigma(easy_case) -> None:  # type: ignor
     finally:
         refs.SQUASH_REL_SIGMA = old
     assert r.depth_sigma_cm == pytest.approx(
-        math.hypot(r0.depth_sigma_cm or 0.0, 0.5 * 1.9), abs=0.06
+        math.hypot(r0.depth_sigma_cm or 0.0, 0.5 * 1.9),
+        abs=0.1,  # both are rounded to 0.1
     )

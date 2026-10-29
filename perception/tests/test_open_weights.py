@@ -99,7 +99,7 @@ def test_full_reasoning_check_can_overrule_a_quick_accept(easy_case) -> None:  #
         },
     )
     out = asyncio.run(
-        VerifyRefineAgent(ver, sam).refine_reference(
+        VerifyRefineAgent(ver, sam, confirm=True).refine_reference(
             case_image(easy_case), reading_for(easy_case).references[0], 1, 1
         )
     )
@@ -114,7 +114,7 @@ def test_confirmed_accept(easy_case) -> None:  # type: ignore[no-untyped-def]
     sam = BoxSam({1: easy_case.wheel_mask}, easy_case.wheel_mask.shape)
     ver = ConfirmingVerifier(lambda what, n: GOOD, confirm_script=lambda what: GOOD)
     out = asyncio.run(
-        VerifyRefineAgent(ver, sam).refine_reference(
+        VerifyRefineAgent(ver, sam, confirm=True).refine_reference(
             case_image(easy_case), reading_for(easy_case).references[0], 1, 1
         )
     )
@@ -265,3 +265,66 @@ def test_batched_propagation_tracks_the_monte_carlo_and_is_faster(easy_case) -> 
     assert t_lin < t_mc
     again = g.measure_wheel_depth(*args, g.GeometryConfig(uncertainty="linear", **base), **kw)
     assert isinstance(again, g.DepthMeasurement) and again.depth_sigma_cm == lin.depth_sigma_cm
+
+
+# --------------------------------------------------------------------------- streaming
+
+
+def _sse(text: str) -> list[tuple[str, dict[str, Any]]]:
+    import json
+
+    out = []
+    for block in text.split("\n\n"):
+        lines = [x for x in block.splitlines() if x and not x.startswith(":")]
+        if not lines:
+            continue
+        kind = next(x[7:] for x in lines if x.startswith("event: "))
+        data = next(x[6:] for x in lines if x.startswith("data: "))
+        out.append((kind, json.loads(data)))
+    return out
+
+
+def _open_client(easy_case):  # type: ignore[no-untyped-def]
+    p, _, _ = agent_pipeline(easy_case, open_reading(easy_case))
+    return TestClient(create_app(p))
+
+
+def test_measure_stream_sends_each_step_then_the_result(easy_case) -> None:  # type: ignore[no-untyped-def]
+    buf = io.BytesIO()
+    Image.fromarray(easy_case.image).save(buf, format="JPEG")
+    with _open_client(easy_case) as c:
+        r = c.post(
+            "/v1/measure/stream",
+            files={"image": ("p.jpg", buf.getvalue(), "image/jpeg")},
+            data={"hint_diameter_cm": "43.4"},
+        )
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    events = _sse(r.text)
+    kinds = [k for k, _ in events]
+    assert kinds[-1] == "result" and set(kinds[:-1]) == {"step"} and len(kinds) > 4
+    steps = [d for k, d in events if k == "step"]
+    result = events[-1][1]
+    assert result["usable"] and result["method"] == "wheel_geometry"
+    assert result["agent_trace"] == steps  # the same steps, in the same order
+    assert steps[0]["step"] == "scene"
+
+
+def test_measure_stream_validation_and_model_errors(easy_case) -> None:  # type: ignore[no-untyped-def]
+    with _open_client(easy_case) as c:
+        assert c.post("/v1/measure/stream").status_code == 422  # before any event
+        bad = c.post("/v1/measure/stream", files={"image": ("p.gif", b"GIF89a", "image/gif")})
+        assert bad.status_code == 415
+    p, _, _ = agent_pipeline(easy_case, open_reading(easy_case))
+
+    async def boom(image):  # type: ignore[no-untyped-def]
+        raise ModelError("scene model failed with HTTP 503")
+
+    p.scene.read_scene = boom  # type: ignore[method-assign]
+    buf = io.BytesIO()
+    Image.fromarray(easy_case.image).save(buf, format="JPEG")
+    with TestClient(create_app(p)) as c:
+        r = c.post("/v1/measure/stream", files={"image": ("p.jpg", buf.getvalue(), "image/jpeg")})
+    events = _sse(r.text)
+    assert events == [
+        ("error", {"status": 503, "detail": "model unavailable: scene model failed with HTTP 503"})
+    ]

@@ -1,7 +1,8 @@
 """FastAPI service for perception (docs/CONTRACTS.md section 1), port 8301.
 
-Endpoints: ``POST /v1/measure``, ``POST /v1/transcribe``, ``GET /healthz``,
-``GET /readyz``.
+Endpoints: ``POST /v1/measure``, ``POST /v1/measure/stream`` (the same, as
+server-sent events: each agent step as it happens, then the result),
+``POST /v1/transcribe``, ``GET /healthz``, ``GET /readyz``.
 
 Models are chosen by environment (see :func:`default_app`): the open-weights
 path (Muse Spark Open on Baseten, SAM 2.1 locally, with the verify-and-refine
@@ -22,18 +23,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .adapters import MetaApiAdapter, ModelError
-from .agent import VerifyRefineAgent
+from .agent import TraceStep, VerifyRefineAgent
 from .media import (
     MAX_IMAGE_BYTES,
     MAX_VIDEO_BYTES,
@@ -69,6 +72,7 @@ _AUDIO_TYPES = {
     "audio/aac": "audio/aac",
 }
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
+KEEPALIVE_S = 15.0
 
 
 async def _read_limited(upload: UploadFile, limit: int, what: str) -> bytes:
@@ -187,13 +191,13 @@ def create_app(
             {"status": "ok" if ok else "unavailable", "reason": why}, status_code=200 if ok else 503
         )
 
-    @app.post("/v1/measure", response_model=MeasureResponse)
-    async def measure(
-        image: Annotated[UploadFile | None, File()] = None,
-        video: Annotated[UploadFile | None, File()] = None,
-        hint_reference: Annotated[str | None, Form()] = None,
-        hint_diameter_cm: Annotated[float | None, Form()] = None,
-    ) -> JSONResponse:
+    async def inputs(
+        image: UploadFile | None,
+        video: UploadFile | None,
+        hint_reference: str | None,
+        hint_diameter_cm: float | None,
+    ) -> tuple[ImageInput | None, VideoInput | None]:
+        """Validated, sanitised media; raises the 413, 415 and 422 errors."""
         if image is None and video is None:
             raise HTTPException(422, "send an image, or a video")
         if hint_reference is not None and hint_reference not in {k.value for k in RefKind}:
@@ -216,12 +220,22 @@ def create_app(
                 vid = await asyncio.to_thread(load_video, raw, ctype)
         except MediaRejected as exc:
             raise HTTPException(422, str(exc)) from exc
+        return img, vid
+
+    async def run(
+        img: ImageInput | None,
+        vid: VideoInput | None,
+        hint_reference: str | None,
+        hint_diameter_cm: float | None,
+        on_step: Callable[[TraceStep], None] | None = None,
+    ) -> MeasureResponse:
         try:
             resp = await pipeline.measure(
                 image=img,
                 video=vid,
                 hint_reference=hint_reference,
                 hint_diameter_cm=hint_diameter_cm,
+                on_step=on_step,
             )
         except ModelError as exc:
             raise HTTPException(503, f"model unavailable: {exc}") from exc
@@ -230,10 +244,67 @@ def create_app(
         key = img if img is not None else (vid.key_frame if vid is not None else None)
         if store is not None and key is not None:
             _store(store, resp, key)
+        return resp
+
+    @app.post("/v1/measure", response_model=MeasureResponse)
+    async def measure(
+        image: Annotated[UploadFile | None, File()] = None,
+        video: Annotated[UploadFile | None, File()] = None,
+        hint_reference: Annotated[str | None, Form()] = None,
+        hint_diameter_cm: Annotated[float | None, Form()] = None,
+    ) -> JSONResponse:
+        img, vid = await inputs(image, video, hint_reference, hint_diameter_cm)
+        resp = await run(img, vid, hint_reference, hint_diameter_cm)
         headers = {}
-        if key is not None and key.captured_at:
-            headers["X-Captured-At"] = key.captured_at
+        if resp.captured_at:
+            headers["X-Captured-At"] = resp.captured_at
         return JSONResponse(resp.model_dump(), headers=headers)
+
+    @app.post("/v1/measure/stream")
+    async def measure_stream(
+        image: Annotated[UploadFile | None, File()] = None,
+        video: Annotated[UploadFile | None, File()] = None,
+        hint_reference: Annotated[str | None, Form()] = None,
+        hint_diameter_cm: Annotated[float | None, Form()] = None,
+    ) -> StreamingResponse:
+        img, vid = await inputs(image, video, hint_reference, hint_diameter_cm)
+        queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+        def on_step(step: TraceStep) -> None:
+            queue.put_nowait(("step", json.dumps(asdict(step))))
+
+        async def work() -> None:
+            try:
+                resp = await run(img, vid, hint_reference, hint_diameter_cm, on_step)
+                queue.put_nowait(("result", json.dumps(resp.model_dump())))
+            except HTTPException as exc:
+                body = {"status": exc.status_code, "detail": exc.detail}
+                queue.put_nowait(("error", json.dumps(body)))
+            except Exception:  # the stream must end with an event, never hang
+                body = {"status": 500, "detail": "internal error"}
+                queue.put_nowait(("error", json.dumps(body)))
+                logging.getLogger(__name__).exception("measure stream failed")
+
+        async def events() -> AsyncIterator[str]:
+            task = asyncio.create_task(work())
+            try:
+                while True:
+                    try:
+                        kind, data = await asyncio.wait_for(queue.get(), KEEPALIVE_S)
+                    except TimeoutError:
+                        yield ": keep-alive\n\n"
+                        continue
+                    yield f"event: {kind}\ndata: {data}\n\n"
+                    if kind in ("result", "error"):
+                        break
+            finally:
+                if not task.done():  # the client went away: stop the work
+                    task.cancel()
+
+        headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        if img is not None and img.captured_at:
+            headers["X-Captured-At"] = img.captured_at
+        return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
 
     @app.post("/v1/transcribe", response_model=TranscribeResponse)
     async def transcribe(audio: Annotated[UploadFile, File()]) -> TranscribeResponse:
@@ -256,6 +327,12 @@ def create_app(
             depth_words=t.depth_words,
             depth_cm=t.depth_cm,
             depth_sigma_cm=t.depth_sigma_cm,
+            languages=list(t.languages),
+            place_spoken=t.place_spoken,
+            depth_words_en=t.depth_words_en,
+            depth_low_cm=t.depth_low_cm,
+            depth_high_cm=t.depth_high_cm,
+            depth_basis=t.depth_basis,
             model=MODEL_LABEL,
             cost_usd=round(t.usage.cost_usd, 6),
         )
@@ -288,13 +365,21 @@ def key_from_dotenv(start: Path | None = None) -> str | None:
     return None
 
 
+def _modal_configured() -> bool:
+    from .modal_sam import ModalSamAdapter
+
+    return ModalSamAdapter.from_env().configured
+
+
 def default_app() -> FastAPI:
     """The app with models chosen by environment.
 
     ``NEERMATTAM_SCENE``: ``muse-spark-open`` (Baseten) or ``muse-spark-1.3``
     (Meta Model API); by default the open model when ``BASETEN_API_KEY`` is set.
-    ``NEERMATTAM_MASKS``: ``sam2.1-local`` (default with the open model),
-    ``sam3.1-api`` or ``sam3.1-local``. With the open model the
+    ``NEERMATTAM_MASKS``: ``sam2.1-modal`` (SAM 2.1 large on Modal with local
+    small as the fallback; the default when ``MODAL_SAM_URL`` is set),
+    ``sam2.1-local`` (optionally ``:large`` and ``:fp16``), ``sam3.1-api`` or
+    ``sam3.1-local``. With the open model the
     verify-and-refine agent checks every mask.
     """
     store = os.environ.get("NEERMATTAM_STORE_DIR")
@@ -308,7 +393,8 @@ def default_app() -> FastAPI:
         masks_name = os.environ.get("NEERMATTAM_MASKS", "sam3.1-api")
         masks = meta if masks_name == "sam3.1-api" else mask_model_from_config(masks_name)
         return create_app(Pipeline(meta, masks), store, muse if muse.api_key else None)
-    masks = mask_model_from_config(os.environ.get("NEERMATTAM_MASKS", "sam2.1-local"), api=meta)
+    default_masks = "sam2.1-modal" if _modal_configured() else "sam2.1-local"
+    masks = mask_model_from_config(os.environ.get("NEERMATTAM_MASKS", default_masks), api=meta)
     agent = VerifyRefineAgent(muse, masks)
     return create_app(Pipeline(muse, masks, agent=agent), store, muse)
 

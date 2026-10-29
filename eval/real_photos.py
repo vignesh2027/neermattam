@@ -4,6 +4,7 @@ Usage (from perception/, with the local extra installed):
 
     uv run --extra local python ../eval/real_photos.py            # fetch if needed, run, write
     uv run --extra local python ../eval/real_photos.py --only c3  # one photo
+    uv run --extra local python ../eval/sam_ab.py                 # the SAM size comparison
 
 Photos are downloaded from Commons into eval/photos/ (gitignored); the URL,
 author and licence of each are in eval/commons_photos.json. Outputs go to
@@ -30,11 +31,14 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 
+from neermattam_perception.adapters import ModelError
 from neermattam_perception.agent import VerifyRefineAgent
 from neermattam_perception.media import load_image
+from neermattam_perception.modal_sam import ModalSamAdapter
 from neermattam_perception.muse_open import MuseSparkOpenAdapter
 from neermattam_perception.pipeline import Pipeline
 from neermattam_perception.sam_local import Sam21LocalAdapter
@@ -60,7 +64,9 @@ def fetch(meta: dict[str, object]) -> Path:
     return path
 
 
-def summarise(pid: str, meta: dict[str, object], body: dict[str, object], wall_s: float) -> str:
+def summarise(
+    pid: str, meta: dict[str, Any], body: dict[str, Any], wall_s: float, out: Path = OUT
+) -> str:
     kind = "named in the brief" if meta.get("set") == "brief" else "extra, side-on wheels"
     lines = [f"### {pid}: {meta['title']} ({kind})", ""]
     lines.append(
@@ -88,16 +94,17 @@ def summarise(pid: str, meta: dict[str, object], body: dict[str, object], wall_s
     timings = body.get("timings_ms", {})
     lines.append(
         f"Wall time {wall_s:.1f} s (timings ms: "
-        + ", ".join(f"{k} {v}" for k, v in dict(timings).items())  # type: ignore[call-overload]
+        + ", ".join(f"{k} {v}" for k, v in dict(timings).items())
         + f"); model cost USD {body.get('cost_usd')}."
     )
     lines.append("")
-    shown = f" Verifier images: `eval/out/{pid}_agent/`." if (OUT / f"{pid}_agent").exists() else ""
-    lines.append(f"Overlay: `eval/out/{pid}_overlay.png`.{shown}")
+    rel = out.relative_to(HERE.parent) if out.is_relative_to(HERE.parent) else out
+    shown = f" Verifier images: `{rel}/{pid}_agent/`." if (out / f"{pid}_agent").exists() else ""
+    lines.append(f"Overlay: `{rel}/{pid}_overlay.png`.{shown}")
     lines.append("")
     lines.append("| Step | Target | Model | Input | Output | Decision | ms |")
     lines.append("|---|---|---|---|---|---|---|")
-    for t in body.get("agent_trace", []):  # type: ignore[union-attr]
+    for t in body.get("agent_trace", []):
         keys = ("step", "target", "model", "input", "output", "decision", "latency_ms")
         cells = [str(t[k]).replace("|", "/") for k in keys]
         lines.append("| " + " | ".join(cells) + " |")
@@ -117,45 +124,119 @@ def write_results(sections: list[str], header: str) -> None:
     RESULTS.write_text(f"# Real-photo evaluation\n\n{begin}\n{body}\n{end}\n", encoding="utf-8")
 
 
-async def run(only: list[str] | None) -> int:
+def process_memory() -> dict[str, float]:
+    import resource
+
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return {"peak_rss_mb": round(peak / 1e6 if sys.platform == "darwin" else peak / 1e3, 1)}
+
+
+def photo_stats(body: dict[str, Any], wall_s: float) -> dict[str, Any]:
+    """Counts from one response: wheels checked and accepted, depths measured, calls."""
+    trace = body.get("agent_trace", [])
+    wheels = {t["target"] for t in trace if t["step"] == "verify" and t["target"] != "water"}
+    accepted = {
+        t["target"]
+        for t in trace
+        if t["step"] in ("verify", "confirm") and t["decision"] == "accept"
+    } - {"water"}
+    # A confirm can overrule a quick accept.
+    overruled = {t["target"] for t in trace if t["step"] == "confirm" and t["decision"] != "accept"}
+    accepted -= overruled
+    depths = [t for t in trace if t["step"] == "geometry" and t["decision"] == "candidate"]
+    checks = [t for t in trace if t["step"] in ("verify", "confirm")]
+    return {
+        "wheels_checked": len(wheels),
+        "wheels_accepted": len(accepted),
+        "wheel_depths": len(depths),
+        "geometry_outputs": [t["output"] for t in depths],
+        "verifier_calls": len(checks),
+        "method": body.get("method"),
+        "depth_cm": body.get("depth_cm"),
+        "depth_sigma_cm": body.get("depth_sigma_cm"),
+        "wall_s": round(wall_s, 1),
+        "timings_ms": body.get("timings_ms"),
+        "cost_usd": body.get("cost_usd"),
+    }
+
+
+async def run(args: argparse.Namespace) -> int:
     meta = json.loads((HERE / "commons_photos.json").read_text(encoding="utf-8"))["photos"]
-    if only:
-        meta = [m for m in meta if m["id"] in only]
-    muse = MuseSparkOpenAdapter.from_env()
+    if args.only:
+        meta = [m for m in meta if m["id"] in args.only]
+    muse = MuseSparkOpenAdapter.from_env(
+        scene_cache_dir=Path(args.scene_cache) if args.scene_cache else None,
+        scene_effort=None if args.scene_effort == "default" else args.scene_effort,
+    )
     if not muse.api_key:
         sys.stderr.write("BASETEN_API_KEY is not set (see the repository .env)\n")
         return 2
-    sam = Sam21LocalAdapter()
-    t0 = time.perf_counter()
-    sam.load()
+    sam: Any
+    if args.modal:
+        sam = ModalSamAdapter.from_env(model=args.sam_size)
+        t0 = time.perf_counter()
+        ok, why = await sam.ready()  # wakes the container; the first request is the cold one
+        if not ok:
+            sys.stderr.write(f"Modal SAM not ready: {why}\n")
+            return 2
+    else:
+        sam = Sam21LocalAdapter(size=args.sam_size, dtype="float16" if args.fp16 else "float32")
+        t0 = time.perf_counter()
+        sam.load()
     load_s = time.perf_counter() - t0
-    OUT.mkdir(exist_ok=True)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
     sections = []
+    stats: dict[str, Any] = {}
     for m in meta:
         path = fetch(m)
         image = load_image(path.read_bytes())
-        agent = VerifyRefineAgent(muse, sam, debug_dir=OUT / f"{m['id']}_agent")
+        agent = VerifyRefineAgent(
+            muse, sam, debug_dir=out / f"{m['id']}_agent", confirm=args.confirm
+        )
         pipe = Pipeline(muse, sam, agent=agent)
-        t1 = time.perf_counter()
-        resp = await pipe.measure(image=image)
+        for attempt in range(3):  # a network outage should not end a long run
+            t1 = time.perf_counter()
+            try:
+                resp = await pipe.measure(image=image)
+                break
+            except ModelError as exc:
+                if attempt == 2:
+                    raise
+                sys.stderr.write(f"{m['id']}: {exc}; trying again in 30 s\n")
+                await asyncio.sleep(30)
         wall = time.perf_counter() - t1
         body = resp.model_dump()
         png = body.pop("overlay_png_b64")
         if png:
-            (OUT / f"{m['id']}_overlay.png").write_bytes(base64.b64decode(png))
-        (OUT / f"{m['id']}.json").write_text(json.dumps(body, indent=1), encoding="utf-8")
-        sections.append(summarise(m["id"], m, body, wall))
+            (out / f"{m['id']}_overlay.png").write_bytes(base64.b64decode(png))
+        (out / f"{m['id']}.json").write_text(json.dumps(body, indent=1), encoding="utf-8")
+        sections.append(summarise(m["id"], m, body, wall, out))
+        stats[m["id"]] = photo_stats(body, wall)
         sys.stdout.write(
-            f"{m['id']}: usable={body['usable']} method={body['method']} depth={body['depth_cm']} "
-            f"sigma={body['depth_sigma_cm']} wall={wall:.1f}s cost={body['cost_usd']}\n"
+            f"{m['id']}: method={body['method']} depth={body['depth_cm']} "
+            f"sigma={body['depth_sigma_cm']} wall={wall:.1f}s cost={body['cost_usd']} "
+            f"wheels {stats[m['id']]['wheels_accepted']}/{stats[m['id']]['wheels_checked']} "
+            f"depths {stats[m['id']]['wheel_depths']}\n"
         )
+    summary = {
+        "sam": sam.mask_model_name,
+        "device": "Modal CPU" if args.modal else sam.device,
+        "load_s": round(load_s, 1),
+        "memory": process_memory() if args.modal else sam.memory(),
+        "scene_effort": muse.scene_effort or "default",
+        "confirm": args.confirm,
+        "photos": stats,
+    }
+    (out / "summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     header = (
         f"Generated by `uv run --extra local python ../eval/real_photos.py` on "
-        f"{time.strftime('%Y-%m-%d')} with {muse.scene_model_name} ({muse.model} on Baseten) and "
-        f"{sam.mask_model_name} on {sam.device} (loaded once in {load_s:.1f} s). "
+        f"{time.strftime('%Y-%m-%d')} with {muse.scene_model_name} ({muse.model} on Baseten, "
+        f"scene reasoning effort {muse.scene_effort or 'default'}) and "
+        f"{sam.mask_model_name} on {summary['device']} (ready in {load_s:.1f} s). "
         "No ground truth exists for these photos; only qualitative behaviour is shown."
     )
-    if not only:
+    if not args.only and args.write_results:
         write_results(sections, header)
     return 0
 
@@ -163,8 +244,21 @@ async def run(only: list[str] | None) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--only", nargs="*", help="photo ids, such as c3 (results file not rewritten)")
+    ap.add_argument("--sam-size", default="large", choices=["small", "base-plus", "large"])
+    ap.add_argument("--fp16", action="store_true", help="SAM weights in float16")
+    ap.add_argument("--modal", action="store_true", help="SAM on the Modal service (MODAL_SAM_*)")
+    ap.add_argument("--scene-effort", default="low", help="low, medium, high, xhigh or default")
+    ap.add_argument("--confirm", action="store_true", help="full-reasoning re-check of accepts")
+    ap.add_argument("--scene-cache", default=None, help="folder to keep scene readings in")
+    ap.add_argument("--out", default=str(OUT))
+    ap.add_argument(
+        "--no-write-results",
+        dest="write_results",
+        action="store_false",
+        help="do not rewrite eval/RESULTS_REAL.md",
+    )
     args = ap.parse_args(argv)
-    return asyncio.run(run(args.only))
+    return asyncio.run(run(args))
 
 
 if __name__ == "__main__":

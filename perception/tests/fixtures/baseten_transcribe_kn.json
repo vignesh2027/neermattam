@@ -1,0 +1,32 @@
+{
+ "id": "chatcmpl-6df3ac8ad60e40d9903c905355bd811b",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "content": "{\"text\":\"ಅಗ್ಯಾರ್ ಸೇತುವೆ ಹತ್ತಿರ ಮೊಣಕಾಲು ವರೆಗೆ ನೀರು ಇದೆ\",\"language\":\"kn\",\"place_spoken\":\"ಅಗ್ಯಾರ್ ಸೇತುವೆ\",\"place_text\":\"Agyar Bridge\",\"depth_words\":\"ಮೊಣಕಾಲು ವರೆಗೆ\",\"depth_words_en\":\"up to the knee\",\"depth_cm\":45,\"depth_low_cm\":35,\"depth_high_cm\":55}",
+    "role": "assistant",
+    "reasoning_content": "We need to output JSON object. The audio clip? But we have text? The user says: The audio clip in this message is a voice note ... Listen to it. But we have text provided? Possibly the text is \"Agyar Setuve hattira mornakalu varige niru idhe\"? Wait need parse.\n\nUser provided: \"Agyar Setuve hattira mornakalu varige niru idhe\"\n\nThis looks like Kannada? Let's transliterate.\n\nWe need to interpret.\n\n\"Agyar Setuve hattira mornakalu varige niru idhe\"\n\nProbably Kannada: \"Agyar Setuve hattira mornakalu varige niru idhe\" -> Means near Agyar Setuve till morning knee depth water was there?\n\nWe need to fil"
+   },
+   "finish_reason": "stop"
+  }
+ ],
+ "created": 1793203670,
+ "model": "meta-models/muse-spark-open-1026",
+ "object": "chat.completion",
+ "usage": {
+  "prompt_tokens": 508,
+  "completion_tokens": 2760,
+  "total_tokens": 3268,
+  "prompt_tokens_details": {
+   "audio_tokens": 0,
+   "cached_tokens": 384
+  },
+  "completion_tokens_details": {
+   "accepted_prediction_tokens": 1846,
+   "audio_tokens": 0,
+   "reasoning_tokens": 2657,
+   "rejected_prediction_tokens": 4552
+  }
+ }
+}

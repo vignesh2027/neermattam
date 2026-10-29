@@ -59,6 +59,8 @@ class SceneObject:
     confidence: float = 0.5
     # Open-weights scene reading only (Muse Spark Open); empty for the hosted path.
     waterline_points: tuple[tuple[int, int], ...] = ()  # where water meets this object
+    tyre_points: tuple[tuple[int, int], ...] = ()  # points on a wheel's rubber, around its arc
+    exclude_points: tuple[tuple[int, int], ...] = ()  # hub, exhaust, mudguard, wall next to it
     visible_fraction: float | None = None  # share of the object's height above water
     depth_cm: float | None = None  # the scene model's own depth estimate at this object
     depth_reason: str | None = None
@@ -87,6 +89,7 @@ class SceneReading:
     overall_low_cm: float | None = None
     overall_high_cm: float | None = None
     overall_reason: str | None = None
+    cached: bool = False  # answered from the scene cache (no model call, no cost)
 
 
 @dataclass(frozen=True, slots=True)

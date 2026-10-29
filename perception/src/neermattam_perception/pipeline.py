@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 
 import cv2
@@ -158,6 +158,19 @@ def _scene_decision(reading: SceneReading, has_estimate: bool) -> str:
     if n:
         return f"segment and verify {n} wheel{'s' if n > 1 else ''} and the water"
     return "no wheel: report own estimate" if has_estimate else "stop: no wheel"
+
+
+class LiveTrace(list[TraceStep]):
+    """The trace list; each appended step is also passed to ``on_step`` at once."""
+
+    def __init__(self, on_step: Callable[[TraceStep], None] | None = None) -> None:
+        super().__init__()
+        self._on_step = on_step
+
+    def append(self, step: TraceStep) -> None:
+        super().append(step)
+        if self._on_step is not None:
+            self._on_step(step)
 
 
 def _ms(t0: float) -> int:
@@ -306,13 +319,19 @@ class Pipeline:
         video: VideoInput | None = None,
         hint_reference: str | None = None,
         hint_diameter_cm: float | None = None,
+        on_step: Callable[[TraceStep], None] | None = None,
     ) -> MeasureResponse:
+        """Measure one photo (or a video's key frame).
+
+        ``on_step`` is called with every trace step the moment it is recorded,
+        in the order the steps happen (the streaming endpoint uses it).
+        """
         cfg = self.config
         key = image if image is not None else (video.key_frame if video is not None else None)
         if key is None:
             raise ValueError("an image or a video is required")
         timings: dict[str, int] = {}
-        trace: list[TraceStep] = []
+        trace: list[TraceStep] = LiveTrace(on_step)
         cost = 0.0
         reasons: list[str] = []
         hint_kind = RefKind(hint_reference) if hint_reference else None
@@ -331,7 +350,8 @@ class Pipeline:
                 "scene",
                 "photo",
                 scene_name,
-                f"photo {key.width}x{key.height} px",
+                f"photo {key.width}x{key.height} px"
+                + (" (cached reading)" if reading.cached else ""),
                 f"water {'visible' if reading.water_visible else 'not visible'}; references: "
                 f"{kinds}" + (f"; own estimate {est.depth_cm:.0f} cm" if est is not None else ""),
                 _scene_decision(reading, est is not None),
@@ -656,17 +676,19 @@ class Pipeline:
         water_id: int,
         trace: list[TraceStep],
     ) -> tuple[ObjectMask | None, list[str], float]:
-        """Masks through the verify-and-refine agent; rims only inside accepted wheels."""
+        """Masks through the verify-and-refine agent.
+
+        No separate rim mask is used on this path: the accepted wheel is already a
+        solid shape (tyre and rim, closed with its convex hull when SAM gave the
+        tyre ring), and rim masks from a single scene-model point were unreliable.
+        """
         assert self.agent is not None
         refs = [(c.index, c.obj, c.wheel_id) for c in cands]
         water_out, ref_outs = await self.agent.run(
-            key, refs, reading.water_box, reading.water_points, water_id
+            key, refs, reading.water_box, reading.water_points, water_id, emit=trace.append
         )
-        trace.extend(water_out.trace)
         failures: list[str] = []
-        rim_prompts: list[ObjectPrompt] = []
         for c, out in zip(cands, ref_outs, strict=True):
-            trace.extend(out.trace)
             if not out.accepted or out.mask is None:
                 failures.append(
                     f"{KIND_TEXT[c.obj.kind]} {c.index}: the scene model did not confirm the "
@@ -675,26 +697,6 @@ class Pipeline:
                 continue
             c.wheel = out.mask
             c.waterline_points = out.waterline_points
-            rp = c.obj.rim_point
-            if c.rim_id is not None and rp is not None and out.mask.mask[rp[1], rp[0]]:
-                rim_prompts.append(ObjectPrompt(c.rim_id, (PointPrompt(*rp),)))
-        if rim_prompts:
-            t0 = time.perf_counter()
-            seg = await self.masks.segment(key, rim_prompts)
-            for c in cands:
-                if c.rim_id is not None and c.rim_id in seg.masks:
-                    c.rim = seg.masks[c.rim_id]
-            trace.append(
-                TraceStep(
-                    "segment",
-                    "rims",
-                    self.model_names.masks,
-                    f"{len(rim_prompts)} rim points inside accepted wheels",
-                    f"{len(seg.masks)} rim masks (used only inside the wheel mask)",
-                    "measure",
-                    _ms(t0),
-                )
-            )
         water = water_out.mask if water_out.accepted else None
         if water is None:
             failures.append(f"water mask not confirmed ({water_out.verdict})")
