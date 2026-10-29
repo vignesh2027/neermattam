@@ -4,13 +4,14 @@ Python service that measures floodwater depth (and, from a short video, surface 
 
 There are two model paths. The hosted path uses Muse Spark 1.3 and SAM 3.1 on the Meta Model API in one segmentation request. The open-weights path uses Muse Spark Open (Meta's open-weight model, served by Baseten) and SAM 2.1, and adds the verify-and-refine agent (`agent.py`):
 
-* the scene model gives each wheel a box, 3 or 4 points on the tyre rubber around its arc, and negative points on the hub and on what touches the tyre (exhaust, mudguard, wall); the box always goes to SAM with those points;
+* the scene model boxes each vehicle; inside the lower part of the box SAM is prompted from a 6 by 4 grid of points and from boxes around dark, roughly elliptical blobs, and every proposal is ranked by wheel shape, tyre darkness and a size plausible for that vehicle, so the wheel does not depend on the scene model pointing at it precisely;
+* for wheels the scene model names outside any vehicle box, it gives a box, 3 or 4 points on the tyre rubber around its arc, and negative points on the hub and on what touches the tyre (exhaust, mudguard, wall); the box always goes to SAM with those points;
 * SAM's proposals (for the box with the points, and for the points alone) are closed into solid wheel shapes and ranked by how well their outline fits one ellipse (`wheel_shape.py`), a judge that costs milliseconds;
 * the best two are shown side by side to Muse Spark Open, which picks one and judges it, or returns corrected boxes and points (at most two corrections); an outline is measured only when the model calls it good on a close crop, its shape score passes, and its box agrees with the tyre box the model draws.
 
 Every step is returned in `agent_trace`, and `POST /v1/measure/stream` sends each step as it happens. `POST /v1/transcribe` reads voice notes in the major Indian languages, mixed or not: it detects the languages, normalises the place for geocoding, and turns the depth words into a range with the phrase table in `voice.py` (a spoken number first, the model's own reading last). When no wheel can be measured, the scene model's own estimate is returned as `method: model_estimate` with a wide sigma.
 
-SAM 2.1 runs on the Modal service (`deploy/modal-sam`, hiera-large; the default when `MODAL_SAM_URL` is set, with local hiera-small as the fallback when Modal fails) or locally (`small`, `base-plus` or `large`, fp32 or fp16). SAM 3.1 drops in by configuration (`NEERMATTAM_MASKS`) when its weights are available. The comparison of the sizes on real photos is in `../eval/RESULTS_SAM_AB.md`.
+SAM 2.1 runs locally (hiera-small by default, the fastest and as good as the larger sizes on the real photos; `base-plus` and `large`, fp32 or fp16, by configuration) or on the Modal service (`deploy/modal-sam`, hiera-large, `NEERMATTAM_MASKS=sam2.1-modal`, with local hiera-small as the fallback when Modal fails). SAM 3.1 drops in by configuration (`NEERMATTAM_MASKS`) when its weights are available. The comparison of the sizes on real photos is in `../eval/RESULTS_SAM_AB.md`.
 
 ```bash
 uv sync --extra local              # the local extra adds torch, torchvision, transformers (SAM 2.1)
@@ -36,6 +37,7 @@ uv run --extra local python ../eval/sam_ab.py                           # SAM si
 | `sam_local.py` | SAM 2.1 run locally (loaded once, embedding reused, small objects segmented zoomed in, all proposals per prompt); SAM 3.1 adapter slots |
 | `modal_sam.py` | SAM 2.1 on the Modal service, and the fallback to the local model |
 | `voice.py` | depth words in Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Marathi, Gujarati, Punjabi, Odia, Urdu and English, mapped to depth ranges (the documented phrase table) |
+| `wheel_finder.py` | finds a vehicle's wheels inside its box: SAM from a grid of points and from dark elliptical blobs, ranked by wheel shape, tyre darkness and size |
 | `wheel_shape.py` | the cheap judge: closes tyre rings into solid wheels and scores how well an outline fits a wheel |
 | `agent.py` | the verify-and-refine agent and its trace |
 | `pipeline.py` | image or video in, `MeasureResponse` out, with the overlay |

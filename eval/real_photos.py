@@ -7,7 +7,8 @@ Usage (from perception/, with the local extra installed):
     uv run --extra local python ../eval/sam_ab.py                 # the SAM size comparison
 
 Photos are downloaded from Commons into eval/photos/ (gitignored); the URL,
-author and licence of each are in eval/commons_photos.json. Outputs go to
+author and licence of each are in eval/commons_photos.json and (the Unsplash
+close-ups) eval/unsplash_photos.json. Outputs go to
 eval/out/ (gitignored): the overlay PNG, the response JSON with its agent trace,
 and every image the verifier was shown. The generated section of
 eval/RESULTS_REAL.md is rewritten between its markers.
@@ -27,7 +28,9 @@ import argparse
 import asyncio
 import base64
 import json
+import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -47,6 +50,8 @@ HERE = Path(__file__).resolve().parent
 PHOTOS = HERE / "photos"
 OUT = HERE / "out"
 RESULTS = HERE / "RESULTS_REAL.md"
+CLOSE_DIR = Path.home() / "neermattam-data" / "probe" / "close"
+SETS = {"commons": "commons_photos.json", "close": "unsplash_photos.json"}
 UA = "neermattam-eval/0.2 (https://github.com/vignesh2027; flood depth research)"
 
 
@@ -55,7 +60,11 @@ def fetch(meta: dict[str, object]) -> Path:
     path = PHOTOS / f"{meta['id']}.jpg"
     if path.exists() and path.stat().st_size > 0:
         return path
-    # IPv4 only: some networks advertise IPv6 routes that hang.
+    local = Path(os.environ.get("NEERMATTAM_CLOSE_DIR", str(CLOSE_DIR))) / f"{meta['id']}.jpg"
+    if meta.get("set") == "close" and local.is_file():
+        shutil.copyfile(local, path)
+        return path
+    # IPv4 only: some networks advertise IPv6 routes that hang. 120 s at most.
     transport = httpx.HTTPTransport(local_address="0.0.0.0", retries=2)
     with httpx.Client(transport=transport, timeout=120.0, headers={"User-Agent": UA}) as c:
         r = c.get(str(meta["download"]), follow_redirects=True)
@@ -67,7 +76,11 @@ def fetch(meta: dict[str, object]) -> Path:
 def summarise(
     pid: str, meta: dict[str, Any], body: dict[str, Any], wall_s: float, out: Path = OUT
 ) -> str:
-    kind = "named in the brief" if meta.get("set") == "brief" else "extra, side-on wheels"
+    kind = {
+        "brief": "Commons, named in the brief",
+        "extra": "Commons, side-on wheels",
+        "close": "Unsplash close-up",
+    }.get(str(meta.get("set")), str(meta.get("set")))
     lines = [f"### {pid}: {meta['title']} ({kind})", ""]
     lines.append(
         f"Author {meta['author']}, licence {meta['licence']} ({meta['licence_url']}), "
@@ -161,7 +174,9 @@ def photo_stats(body: dict[str, Any], wall_s: float) -> dict[str, Any]:
 
 
 async def run(args: argparse.Namespace) -> int:
-    meta = json.loads((HERE / "commons_photos.json").read_text(encoding="utf-8"))["photos"]
+    meta = []
+    for name in args.sets:
+        meta += json.loads((HERE / SETS[name]).read_text(encoding="utf-8"))["photos"]
     if args.only:
         meta = [m for m in meta if m["id"] in args.only]
     muse = MuseSparkOpenAdapter.from_env(
@@ -251,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--confirm", action="store_true", help="full-reasoning re-check of accepts")
     ap.add_argument("--scene-cache", default=None, help="folder to keep scene readings in")
     ap.add_argument("--out", default=str(OUT))
+    ap.add_argument("--sets", nargs="*", default=["close", "commons"], choices=list(SETS))
     ap.add_argument(
         "--no-write-results",
         dest="write_results",

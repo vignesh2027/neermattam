@@ -328,3 +328,27 @@ def random_params(rng: np.random.Generator, diameters_cm: list[float] | None = N
 
 def distance_m(p: SynthParams) -> float:
     return p.focal_scale * p.width * p.diameter_cm / 100.0 / p.wheel_px
+
+
+# The wheel diameters synthetic scenes are drawn from: the catalogue's distinct
+# diameters when the evaluation tables in docs/GEOMETRY.md were made. Kept
+# fixed, so that adding a vehicle to the catalogue does not change the
+# synthetic evaluation or its calibration.
+SYNTH_DIAMETERS_CM: tuple[float, ...] = (
+    42.6,
+    43.4,
+    46.7,
+    57.8,
+    58.7,
+    59.2,
+    59.4,
+    61.2,
+    61.5,
+    61.7,
+    62.0,
+    62.1,
+    62.4,
+    64.9,
+    66.3,
+    106.4,
+)

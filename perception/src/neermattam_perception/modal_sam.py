@@ -313,6 +313,36 @@ class ModalSamAdapter:
                     out.append(MaskCandidate(self._place(m, frame, w, h), round(sc, 3), label, idx))
         return out
 
+    async def region_candidates(
+        self,
+        image: ImageInput,
+        region: Box,
+        prompts: Sequence[tuple[str, Box | None, Sequence[PointPrompt]]],
+    ) -> list[MaskCandidate]:
+        """Every proposal for many prompts inside one region, in one request."""
+        w, h = image.width, image.height
+        x0, y0 = max(0, region[0]), max(0, region[1])
+        x1, y1 = min(w, region[2]), min(h, region[3])
+        crop = image.rgb[y0:y1, x0:x1]
+        s = min(1.0, self.max_side / max(crop.shape[:2]))
+        im = Image.fromarray(np.ascontiguousarray(crop))
+        if s < 1.0:
+            im = im.resize((max(1, round(crop.shape[1] * s)), max(1, round(crop.shape[0] * s))))
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=self.jpeg_quality)
+        frame = _Frame((x0, y0, x1, y1), s, buf.getvalue())
+        payload = [
+            self._prompt_json(f"{i}:{label}", frame, box, pts, False)
+            for i, (label, box, pts) in enumerate(prompts)
+        ]
+        res = await self._segment_frame(frame, payload)
+        out = []
+        for i, (label, _, _) in enumerate(prompts):
+            for m, sc, idx in res.get(f"{i}:{label}", []):
+                if m.any():
+                    out.append(MaskCandidate(self._place(m, frame, w, h), round(sc, 3), label, idx))
+        return out
+
     async def track(self, video: VideoInput, concept: str) -> TrackResult:
         raise ModelError("video tracking by noun phrase needs SAM 3.1")
 
@@ -385,6 +415,24 @@ class FallbackMasks:
         if not getattr(self.fallback, "loaded", True):
             await asyncio.to_thread(self.fallback.load)
         return await self.fallback.candidates(image, box, points)  # type: ignore[no-any-return]
+
+    async def region_candidates(
+        self,
+        image: ImageInput,
+        region: Box,
+        prompts: Sequence[tuple[str, Box | None, Sequence[PointPrompt]]],
+    ) -> list[MaskCandidate]:
+        if self._use_primary():
+            try:
+                res = await self.primary.region_candidates(image, region, prompts)
+                self._last = str(self.primary.mask_model_name)
+                return res  # type: ignore[no-any-return]
+            except ModelError as exc:
+                fb = await self._fallback(exc)
+                return await fb.region_candidates(image, region, prompts)  # type: ignore[no-any-return]
+        if not getattr(self.fallback, "loaded", True):
+            await asyncio.to_thread(self.fallback.load)
+        return await self.fallback.region_candidates(image, region, prompts)  # type: ignore[no-any-return]
 
     async def track(self, video: VideoInput, concept: str) -> TrackResult:
         return await self.fallback.track(video, concept)  # type: ignore[no-any-return]

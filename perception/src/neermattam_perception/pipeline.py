@@ -30,7 +30,14 @@ from dataclasses import asdict, dataclass, field
 import cv2
 import numpy as np
 
-from .adapters import MaskModel, ModelError, SceneModel, SceneObject, SceneReading
+from .adapters import (
+    MaskModel,
+    ModelError,
+    SceneModel,
+    SceneObject,
+    SceneReading,
+    VehicleObject,
+)
 from .agent import TraceStep, VerifyRefineAgent
 from .geometry import (
     DepthFailure,
@@ -83,6 +90,7 @@ class PipelineConfig:
     # so it is off by default.
     perspective: str = "off"
     max_wheels: int = 4
+    max_vehicles: int = 2
     min_quality: float = 0.25
 
 
@@ -96,6 +104,7 @@ class _Candidate:
     wheel: ObjectMask | None = None
     rim: ObjectMask | None = None
     waterline_points: tuple[tuple[int, int], ...] = ()
+    vehicle: VehicleObject | None = None  # its wheel is searched for inside the box
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,10 +160,31 @@ def second_line(points: Sequence[tuple[int, int]], m: DepthMeasurement) -> Line 
     return None
 
 
+# The wheel each kind of vehicle the scene model names stands on. Trucks and
+# other vehicles have no catalogue wheel, so their wheels are not measured.
+VEHICLE_WHEEL: dict[str, RefKind] = {
+    "car": RefKind.CAR_WHEEL,
+    "two_wheeler": RefKind.TWO_WHEELER_WHEEL,
+    "auto_rickshaw": RefKind.AUTO_WHEEL,
+    "bus": RefKind.BUS_WHEEL,
+}
+
+
+def _inside(p: tuple[int, int], box: tuple[int, int, int, int]) -> bool:
+    return box[0] <= p[0] < box[2] and box[1] <= p[1] < box[3]
+
+
 def _scene_decision(reading: SceneReading, has_estimate: bool) -> str:
     if not reading.water_visible:
         return "stop: no water"
     n = sum(1 for r in reading.references if r.kind in WHEEL_KINDS)
+    nv = sum(1 for v in reading.vehicles if v.wheels_visible and v.kind in VEHICLE_WHEEL)
+    if nv:
+        return (
+            f"search {nv} vehicle box{'es' if nv > 1 else ''} for wheels"
+            + (f", check {n} wheel{'s' if n > 1 else ''}" if n else "")
+            + " and segment the water"
+        )
     if n:
         return f"segment and verify {n} wheel{'s' if n > 1 else ''} and the water"
     return "no wheel: report own estimate" if has_estimate else "stop: no wheel"
@@ -385,8 +415,33 @@ class Pipeline:
         wheels = [r for r in reading.references if r.kind in WHEEL_KINDS]
         if hint_kind is not None and any(r.kind == hint_kind for r in wheels):
             wheels = [r for r in wheels if r.kind == hint_kind]  # the reporter knows best
-        wheels = wheels[: cfg.max_wheels]
-        if not wheels:
+        # Vehicles the scene model boxed: on the agent path their wheels are found
+        # inside the box by SAM, whatever its points said.
+        vehicle_jobs: list[tuple[VehicleObject, RefKind]] = []
+        if self.agent is not None:
+            for v in reading.vehicles:
+                if not v.wheels_visible or len(vehicle_jobs) >= cfg.max_vehicles:
+                    continue
+                vkind = VEHICLE_WHEEL.get(v.kind)
+                if (
+                    vkind is None
+                    and v.kind == "truck"
+                    and any(w.kind == RefKind.CAR_WHEEL and _inside(w.point, v.box) for w in wheels)
+                ):
+                    # A pickup or light truck the scene model says stands on car-size
+                    # wheels: searched with the car wheel prior (its wider sigma).
+                    vkind = RefKind.CAR_WHEEL
+                    reasons.append("a light truck on car-size wheels: generic car wheel size used")
+                if vkind is None:
+                    reasons.append(f"no wheel size is known for a {v.kind.replace('_', ' ')}")
+                    continue
+                if hint_kind is not None and hint_kind in WHEEL_KINDS and vkind != hint_kind:
+                    continue
+                vehicle_jobs.append((v, vkind))
+            boxes = [v.box for v, _ in vehicle_jobs]
+            wheels = [w for w in wheels if not any(_inside(w.point, b) for b in boxes)]
+        wheels = wheels[: max(0, cfg.max_wheels - len(vehicle_jobs))]
+        if not wheels and not vehicle_jobs:
             if est is not None:
                 return self._estimate_only(
                     key,
@@ -406,7 +461,13 @@ class Pipeline:
             )
 
         cands: list[_Candidate] = []
-        for i, wref in enumerate(wheels):
+        for v, vkind in vehicle_jobs:
+            i = len(cands)
+            centre = ((v.box[0] + v.box[2]) // 2, (v.box[1] + v.box[3]) // 2)
+            obj = SceneObject(vkind, centre, v.box, vehicle=v.vehicle)
+            cands.append(_Candidate(obj, i + 1, 1 + 2 * i, None, False, vehicle=v))
+        for wref in wheels:
+            i = len(cands)
             rid = None
             if wref.rim_point is not None and wref.rim_point != wref.point:
                 rid = 2 + 2 * i
@@ -683,16 +744,32 @@ class Pipeline:
         tyre ring), and rim masks from a single scene-model point were unreliable.
         """
         assert self.agent is not None
-        refs = [(c.index, c.obj, c.wheel_id) for c in cands]
-        water_out, ref_outs = await self.agent.run(
-            key, refs, reading.water_box, reading.water_points, water_id, emit=trace.append
+        refs = [(c.index, c.obj, c.wheel_id) for c in cands if c.vehicle is None]
+        vjobs = [
+            (c.index, c.vehicle, c.obj.kind, c.wheel_id) for c in cands if c.vehicle is not None
+        ]
+        water_out, outs = await self.agent.run(
+            key,
+            refs,
+            reading.water_box,
+            reading.water_points,
+            water_id,
+            emit=trace.append,
+            vehicles=vjobs,
         )
+        # The agent returns vehicles first, then references; restore the order of cands.
+        by_index = {o.index: o for o in outs}
+        ref_outs = [by_index[c.index] for c in cands]
         failures: list[str] = []
         for c, out in zip(cands, ref_outs, strict=True):
             if not out.accepted or out.mask is None:
+                what = (
+                    f"{c.vehicle.kind.replace('_', ' ')} {c.index} wheel"
+                    if c.vehicle is not None
+                    else f"{KIND_TEXT[c.obj.kind]} {c.index}"
+                )
                 failures.append(
-                    f"{KIND_TEXT[c.obj.kind]} {c.index}: the scene model did not confirm the "
-                    f"mask ({out.verdict or 'no mask'})"
+                    f"{what}: the scene model did not confirm the mask ({out.verdict or 'no mask'})"
                 )
                 continue
             c.wheel = out.mask

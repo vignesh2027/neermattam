@@ -146,6 +146,9 @@ _SWIFT = (
 )
 _I20 = "https://www.hyundai.com/content/dam/hyundai/in/en/data/brochure/i20.pdf"
 _WAGONR = "https://www.autocarindia.com/cars/maruti-suzuki/wagon-r/lxi-10"
+# Hyundai's own CRETA brochure, current generation, as hosted by a Hyundai dealer
+# (read 2026-10-29): "205 / 65 R16 ... (E,EX)", "215 / 60 R17 ... alloy (S(O), SX, ...)".
+_CRETA = "https://hanshyundai.com/brochures/brochure-creta-1.pdf"
 _RE_AUTO = (
     "https://www.bajajauto.com/en-kh/-/media/globalbajajauto/common-media/brochure/3wheelers/"
     "bajaj-re-4s-lpg-with-door-brochure.pdf"
@@ -230,6 +233,30 @@ CATALOGUE: tuple[WheelEntry, ...] = (
     _w("hyundai_i20", "Hyundai i20 (Era)", CAR, "any", "185/70 R14", _I20, True),
     _w("hyundai_i20", "Hyundai i20 (Magna)", CAR, "any", "185/65 R15", _I20, True),
     _w("hyundai_i20", "Hyundai i20 (Sportz, Asta)", CAR, "any", "195/55 R16", _I20, True),
+    _w(
+        "hyundai_creta",
+        "Hyundai Creta (E, EX, S: 16 inch wheels)",
+        CAR,
+        "any",
+        "205/65 R16",
+        _CRETA,
+        False,
+        note="seen in Hyundai's brochure for the current Creta (dealer-hosted copy); the "
+        "2015 to 2020 first generation is listed with the same two sizes only by secondary "
+        "sources, so the entry is not marked verified",
+    ),
+    _w(
+        "hyundai_creta",
+        "Hyundai Creta (SX and above: 17 inch wheels)",
+        CAR,
+        "any",
+        "215/60 R17",
+        _CRETA,
+        False,
+        note="seen in Hyundai's brochure for the current Creta (dealer-hosted copy); the "
+        "2015 to 2020 first generation is listed with the same two sizes only by secondary "
+        "sources, so the entry is not marked verified",
+    ),
     _w(
         "maruti_wagonr",
         "Maruti Suzuki WagonR (LXi 1.0)",

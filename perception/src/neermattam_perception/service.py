@@ -365,20 +365,14 @@ def key_from_dotenv(start: Path | None = None) -> str | None:
     return None
 
 
-def _modal_configured() -> bool:
-    from .modal_sam import ModalSamAdapter
-
-    return ModalSamAdapter.from_env().configured
-
-
 def default_app() -> FastAPI:
     """The app with models chosen by environment.
 
     ``NEERMATTAM_SCENE``: ``muse-spark-open`` (Baseten) or ``muse-spark-1.3``
     (Meta Model API); by default the open model when ``BASETEN_API_KEY`` is set.
-    ``NEERMATTAM_MASKS``: ``sam2.1-modal`` (SAM 2.1 large on Modal with local
-    small as the fallback; the default when ``MODAL_SAM_URL`` is set),
-    ``sam2.1-local`` (optionally ``:large`` and ``:fp16``), ``sam3.1-api`` or
+    ``NEERMATTAM_MASKS``: ``sam2.1-local`` (the default: hiera-small on this
+    machine; optionally ``:large`` and ``:fp16``), ``sam2.1-modal`` (SAM 2.1
+    large on Modal with local small as the fallback), ``sam3.1-api`` or
     ``sam3.1-local``. With the open model the
     verify-and-refine agent checks every mask.
     """
@@ -393,8 +387,10 @@ def default_app() -> FastAPI:
         masks_name = os.environ.get("NEERMATTAM_MASKS", "sam3.1-api")
         masks = meta if masks_name == "sam3.1-api" else mask_model_from_config(masks_name)
         return create_app(Pipeline(meta, masks), store, muse if muse.api_key else None)
-    default_masks = "sam2.1-modal" if _modal_configured() else "sam2.1-local"
-    masks = mask_model_from_config(os.environ.get("NEERMATTAM_MASKS", default_masks), api=meta)
+    # Local hiera-small is the default: on the real photos it reached the same
+    # outcomes as large and as large on Modal, and it is the fastest
+    # (eval/RESULTS_SAM_AB.md, eval/RESULTS_REAL.md). Modal stays selectable.
+    masks = mask_model_from_config(os.environ.get("NEERMATTAM_MASKS", "sam2.1-local"), api=meta)
     agent = VerifyRefineAgent(muse, masks)
     return create_app(Pipeline(muse, masks, agent=agent), store, muse)
 

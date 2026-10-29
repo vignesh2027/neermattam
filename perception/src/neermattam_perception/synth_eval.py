@@ -46,8 +46,7 @@ from .geometry import (
     depth_from_line,
     measure_wheel_depth,
 )
-from .references import CATALOGUE
-from .synth import SynthParams, _camera, distance_m, random_params, render
+from .synth import SYNTH_DIAMETERS_CM, SynthParams, _camera, distance_m, random_params, render
 
 DEFAULT_FOCAL_35MM = 26.0
 FloatArray = NDArray[np.float64]
@@ -78,7 +77,7 @@ def run_case(args: tuple[int, int, int] | tuple[int, int, int, bool]) -> CaseRes
     index, seed, draws = args[0], args[1], args[2]
     raw = len(args) > 3 and bool(args[3])
     rng = np.random.default_rng([seed, index])
-    diameters = sorted({e.diameter_cm for e in CATALOGUE})
+    diameters = list(SYNTH_DIAMETERS_CM)
     p = random_params(rng, diameters)
     case = render(p, rng)
     cam = _camera(p, p.diameter_cm / 200.0)

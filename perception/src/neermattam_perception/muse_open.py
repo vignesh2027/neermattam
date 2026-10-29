@@ -33,7 +33,7 @@ from typing import Any
 import httpx
 from PIL import Image
 
-from .adapters import ImageQuality, ModelError, SceneObject, SceneReading
+from .adapters import ImageQuality, ModelError, SceneObject, SceneReading, VehicleObject
 from .media import ImageInput
 from .references import RefKind, vehicles
 from .voice import depth_from_words, normalise_languages
@@ -224,6 +224,11 @@ Return one JSON object, nothing else:
       "depth_cm": your estimate of the water depth at this object in centimetres,
       "depth_reason": one short sentence: what the estimate is based on,
       "confidence": 0 to 1}},
+  "vehicles": up to 4 vehicles standing in the water, nearest first. Each:
+    {{"kind": "car", "two_wheeler", "auto_rickshaw", "bus", "truck" or "other",
+      "box": [..] the whole vehicle as far as it is visible above the water,
+      "vehicle": exact model if the bodywork shows it, one of {", ".join(sorted(vehicles()))}, else "unknown",
+      "wheels_visible": true if part of any wheel's tyre shows above the water}},
   "overall": {{"depth_cm": water depth on the street where most of it is visible, "low_cm": .., "high_cm": .., "reason": one short sentence}},
   "floating_debris": a short noun phrase for things floating on the water, or "",
   "image_quality": {{"score": 0 to 1, "blurred": bool, "too_dark": bool, "issues": [short phrases]}}
@@ -437,6 +442,22 @@ def parse_open_scene(data: dict[str, Any], width: int, height: int) -> SceneRead
         q = {}
     issues = q.get("issues") or []
     first = refs[0] if refs else None
+    found_vehicles = []
+    for v in (data.get("vehicles") or [])[:4]:
+        if not isinstance(v, dict):
+            continue
+        vb = grid_box(v.get("box"))
+        if vb is None:
+            continue
+        model = v.get("vehicle")
+        found_vehicles.append(
+            VehicleObject(
+                kind=str(v.get("kind") or "other").strip().lower(),
+                box=box_to_px(vb, width, height),
+                vehicle=model if isinstance(model, str) and model in vehicles() else None,
+                wheels_visible=bool(v.get("wheels_visible", True)),
+            )
+        )
     return SceneReading(
         water_visible=bool(data.get("water_visible", False)),
         water_points=tuple(water_points[:3]),
@@ -454,6 +475,7 @@ def parse_open_scene(data: dict[str, Any], width: int, height: int) -> SceneRead
         overall_low_cm=_num(overall.get("low_cm")),
         overall_high_cm=_num(overall.get("high_cm")),
         overall_reason=str(overall.get("reason") or "").strip()[:200] or None,
+        vehicles=tuple(found_vehicles),
     )
 
 

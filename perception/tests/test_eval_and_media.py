@@ -10,8 +10,7 @@ import pytest
 
 from neermattam_perception import media, synth_eval
 from neermattam_perception.geometry import DepthMeasurement, GeometryConfig, measure_wheel_depth
-from neermattam_perception.references import CATALOGUE
-from neermattam_perception.synth import random_params, render
+from neermattam_perception.synth import SYNTH_DIAMETERS_CM, random_params, render
 
 
 def test_video_key_frame_is_the_sharpest() -> None:
@@ -38,7 +37,7 @@ def test_video_key_frame_is_the_sharpest() -> None:
 
 def test_synthetic_accuracy_regression_guard() -> None:
     """A small fixed sample of shallow-to-mid scenes stays accurate (full table: synth_eval)."""
-    diam = sorted({e.diameter_cm for e in CATALOGUE})
+    diam = list(SYNTH_DIAMETERS_CM)
     errs = []
     for i in range(10):
         rng = np.random.default_rng([77, i])

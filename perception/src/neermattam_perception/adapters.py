@@ -67,6 +67,17 @@ class SceneObject:
 
 
 @dataclass(frozen=True, slots=True)
+class VehicleObject:
+    """A vehicle standing in the water, as the scene model boxed it (vehicles are
+    large and easy to box; their wheels are found inside the box by SAM)."""
+
+    kind: str  # car, two_wheeler, auto_rickshaw, bus, truck or other
+    box: tuple[int, int, int, int]
+    vehicle: str | None = None  # catalogue key, or None when unknown
+    wheels_visible: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class ImageQuality:
     score: float  # 0 (useless) to 1 (clear)
     blurred: bool = False
@@ -90,6 +101,7 @@ class SceneReading:
     overall_high_cm: float | None = None
     overall_reason: str | None = None
     cached: bool = False  # answered from the scene cache (no model call, no cost)
+    vehicles: tuple[VehicleObject, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

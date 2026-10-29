@@ -27,10 +27,9 @@ import numpy as np
 
 from neermattam_perception import geometry
 from neermattam_perception.geometry import DepthMeasurement, GeometryConfig, measure_wheel_depth
-from neermattam_perception.references import CATALOGUE
-from neermattam_perception.synth import random_params, render
+from neermattam_perception.synth import SYNTH_DIAMETERS_CM, random_params, render
 
-DIAMETERS = sorted({e.diameter_cm for e in CATALOGUE})
+DIAMETERS = list(SYNTH_DIAMETERS_CM)
 
 
 def one(args: tuple[int, int, int]) -> tuple[float, float, float, float] | None:

@@ -434,6 +434,42 @@ class Sam21LocalAdapter:
         masks = await asyncio.to_thread(self._segment_sync, image.rgb, objects, key)
         return MaskResult(masks, 0.0)
 
+    def _region_sync(
+        self,
+        rgb: NDArray[np.uint8],
+        region: tuple[int, int, int, int],
+        prompts: Sequence[tuple[str, tuple[int, int, int, int] | None, Sequence[PointPrompt]]],
+        key: str,
+    ) -> list[MaskCandidate]:
+        if self._model is None:
+            raise ModelError("SAM 2.1 is not loaded")
+        h, w = rgb.shape[:2]
+        x0, y0, x1, y1 = self._clip_box(region, w, h) or (0, 0, w, h)
+        out: list[MaskCandidate] = []
+        with self._lock:
+            crop = np.ascontiguousarray(rgb[y0:y1, x0:x1])
+            emb, sizes = self._embedding(crop, f"{key}:region:{x0},{y0},{x1},{y1}")
+            for label, box, points in prompts:
+                lbox, lpts = self._local_prompt(box, points, (x0, y0, x1, y1), True)
+                masks, scores = self._predict_all(emb, sizes, lbox, lpts)
+                for i, (m, sc) in enumerate(zip(masks, scores, strict=True)):
+                    if not m.any():
+                        continue
+                    full = np.zeros((h, w), dtype=bool)
+                    full[y0:y1, x0:x1] = largest_component(m)
+                    out.append(MaskCandidate(full, round(sc, 3), label, i))
+        return out
+
+    async def region_candidates(
+        self,
+        image: ImageInput,
+        region: tuple[int, int, int, int],
+        prompts: Sequence[tuple[str, tuple[int, int, int, int] | None, Sequence[PointPrompt]]],
+    ) -> list[MaskCandidate]:
+        """Every proposal for many prompts inside one region, from one image embedding."""
+        key = hashlib.sha1(image.jpeg).hexdigest()
+        return await asyncio.to_thread(self._region_sync, image.rgb, region, prompts, key)
+
     async def candidates(
         self,
         image: ImageInput,

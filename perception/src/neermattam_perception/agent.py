@@ -39,7 +39,7 @@ import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
 
-from .adapters import MaskModel, ModelError, SceneObject
+from .adapters import MaskModel, ModelError, SceneObject, VehicleObject
 from .media import ImageInput
 from .muse_open import (
     JsonReply,
@@ -51,7 +51,16 @@ from .muse_open import (
 from .references import RefKind
 from .sam import ObjectMask, ObjectPrompt, PointPrompt
 from .sam_local import box_iou
-from .wheel_shape import ShapeScore, dedupe, solid_wheel, wheel_shape
+from .wheel_finder import (
+    INSIDE_TYRE_RATIO,
+    WheelScore,
+    dark_ellipse_boxes,
+    grid_points,
+    outside_inside_ratio,
+    score_wheel,
+    wheel_region,
+)
+from .wheel_shape import ShapeScore, dedupe, mask_iou, solid_wheel, wheel_shape
 
 KIND_TEXT = {
     RefKind.TWO_WHEELER_WHEEL: "two-wheeler wheel and tyre",
@@ -97,6 +106,9 @@ class Proposal:
     mask: NDArray[np.bool_] = field(repr=False)  # solid wheel shape
     shape: ShapeScore
     source: str  # which prompt variant and which of SAM's proposals
+    # Brightness just outside over just inside the outline; well below one when
+    # the outline follows the rim, inside the dark tyre (wheel_finder).
+    edge_ratio: float = 1.0
 
 
 @dataclass
@@ -475,7 +487,8 @@ class VerifyRefineAgent:
             out = []
             for i in keep:
                 solid, _ = solid_wheel(raw[i][0])
-                out.append(Proposal(solid, wheel_shape(raw[i][0]), raw[i][1]))
+                ratio = outside_inside_ratio(image.rgb, solid)
+                out.append(Proposal(solid, wheel_shape(raw[i][0]), raw[i][1], ratio))
             return sorted(out, key=lambda p: -p.shape.score)
 
         props = await asyncio.to_thread(score)
@@ -488,35 +501,46 @@ class VerifyRefineAgent:
         index: int,
         object_id: int,
         emit: Emit | None = None,
+        seed: list[Proposal] | None = None,
+        target: str | None = None,
+        trace: list[TraceStep] | None = None,
     ) -> RefOutcome:
-        target = f"{obj.kind.value.replace('_', ' ')} {index}"
+        """Verify and refine one wheel. ``seed`` replaces SAM's first proposals (the
+        vehicle-box search found them already); ``trace`` continues an earlier one."""
+        target = target or f"{obj.kind.value.replace('_', ' ')} {index}"
         kind_text = KIND_TEXT[obj.kind]
         box: Box | None = obj.box
         out = RefOutcome(index, obj, False, None, box, 0)
+        if trace is not None:
+            out.trace = trace
         pts = _initial_points(obj, box)
         for attempt in range(self.max_refinements + 1):
-            props, n_raw, ms = await self._proposals(image, box, pts, object_id)
+            if attempt == 0 and seed is not None:
+                props = seed
+            else:
+                props, n_raw, ms = await self._proposals(image, box, pts, object_id)
             shown = props[:2]
-            self._log(
-                out.trace,
-                TraceStep(
-                    "segment",
-                    target,
-                    self.mask_name,
-                    f"box {_fmt_box(box)}" + _fmt_points(pts),
-                    (
-                        f"{n_raw} proposals, {len(props)} distinct; best shapes "
-                        + ", ".join(f"{p.shape.score:.2f}" for p in shown)
-                    )
-                    if props
-                    else "no mask",
-                    "verify the best " + ("two" if len(shown) == 2 else "one")
-                    if shown
-                    else "verify",
-                    ms,
-                ),
-                emit,
-            )
+            if not (attempt == 0 and seed is not None):
+                self._log(
+                    out.trace,
+                    TraceStep(
+                        "segment",
+                        target,
+                        self.mask_name,
+                        f"box {_fmt_box(box)}" + _fmt_points(pts),
+                        (
+                            f"{n_raw} proposals, {len(props)} distinct; best shapes "
+                            + ", ".join(f"{p.shape.score:.2f}" for p in shown)
+                        )
+                        if props
+                        else "no mask",
+                        "verify the best " + ("two" if len(shown) == 2 else "one")
+                        if shown
+                        else "verify",
+                        ms,
+                    ),
+                    emit,
+                )
             # The first look is wide, so a box that missed its object still shows
             # it, unless the best proposal already has a wheel's shape; later looks
             # are close, so the outline can be judged in detail.
@@ -745,6 +769,7 @@ class VerifyRefineAgent:
             and quality == "good"
             and chosen.shape.score >= self.accept_shape
             and (box_agree is None or box_agree >= self.min_box_agreement)
+            and chosen.edge_ratio >= INSIDE_TYRE_RATIO
         ):
             decision = "accept"
         elif can_refine:
@@ -760,6 +785,17 @@ class VerifyRefineAgent:
                 f"give up: the outline covers a different area than the tyre ({box_agree:.2f})"
             )
             verdict = "outline and the tyre's box disagree"
+        elif (
+            chosen is not None
+            and is_target
+            and quality == "good"
+            and chosen.edge_ratio < INSIDE_TYRE_RATIO
+        ):
+            decision = (
+                "give up: the outline sits inside the tyre (darker outside than inside, "
+                f"{chosen.edge_ratio:.2f})"
+            )
+            verdict = "outline follows the rim, inside the tyre"
         elif chosen is not None and is_target and quality == "good":
             decision = f"give up: the outline does not fit a wheel ({chosen.shape.text()})"
             verdict = "outline accepted by the scene model but not wheel-shaped"
@@ -773,7 +809,11 @@ class VerifyRefineAgent:
         pick = str(d.get("choice") or "").strip().upper()[:4]
         summary = (
             (f"chose {pick}, " if pick else "")
-            + (f"{chosen.shape.text()}, " if chosen is not None else "")
+            + (
+                f"{chosen.shape.text()}, edge ratio {chosen.edge_ratio:.2f}, "
+                if chosen is not None
+                else ""
+            )
             + (f"box agreement {box_agree:.2f}, " if box_agree is not None else "")
             + f"is_target={str(is_target).lower()}, outline {quality}, "
             + (f"view {view}, " if view else "")
@@ -913,6 +953,86 @@ class VerifyRefineAgent:
             pts = (npt,) if npt is not None else ()
         return out
 
+    async def find_vehicle_wheel(
+        self,
+        image: ImageInput,
+        vehicle: VehicleObject,
+        kind: RefKind,
+        index: int,
+        object_id: int,
+        emit: Emit | None = None,
+    ) -> RefOutcome:
+        """A wheel of ``vehicle`` found by SAM from a point grid and dark blobs in the
+        lower part of its box, ranked by wheel score, then verified as usual."""
+        target = f"{vehicle.kind.replace('_', ' ')} {index} wheel"
+        region = wheel_region(vehicle.box, image.width, image.height)
+        vw = vehicle.box[2] - vehicle.box[0]
+        t0 = time.perf_counter()
+        grid = grid_points(region)
+        blobs = await asyncio.to_thread(dark_ellipse_boxes, image.rgb, region, vw)
+        prompts: list[tuple[str, Box | None, Sequence[PointPrompt]]] = [
+            ("grid", None, (PointPrompt(*p),)) for p in grid
+        ] + [("dark blob", b, ()) for b in blobs]
+        trace: list[TraceStep] = []
+        many = getattr(self.masks, "region_candidates", None)
+        raw: list[NDArray[np.bool_]] = []
+        if many is not None:
+            raw = [c.mask for c in await many(image, region, prompts)]
+        else:  # one request per prompt
+            for _, b, p in prompts:
+                one, _ = await self._segment(image, ObjectPrompt(object_id, tuple(p), b))
+                if one is not None:
+                    raw.append(one.mask)
+
+        def rank() -> list[tuple[WheelScore, NDArray[np.bool_]]]:
+            keep = dedupe(raw)
+            scored = [(score_wheel(image.rgb, raw[i], region, vw), raw[i]) for i in keep]
+            scored = [t for t in scored if t[0].score > 0]
+            scored.sort(key=lambda t: -t[0].score)
+            best: list[tuple[WheelScore, NDArray[np.bool_]]] = []
+            for sc, m in scored:  # two distinct wheels or outlines
+                if all(mask_iou(m, b) < 0.5 for _, b in best):
+                    best.append((sc, m))
+                if len(best) == 2:
+                    break
+            return best
+
+        best = await asyncio.to_thread(rank)
+        out_text = (
+            f"{len(raw)} proposals from {len(grid)} grid points and {len(blobs)} dark blobs; "
+            + ("best: " + "; ".join(sc.text() for sc, _ in best) if best else "none wheel-like")
+        )
+        self._log(
+            trace,
+            TraceStep(
+                "segment",
+                target,
+                self.mask_name,
+                f"lower part of the vehicle box {_fmt_box(region)}",
+                out_text,
+                "verify the best " + ("two" if len(best) == 2 else "one") if best else "give up",
+                round(1000 * (time.perf_counter() - t0)),
+            ),
+            emit,
+        )
+        if not best:
+            obj = SceneObject(kind, (0, 0), vehicle.box, vehicle=vehicle.vehicle)
+            out = RefOutcome(index, obj, False, None, None, 0, trace=trace)
+            out.verdict = "no wheel-like proposal in the vehicle box"
+            return out
+        seed = []
+        for sc, wheel in best:
+            solid, _ = solid_wheel(wheel)
+            ratio = outside_inside_ratio(image.rgb, solid)
+            seed.append(Proposal(solid, sc.shape, "vehicle search", ratio))
+        bb = mask_bbox(seed[0].mask) or vehicle.box
+        obj = SceneObject(
+            kind, ((bb[0] + bb[2]) // 2, (bb[1] + bb[3]) // 2), bb, vehicle=vehicle.vehicle
+        )
+        return await self.refine_reference(
+            image, obj, index, object_id, emit, seed=seed, target=target, trace=trace
+        )
+
     async def run(
         self,
         image: ImageInput,
@@ -921,10 +1041,17 @@ class VerifyRefineAgent:
         water_points: Sequence[tuple[int, int]],
         water_id: int,
         emit: Emit | None = None,
+        vehicles: Sequence[tuple[int, VehicleObject, RefKind, int]] = (),
     ) -> tuple[WaterOutcome, list[RefOutcome]]:
-        """Water and every reference, verified concurrently (SAM itself runs one at a time)."""
+        """Water, every vehicle's wheel and every other reference, verified
+        concurrently (SAM itself runs one request at a time). Outcomes come back in
+        the order: vehicles, then references."""
         water_job = self.refine_water(image, water_box, water_points, water_id, emit)
-        ref_jobs = [self.refine_reference(image, obj, idx, oid, emit) for idx, obj, oid in refs]
-        water, *outs = await asyncio.gather(water_job, *ref_jobs)
+        jobs = [
+            self.find_vehicle_wheel(image, v, kind, idx, oid, emit)
+            for idx, v, kind, oid in vehicles
+        ]
+        jobs += [self.refine_reference(image, obj, idx, oid, emit) for idx, obj, oid in refs]
+        water, *outs = await asyncio.gather(water_job, *jobs)
         assert isinstance(water, WaterOutcome)
         return water, [r for r in outs if isinstance(r, RefOutcome)]
