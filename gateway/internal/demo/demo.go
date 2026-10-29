@@ -303,6 +303,7 @@ func (s *Seeder) dripOne(ctx context.Context) {
 	s.Origins.Mark(res.Cell, true)
 	report.MarkNearby(ctx, s.Engine, s.Origins, lat, lon, true)
 	s.Hub.PublishFeed(live.FeedItem{
+		City:      "chennai",
 		Simulated: true, Source: "simulated", DepthCm: r.DepthCm, DepthSigmaCm: r.DepthSigmaCm,
 		Place: h.Name, Lat: lat, Lon: lon, At: r.ObservedAt,
 	})

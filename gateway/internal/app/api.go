@@ -10,7 +10,9 @@ import (
 	"io"
 	"math"
 	"mime"
+	"neermattam/gateway/internal/cities"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,6 +84,8 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 			lonS = v
 		case "location":
 			latS, lonS, _ = strings.Cut(v, ",")
+		case "city":
+			sub.City = strings.ToLower(v)
 		case "hint_reference":
 			if v != "" {
 				if !hintReferences[v] {
@@ -179,6 +183,11 @@ type cellsEntry struct {
 	etag string
 	at   time.Time
 
+	city        string
+	frame       web.Frame
+	devOnce     sync.Once
+	devBody     []byte
+	devGz       []byte
 	previewOnce sync.Once
 	preview     web.PreviewView
 }
@@ -204,7 +213,7 @@ func (e *cellsEntry) Preview() web.PreviewView {
 		if err != nil {
 			cells = nil
 		}
-		e.preview = web.NewPreview(cells)
+		e.preview = web.NewPreview(cells, e.frame)
 	})
 	return e.preview
 }
@@ -239,6 +248,12 @@ func (c *cellsCache) put(key string, e *cellsEntry) {
 // fresh.
 func (a *App) cellsFor(ctx context.Context, bbox config.BBox) (*cellsEntry, error) {
 	key := fmt.Sprintf("%.4f,%.4f,%.4f,%.4f", bbox.MinLon, bbox.MinLat, bbox.MaxLon, bbox.MaxLat)
+	return a.cellsCached(ctx, "bbox="+key, url.Values{"bbox": {key}}, "")
+}
+
+// cellsCached serves one engine cells query from the 2-second cache.
+// Requests that miss together share one fetch.
+func (a *App) cellsCached(ctx context.Context, key string, q url.Values, city string) (*cellsEntry, error) {
 	if e, ok := a.cells.get(key); ok {
 		a.Metrics.CellsCache.Inc("hit")
 		return e, nil
@@ -262,7 +277,7 @@ func (a *App) cellsFor(ctx context.Context, bbox config.BBox) (*cellsEntry, erro
 	// The shared fetch must not die with the first caller's request.
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	c.e, c.err = a.fetchCells(fctx, key)
+	c.e, c.err = a.fetchCells(fctx, q, city)
 	if c.err == nil {
 		a.cells.put(key, c.e)
 	}
@@ -273,17 +288,25 @@ func (a *App) cellsFor(ctx context.Context, bbox config.BBox) (*cellsEntry, erro
 	return c.e, c.err
 }
 
-func (a *App) fetchCells(ctx context.Context, key string) (*cellsEntry, error) {
-	raw, err := a.Engine.Cells(ctx, key)
+func (a *App) fetchCells(ctx context.Context, q url.Values, city string) (*cellsEntry, error) {
+	raw, err := a.Engine.CellsQuery(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	body, err := live.DecorateCollection(raw, a.Origins)
+	simulated := a.Origins.HasSimulated()
+	if city != "" {
+		simulated = a.simulatedIn(city)
+	}
+	body, err := live.DecorateCollectionFor(raw, a.Origins, city, simulated)
 	if err != nil {
 		return nil, err
 	}
 	sum := sha256.Sum256(body)
-	return &cellsEntry{body: body, gz: web.CompressBest(body), etag: `"` + hex.EncodeToString(sum[:12]) + `"`, at: time.Now()}, nil
+	e := &cellsEntry{body: body, gz: web.CompressBest(body), etag: `"` + hex.EncodeToString(sum[:12]) + `"`, at: time.Now(), city: city}
+	if c, ok := a.Cities.Get(city); ok {
+		e.frame = web.FrameFor(c.ID, c.BBox.MinLon, c.BBox.MinLat, c.BBox.MaxLon, c.BBox.MaxLat)
+	}
+	return e, nil
 }
 
 // apiCells is GET /api/cells?bbox=minLon,minLat,maxLon,maxLat. Without a
@@ -292,24 +315,54 @@ func (a *App) apiCells(w http.ResponseWriter, r *http.Request) {
 	if !a.limit(w, r, a.apiLimit, "api") {
 		return
 	}
-	bbox := a.Cfg.ServiceArea
-	if q := r.URL.Query().Get("bbox"); q != "" {
-		b, err := config.ParseBBox(q)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		if (b.MaxLon-b.MinLon)*(b.MaxLat-b.MinLat) > 1 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bbox is too large: at most 1 square degree per request"})
-			return
-		}
-		bbox = b
-	}
-	e, err := a.cellsFor(r.Context(), bbox)
-	if err != nil {
-		a.upstreamError(w, err)
+	e, code, msg := a.cellsRequest(r)
+	if code != 0 {
+		writeJSON(w, code, map[string]string{"error": msg, "code": "bad_request"})
 		return
 	}
+	if e == nil {
+		return
+	}
+	if e.err != nil {
+		a.upstreamError(w, e.err)
+		return
+	}
+	a.serveCells(w, r, e.entry)
+}
+
+// cellsAnswer is a cells lookup's result.
+type cellsAnswer struct {
+	entry *cellsEntry
+	err   error
+}
+
+// cellsRequest reads ?city= or ?bbox= (default: the default city).
+func (a *App) cellsRequest(r *http.Request) (*cellsAnswer, int, string) {
+	q := r.URL.Query()
+	if raw := q.Get("bbox"); raw != "" {
+		b, err := config.ParseBBox(raw)
+		if err != nil {
+			return nil, http.StatusBadRequest, err.Error()
+		}
+		if (b.MaxLon-b.MinLon)*(b.MaxLat-b.MinLat) > 1 {
+			return nil, http.StatusBadRequest, "bbox is too large: at most 1 square degree per request"
+		}
+		e, err := a.cellsFor(r.Context(), b)
+		return &cellsAnswer{e, err}, 0, ""
+	}
+	city := strings.ToLower(strings.TrimSpace(q.Get("city")))
+	if city == "" {
+		city = cities.Default
+	}
+	if _, ok := a.Cities.Get(city); !ok {
+		return nil, http.StatusBadRequest, fmt.Sprintf("city must be one of %s", strings.Join(a.Cities.SortedIDs(), ", "))
+	}
+	e, err := a.cellsForCity(r.Context(), city)
+	return &cellsAnswer{e, err}, 0, ""
+}
+
+// serveCells writes a cached collection with its ETag and gzip copy.
+func (a *App) serveCells(w http.ResponseWriter, r *http.Request, e *cellsEntry) {
 	h := w.Header()
 	h.Set("ETag", e.etag)
 	h.Set("Cache-Control", "public, max-age=2")
@@ -339,11 +392,11 @@ func (a *App) upstreamError(w http.ResponseWriter, err error) {
 		if status >= 500 && status != http.StatusServiceUnavailable {
 			status = http.StatusBadGateway
 		}
-		writeJSON(w, status, map[string]string{"error": ue.Message})
+		writeJSON(w, status, map[string]string{"error": ue.Message, "code": "engine_error"})
 		return
 	}
 	a.Log.Warn("engine unavailable", "error", err.Error())
-	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the map engine is not reachable right now; try again shortly"})
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the map engine is not reachable right now; try again shortly", "code": "engine_unavailable"})
 }
 
 // NormaliseVehicle maps UI and API names onto the engine's vehicle ids.
@@ -363,51 +416,63 @@ func NormaliseVehicle(v string) (string, bool) {
 	return "", false
 }
 
-func (a *App) checkPoint(raw, name string) (string, error) {
-	parts := strings.Split(raw, ",")
-	if len(parts) != 2 {
-		return "", fmt.Errorf("%s must be lat,lon, such as 12.9791,80.2209", name)
+// checkPoint reads lat,lon and, when city is set, requires it to lie in
+// that city.
+func (a *App) checkPoint(raw, name string) (string, float64, float64, *routeError) {
+	lat, lon, ok := parseLatLon(raw)
+	if !ok {
+		return "", 0, 0, rerr(400, "bad_point", "route_bad_point", "%s must be lat,lon, such as 12.9791,80.2209.", name)
 	}
-	lat, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-	lon, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-	if err1 != nil || err2 != nil {
-		return "", fmt.Errorf("%s must be two decimal numbers: lat,lon", name)
-	}
-	if !a.Cfg.ServiceArea.Contains(lat, lon) {
-		return "", fmt.Errorf("%s (%.4f, %.4f) is outside the Chennai service area; the order is lat,lon", name, lat, lon)
-	}
-	return fmt.Sprintf("%.6f,%.6f", lat, lon), nil
+	return fmt.Sprintf("%.6f,%.6f", lat, lon), lat, lon, nil
 }
 
 type routeQuery struct {
-	From, To, Vehicle string
+	From, To, Vehicle, City string
 }
 
-func (a *App) parseRoute(r *http.Request) (routeQuery, error) {
+// parseRoute reads from, to and vehicle. Both ends must be in one covered
+// city: the chosen one when city is given, else the one holding from.
+func (a *App) parseRoute(r *http.Request, city string) (routeQuery, *routeError) {
 	q := r.URL.Query()
-	from, err := a.checkPoint(q.Get("from"), "from")
+	from, flat, flon, err := a.checkPoint(q.Get("from"), "from")
 	if err != nil {
 		return routeQuery{}, err
 	}
-	to, err := a.checkPoint(q.Get("to"), "to")
+	to, tlat, tlon, err := a.checkPoint(q.Get("to"), "to")
 	if err != nil {
 		return routeQuery{}, err
 	}
 	v, ok := NormaliseVehicle(q.Get("vehicle"))
 	if !ok {
-		return routeQuery{}, errors.New("vehicle must be walking, two_wheeler, auto, car or bus")
+		return routeQuery{}, rerr(400, "bad_vehicle", "route_bad_vehicle", "vehicle must be walking, two_wheeler, auto, car or bus.")
 	}
-	return routeQuery{from, to, v}, nil
+	fc, fok := a.Cities.Find(flat, flon)
+	tc, tok := a.Cities.Find(tlat, tlon)
+	if city == "" {
+		if !fok {
+			return routeQuery{}, rerr(400, "outside_area", "route_outside_all", "The start (%.4f, %.4f) is outside every city Neermattam covers. The order is lat,lon.", flat, flon)
+		}
+		city = fc.ID
+	}
+	c, _ := a.Cities.Get(city)
+	switch {
+	case !c.Contains(flat, flon) || !c.Contains(tlat, tlon):
+		if fok && tok && fc.ID != tc.ID {
+			return routeQuery{}, rerr(400, "different_cities", "route_different_cities", "The start and the end are in different cities. A route has to start and end in the same city.")
+		}
+		return routeQuery{}, rerr(400, "outside_area", "route_outside_city", "The start or the end is outside %s. Pick both points in %s, or switch city.", cityArg(city), cityArg(city))
+	}
+	return routeQuery{from, to, v, city}, nil
 }
 
-// routeJSON asks the engine and labels the result when the map holds
+// routeJSON asks the engine and labels the result when the city holds
 // simulated water.
 func (a *App) routeJSON(ctx context.Context, q routeQuery) ([]byte, error) {
 	raw, err := a.Engine.Route(ctx, q.From, q.To, q.Vehicle)
 	if err != nil {
 		return nil, err
 	}
-	if !a.Origins.HasSimulated() {
+	if !a.simulatedIn(q.City) {
 		return raw, nil
 	}
 	var f map[string]any
@@ -429,19 +494,27 @@ func (a *App) apiRoute(w http.ResponseWriter, r *http.Request) {
 	if !a.limit(w, r, a.apiLimit, "api") {
 		return
 	}
-	q, err := a.parseRoute(r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	body, err := a.routeJSON(r.Context(), q)
-	if err != nil {
-		a.upstreamError(w, err)
+	body, rerr := a.routeFor(r)
+	if rerr != nil {
+		writeJSON(w, rerr.Status, map[string]string{"error": rerr.Msg, "code": rerr.Code})
 		return
 	}
 	w.Header().Set("Content-Type", "application/geo+json")
 	w.Header().Set("Cache-Control", "no-store")
 	web.WriteBody(w, r, body, nil)
+}
+
+// routeFor plans the route a request asks for, with errors in plain words.
+func (a *App) routeFor(r *http.Request) ([]byte, *routeError) {
+	q, perr := a.parseRoute(r, strings.ToLower(r.URL.Query().Get("city")))
+	if perr != nil {
+		return nil, perr
+	}
+	body, err := a.routeJSON(r.Context(), q)
+	if err != nil {
+		return nil, a.engineRouteError(err, q.City)
+	}
+	return body, nil
 }
 
 // apiStream is GET /api/stream: server-sent events of changed cells, the
@@ -450,7 +523,14 @@ func (a *App) apiStream(w http.ResponseWriter, r *http.Request) {
 	if !a.limit(w, r, a.apiLimit, "stream") {
 		return
 	}
-	sub, err := a.Hub.Subscribe()
+	city := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("city")))
+	if city != "" {
+		if _, ok := a.Cities.Get(city); !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown city", "code": "bad_city"})
+			return
+		}
+	}
+	sub, err := a.Hub.SubscribeCity(city)
 	if err != nil {
 		a.Metrics.SSEDropped.Inc("refused_full")
 		w.Header().Set("Retry-After", "10")
@@ -465,7 +545,7 @@ func (a *App) apiStream(w http.ResponseWriter, r *http.Request) {
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	hello, _ := json.Marshal(map[string]any{"simulated_scenario": a.Origins.HasSimulated(), "engine_stream": a.Hub.UpstreamConnected()})
+	hello, _ := json.Marshal(map[string]any{"city": city, "simulated_scenario": a.simulatedIn(city) || (city == "" && a.Origins.HasSimulated()), "engine_stream": a.Hub.UpstreamConnected()})
 	if _, err := fmt.Fprintf(w, "retry: 3000\n\nevent: hello\ndata: %s\n\n", hello); err != nil {
 		return
 	}
@@ -505,8 +585,9 @@ func (a *App) readyz(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var wg sync.WaitGroup
 	var engErr, perErr error
+	var eng upstream.Readiness
 	wg.Add(2)
-	go func() { defer wg.Done(); engErr = a.Engine.Ready(ctx) }()
+	go func() { defer wg.Done(); eng, engErr = a.Engine.Readiness(ctx) }()
 	go func() { defer wg.Done(); perErr = a.Perception.Ready(ctx) }()
 	wg.Wait()
 	status := func(err error) string {
@@ -528,6 +609,12 @@ func (a *App) readyz(w http.ResponseWriter, r *http.Request) {
 	}
 	code := http.StatusOK
 	body["status"] = "ready"
+	if engErr == nil && eng.Status == "degraded" {
+		// Some city's routing is loading or failed; everything else works.
+		body["status"] = "degraded"
+		body["engine"] = "degraded"
+		body["reason"] = eng.Reason
+	}
 	if engErr != nil || perErr != nil {
 		code = http.StatusServiceUnavailable
 		body["status"] = "not_ready"

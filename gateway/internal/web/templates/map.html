@@ -4,17 +4,22 @@
   {{if .CellsJSON}}<script type="application/json" id="cells-data" data-etag="{{.CellsETag}}">{{.CellsJSON}}</script>{{end}}
 
   <div class="overlay glass status-card">
-    <h1><span class="live-dot" id="live-dot" aria-hidden="true"></span>{{t "map.title"}}</h1>
+    <div class="title-row"><h1><span class="live-dot" id="live-dot" aria-hidden="true"></span>{{t "map.title_city" (t (printf "city.%s" .City.ID))}}</h1>{{template "city_switcher" .}}</div>
     <p class="sub">{{t "map.sub"}}</p>
     <div class="stats" aria-live="polite">
       <div class="stat"><b id="st-cells">{{.Stats.Cells}}</b><span><span class="lg-only">{{t "map.stat_cells"}}</span><span class="sm-only">{{t "map.stat_cells_short"}}</span></span></div>
       <div class="stat"><b id="st-deep">{{.Stats.Deep}}</b><span>{{t "map.stat_deep"}}</span></div>
       <div class="stat"><b id="st-max">{{.Stats.Max}}</b><span><span class="lg-only">{{t "map.stat_max"}}</span><span class="sm-only">{{t "map.stat_max_short"}}</span></span></div>
     </div>
-    {{if .Demo}}
+    {{if .City.Simulated}}
     <div class="sim-banner" role="note">
       {{template "icon-flask"}}
       <span><strong>{{t "sim.title"}}</strong> <span class="lg-only">{{t "sim.long"}}</span><span class="sm-only">{{t "sim.short"}}</span></span>
+    </div>
+    {{else if .Stats.Empty}}
+    <div class="empty-banner" role="note" id="empty-banner">
+      {{template "icon-pin"}}
+      <span><strong>{{t "city.no_reports" (t (printf "city.%s" .City.ID))}}</strong> {{t "city.no_reports_sub"}}</span>
     </div>
     {{end}}
   </div>
@@ -41,7 +46,7 @@
       <ul class="keys">
         <li><span class="sw sw-hatch" aria-hidden="true"></span>{{t "legend.unknown"}}</li>
         <li><span class="sw sw-none" aria-hidden="true"></span>{{t "legend.no_reports"}}</li>
-        {{if .Demo}}<li><span class="sw sw-real" aria-hidden="true"></span>{{t "legend.real"}}</li>{{end}}
+        {{if .City.Simulated}}<li><span class="sw sw-real" aria-hidden="true"></span>{{t "legend.real"}}</li>{{end}}
       </ul>
     </div>
   </details>
@@ -62,7 +67,7 @@
 
   <div class="overlay map-actions">
     <p class="advisory-pill" role="note">{{template "icon-alert"}}{{t "advisory.short"}}</p>
-    <a class="btn btn-primary btn-lg" href="/report" id="report-here">{{template "icon-camera"}}{{t "map.report_here"}}</a>
+    <a class="btn btn-primary btn-lg" href="/report?city={{.City.ID}}" id="report-here">{{template "icon-camera"}}{{t "map.report_here"}}</a>
   </div>
 </section>
 {{end}}
@@ -73,13 +78,16 @@ document.addEventListener("DOMContentLoaded", function () {
   var params = new URLSearchParams(location.search), at = (params.get("at") || "").split(",").map(Number);
   var focus = at.length === 2 && isFinite(at[0]) && isFinite(at[1]) ? [at[1], at[0]] : null;
   var mobile = matchMedia("(max-width: 560px)").matches;
-  var map = NM.create("map", focus ? { center: focus, zoom: 15 } : { center: mobile ? [80.215, 13.0] : [80.205, 13.0], zoom: mobile ? 10.6 : 11.6 });
+  var chennai = NM.city.id === "chennai";
+  var map = NM.create("map", focus ? { center: focus, zoom: 15 }
+    : chennai ? { center: mobile ? [80.215, 13.0] : [80.205, 13.0], zoom: mobile ? 10.6 : 11.6 }
+    : NM.cityView({ fitBoundsOptions: { padding: mobile ? { top: 210, bottom: 120, left: 16, right: 16 } : { top: 40, bottom: 40, left: 380, right: 60 } } }));
   if (mobile) document.getElementById("legend").removeAttribute("open");
   var dot = document.getElementById("live-dot"), feedState = document.getElementById("feed-state");
 
   // Cells go on as soon as the style is parsed, before base map tiles load.
   map.once("style.load", function () {
-    NM.addCells(map, { showReal: {{.Demo}} });
+    NM.addCells(map, { showReal: {{.City.Simulated}} });
     NM.popups(map);
     if (focus) new maplibregl.Marker({ color: "#2563EB" }).setLngLat(focus).addTo(map);
     var framed = !!focus;
@@ -99,6 +107,8 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("st-cells").textContent = list.length.toLocaleString();
         document.getElementById("st-deep").textContent = deep.toLocaleString();
         document.getElementById("st-max").textContent = known.length ? Math.round(max) + " cm" : NM.tr("js.none");
+        var empty = document.getElementById("empty-banner");
+        if (empty && list.length) empty.remove();
       },
       onStatus: function (s) {
         dot.setAttribute("data-state", s);
@@ -123,7 +133,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   map.on("moveend", function () {
     var c = map.getCenter();
-    document.getElementById("report-here").href = "/report?at=" + c.lat.toFixed(5) + "," + c.lng.toFixed(5);
+    document.getElementById("report-here").href = "/report?city=" + NM.city.id + "&at=" + c.lat.toFixed(5) + "," + c.lng.toFixed(5);
   });
 
   document.querySelectorAll("input[name=colour]").forEach(function (r) {

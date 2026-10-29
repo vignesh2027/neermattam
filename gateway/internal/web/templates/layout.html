@@ -41,6 +41,7 @@
     <a href="/map" {{if eq .Active "map"}}aria-current="page"{{end}}><span class="lg-only">{{t "nav.map"}}</span><span class="sm-only">{{t "nav.map_short"}}</span></a>
     <a href="/report" {{if eq .Active "report"}}aria-current="page"{{end}}>{{t "nav.report"}}</a>
     <a href="/route" {{if eq .Active "route"}}aria-current="page"{{end}}>{{t "nav.route"}}</a>
+    <a href="/alerts" {{if eq .Active "alerts"}}aria-current="page"{{end}}>{{t "nav.alerts"}}</a>
     <a href="/about" {{if eq .Active "about"}}aria-current="page"{{end}}>{{t "nav.about"}}</a>
   </nav>
   <details class="lang-menu">
@@ -56,18 +57,34 @@
 {{template "content" .}}
 </main>
 {{if .Footer}}<footer class="site-footer"><div class="inner">
+  <nav class="footer-links" aria-label="{{t "footer.links"}}">
+    <a href="/control">{{t "nav.control"}}</a>
+    <a href="/developers">{{t "nav.developers"}}</a>
+    <a href="/alerts">{{t "nav.alerts"}}</a>
+    <a href="/about">{{t "nav.about"}}</a>
+  </nav>
   <span>{{t "footer.advisory"}}</span>
   <span>{{t "footer.credits"}}</span>
 </div></footer>{{end}}
 {{if .NeedsMap}}<script type="application/json" id="i18n">{{.ClientText}}</script>
+<script type="application/json" id="city">{{.City.JSON}}</script>
 {{template "mapcore" .}}{{end}}
 {{block "scripts" .}}{{end}}
 </body>
 </html>{{end}}
 
+{{define "city_switcher"}}<details class="city-menu">
+  <summary aria-label="{{t "city.choose"}}">{{template "icon-pin"}}<span class="city-current">{{t (printf "city.%s" .City.ID)}}</span>{{template "icon-chev"}}</summary>
+  <ul role="list">
+    {{range .CityLinks}}<li><a href="{{.Href}}" {{if .Current}}aria-current="true"{{end}}><span>{{t (printf "city.%s" .ID)}}</span>{{if .Simulated}}<small class="chip chip-violet">{{t "city.demo_tag"}}</small>{{end}}</a></li>
+    {{end}}
+  </ul>
+</details>{{end}}
+
 {{define "mark"}}<img class="brand-mark" src="{{asset "brand/mark-64.png"}}" srcset="{{asset "brand/mark-64.png"}} 1x, {{asset "brand/mark-128.png"}} 2x" width="40" height="40" alt="" decoding="async">{{end}}
 {{define "icon-globe"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/></svg>{{end}}
 
+{{define "icon-bell"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>{{end}}
 {{define "icon-camera"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>{{end}}
 {{define "icon-alert"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>{{end}}
 {{define "icon-flask"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7 15h10"/></svg>{{end}}

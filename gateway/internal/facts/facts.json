@@ -19,13 +19,13 @@
     "photos": 6,
     "wheel_geometry": 0,
     "model_estimate": 6,
-    "date": "2026-10-27",
+    "date": "2026-10-28",
     "source": "eval/RESULTS_REAL.md"
   },
   "trace": {
     "photo": "India - Chennai - Monsoon - 02",
     "credit": "McKay Savage, CC BY 2.0, via Wikimedia Commons",
-    "date": "2026-10-27",
+    "date": "2026-10-28",
     "steps": [
       {
         "step": "scene",

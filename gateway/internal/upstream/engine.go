@@ -161,14 +161,35 @@ func (e *Engine) Cells(ctx context.Context, bbox string) ([]byte, error) {
 
 // CellProps are the properties of one engine cell feature.
 type CellProps struct {
-	Cell         string    `json:"cell"`
-	DepthCm      float64   `json:"depth_cm"`
-	DepthSigmaCm float64   `json:"depth_sigma_cm"`
-	Unknown      bool      `json:"unknown"`
-	NReadings    int       `json:"n_readings"`
-	HazardClass  string    `json:"hazard_class"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	Origin       string    `json:"origin,omitempty"`
+	Cell             string    `json:"cell"`
+	City             string    `json:"city"`
+	DepthCm          float64   `json:"depth_cm"`
+	DepthSigmaCm     float64   `json:"depth_sigma_cm"`
+	DepthUpperCm     *float64  `json:"depth_upper_cm"`
+	Unknown          bool      `json:"unknown"`
+	Expired          bool      `json:"expired"`
+	NReadings        int       `json:"n_readings"`
+	HazardClass      string    `json:"hazard_class"`
+	HazardClassUpper string    `json:"hazard_class_upper"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Origin           string    `json:"origin,omitempty"`
+}
+
+// BlockingDepthCm is the depth routing judges the cell at: the upper
+// estimate when the engine sends one, else the mean plus 1.5 sigma.
+func (p CellProps) BlockingDepthCm() float64 {
+	if p.DepthUpperCm != nil {
+		return *p.DepthUpperCm
+	}
+	return p.DepthCm + 1.5*p.DepthSigmaCm
+}
+
+// UpperClass is the hazard class at the blocking depth, else the class.
+func (p CellProps) UpperClass() string {
+	if p.HazardClassUpper != "" {
+		return p.HazardClassUpper
+	}
+	return p.HazardClass
 }
 
 // CellFeature is a decoded cell with its centroid.
@@ -198,14 +219,44 @@ func DecodeCells(raw []byte) ([]CellFeature, error) {
 	}
 	out := make([]CellFeature, 0, len(fc.Features))
 	for _, f := range fc.Features {
-		cf := CellFeature{ID: f.ID, Props: f.Properties, RawPolygon: f.Geometry.Coordinates}
-		if cf.ID == "" {
-			cf.ID = f.Properties.Cell
-		}
-		cf.Lat, cf.Lon = Centroid(f.Geometry.Coordinates)
-		out = append(out, cf)
+		out = append(out, f.feature())
 	}
 	return out, nil
+}
+
+// DecodeCell parses one cell feature, as the stream sends it.
+func DecodeCell(raw []byte) (CellFeature, error) {
+	var f rawCell
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return CellFeature{}, err
+	}
+	return f.feature(), nil
+}
+
+func (f rawCell) feature() CellFeature {
+	cf := CellFeature{ID: f.ID, Props: f.Properties, RawPolygon: f.Geometry.Coordinates}
+	if cf.ID == "" {
+		cf.ID = f.Properties.Cell
+	}
+	cf.Lat, cf.Lon = Centroid(f.Geometry.Coordinates)
+	return cf
+}
+
+// ContainsPoint reports whether the cell's outer ring holds the point.
+func (c CellFeature) ContainsPoint(lat, lon float64) bool {
+	if len(c.RawPolygon) == 0 {
+		return false
+	}
+	ring := c.RawPolygon[0]
+	in := false
+	for i, j := 0, len(ring)-1; i < len(ring); j, i = i, i+1 {
+		xi, yi := ring[i][0], ring[i][1]
+		xj, yj := ring[j][0], ring[j][1]
+		if (yi > lat) != (yj > lat) && lon < (xj-xi)*(lat-yi)/(yj-yi)+xi {
+			in = !in
+		}
+	}
+	return in
 }
 
 // Centroid averages the distinct vertices of the outer ring.
@@ -275,7 +326,7 @@ type Event struct {
 	Comment string
 }
 
-// Stream connects to /v1/stream and calls fn for each event until the
+// Stream connects to /v1/stream (every city) and calls fn for each event until the
 // stream ends or ctx is cancelled. Only the connection has a timeout.
 func (e *Engine) Stream(ctx context.Context, fn func(Event)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.base+"/v1/stream", nil)

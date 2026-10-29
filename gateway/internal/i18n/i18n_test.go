@@ -32,6 +32,9 @@ func verbs(s string) []string {
 
 var tagRe = regexp.MustCompile(`</?[a-z]+[^>]*>`)
 
+// en is the merged English catalogue in the tests below.
+var en = Catalogs[Default]
+
 func TestEveryLanguageHasEveryKey(t *testing.T) {
 	for _, l := range Languages {
 		cat := Catalogs[l.Code]
@@ -99,7 +102,7 @@ func TestEveryUsedKeyExists(t *testing.T) {
 		for _, m := range keyRe.FindAllStringSubmatch(string(b), -1) {
 			seen++
 			k := m[1]
-			if strings.HasSuffix(k, ".") {
+			if strings.HasSuffix(k, ".") || strings.HasSuffix(k, "_") {
 				continue // a prefix completed at run time, checked below
 			}
 			if _, ok := en[k]; !ok {

@@ -1,0 +1,169 @@
+{{define "content"}}
+<div class="page">
+  <header class="page-head">
+    <p class="eyebrow">{{t "watch.eyebrow"}}</p>
+    <div class="title-row"><h1>{{t "watch.title"}}</h1>{{template "city_switcher" .}}</div>
+    <p>{{t "watch.lead"}}</p>
+  </header>
+
+  <div class="split">
+    <form class="card panel" id="watch-form" novalidate>
+      <div class="step">
+        <span class="step-n" aria-hidden="true">1</span>
+        <div class="step-body">
+          <h2 class="step-title">{{t "watch.step1"}}</h2>
+          <div class="seg watch-kind" role="radiogroup" aria-label="{{t "watch.step1"}}">
+            <label><input type="radio" name="kind" value="point" {{if not .Alerts.From}}checked{{end}}>{{t "watch.kind_point"}}</label>
+            <label><input type="radio" name="kind" value="route" {{if .Alerts.From}}checked{{end}} {{if not .Alerts.From}}disabled{{end}}>{{t "watch.kind_route"}}</label>
+          </div>
+          <div id="watch-point" {{if .Alerts.From}}hidden{{end}}>
+            <p class="hint">{{t "watch.point_hint"}}</p>
+            <div id="watch-map" class="pick-map" role="region" aria-label="{{t "watch.map_aria"}}"></div>
+            <p class="small muted" id="watch-where" aria-live="polite">{{t "watch.no_point"}}</p>
+          </div>
+          <div id="watch-route" {{if not .Alerts.From}}hidden{{end}}>
+            {{if .Alerts.From}}<p class="hint">{{t "watch.route_hint"}}</p>
+            <p class="mono small">{{.Alerts.From}} · {{.Alerts.To}}</p>{{else}}
+            <p class="hint">{{t "watch.route_how"}} <a href="/route?city={{.City.ID}}">{{t "watch.route_link"}}</a></p>{{end}}
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="step-n" aria-hidden="true">2</span>
+        <div class="step-body">
+          <h2 class="step-title">{{t "watch.step2"}}</h2>
+          <div class="vehicles">
+            {{range .Alerts.Vehicles}}
+            <label class="vehicle"><input type="radio" name="vehicle" value="{{.}}" {{if eq . $.Alerts.Vehicle}}checked{{end}}><span>{{template "vehicle-icon" .}}{{t (printf "vehicle.%s" .)}}</span></label>
+            {{end}}
+          </div>
+          <p class="hint">{{t "watch.limits"}}</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="step-n" aria-hidden="true">3</span>
+        <div class="step-body">
+          <h2 class="step-title">{{t "watch.step3"}}</h2>
+          {{if .Alerts.Push}}
+          <button class="btn btn-primary btn-lg" type="submit" id="watch-go" style="width:100%">{{template "icon-bell"}}{{t "watch.turn_on"}}</button>
+          <p class="form-error" id="watch-error" role="alert"></p>
+          <p class="watch-ok" id="watch-ok" role="status" hidden></p>
+          <p class="hint">{{t "watch.permission"}}</p>
+          {{else}}<p class="note-warn" role="note">{{template "icon-alert"}}<span>{{t "watch.push_off"}}</span></p>{{end}}
+        </div>
+      </div>
+    </form>
+
+    <aside class="watch-side">
+      <section class="card panel" aria-labelledby="watch-mine-h">
+        <h2 id="watch-mine-h">{{t "watch.mine"}}</h2>
+        <ul class="watch-list" id="watch-list" role="list"><li class="muted small">{{t "watch.mine_none"}}</li></ul>
+      </section>
+      <section class="card panel" aria-labelledby="watch-what-h">
+        <h2 id="watch-what-h">{{t "watch.what_title"}}</h2>
+        <ul class="watch-kinds" role="list">
+          <li><span class="chip chip-danger">{{t "watch.k_over"}}</span>{{t "watch.k_over_p"}}</li>
+          <li><span class="chip chip-violet">{{t "watch.k_worse"}}</span>{{t "watch.k_worse_p"}}</li>
+          <li><span class="chip chip-ok">{{t "watch.k_clear"}}</span>{{t "watch.k_clear_p"}}</li>
+          <li><span class="chip chip-grey">{{t "watch.k_stale"}}</span>{{t "watch.k_stale_p"}}</li>
+        </ul>
+        <p class="small muted">{{t "watch.privacy" .Alerts.TTLDays .Alerts.MaxPer}}</p>
+        <p class="small muted">{{t "watch.ios"}}</p>
+        {{if .Alerts.WhatsApp}}<p class="small">{{t "watch.whatsapp"}}</p>{{end}}
+        <p class="advisory-pill" role="note">{{template "icon-alert"}}{{t "watch.advisory"}}</p>
+      </section>
+    </aside>
+  </div>
+</div>
+<script type="application/json" id="watch-cfg">{{.Alerts.Config}}</script>
+{{end}}
+
+{{define "scripts"}}<script nonce="{{.Nonce}}">
+document.addEventListener("DOMContentLoaded", function () {
+  "use strict";
+  var cfg = {};
+  try { cfg = JSON.parse(document.getElementById("watch-cfg").textContent); } catch (e) {}
+  var form = document.getElementById("watch-form"), list = document.getElementById("watch-list");
+  var errBox = document.getElementById("watch-error"), okBox = document.getElementById("watch-ok"), where = document.getElementById("watch-where");
+  var point = null, marker = null;
+  var map = NM.create("watch-map", NM.city.id === "chennai" ? { zoom: 12, center: [80.2209, 13.0] } : NM.cityView());
+  map.once("style.load", function () { NM.addCells(map, { showReal: NM.city.simulated }); NM.live(map, {}); });
+  map.on("click", function (e) {
+    point = { lat: +e.lngLat.lat.toFixed(5), lon: +e.lngLat.lng.toFixed(5) };
+    if (marker) marker.remove();
+    marker = new maplibregl.Marker({ color: "#2563EB" }).setLngLat(e.lngLat).addTo(map);
+    where.textContent = point.lat + ", " + point.lon;
+  });
+  form.querySelectorAll("input[name=kind]").forEach(function (r) {
+    r.addEventListener("change", function () {
+      document.getElementById("watch-point").hidden = r.value !== "point" || !r.checked;
+      document.getElementById("watch-route").hidden = r.value !== "route" || !r.checked;
+      if (r.value === "point") map.resize();
+    });
+  });
+
+  // This device's watches: ids and tokens kept in localStorage.
+  function load() { try { return JSON.parse(localStorage.getItem("nm_watches") || "[]"); } catch (e) { return []; } }
+  function save(w) { try { localStorage.setItem("nm_watches", JSON.stringify(w)); } catch (e) {} }
+  function render() {
+    var w = load();
+    list.textContent = "";
+    if (!w.length) { list.appendChild(NM.el("li", "muted small", NM.tr("js.watch_none"))); return; }
+    w.forEach(function (x) {
+      var li = NM.el("li", "watch-item"), info = NM.el("span", "watch-info");
+      info.appendChild(NM.el("b", null, x.where));
+      var st = NM.el("small", null, x.vehicleName || "");
+      info.appendChild(st);
+      var chip = NM.el("span", "chip chip-grey", "");
+      var stop = NM.el("button", "btn btn-ghost btn-sm", NM.tr("js.watch_stop"));
+      stop.type = "button";
+      stop.addEventListener("click", function () {
+        fetch("/api/alerts/" + x.id, { method: "DELETE", headers: { "X-Alert-Token": x.token } })
+          .then(function () { save(load().filter(function (y) { return y.id !== x.id; })); render(); });
+      });
+      li.appendChild(chip); li.appendChild(info); li.appendChild(stop); list.appendChild(li);
+      fetch("/api/alerts/" + x.id, { headers: { "X-Alert-Token": x.token } })
+        .then(function (r) { if (r.status === 404) { save(load().filter(function (y) { return y.id !== x.id; })); li.remove(); return null; } return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j) return;
+          chip.className = "chip " + (j.status === "over" ? "chip-danger" : j.status === "under" ? "chip-ok" : "chip-grey");
+          chip.textContent = NM.tr("js.watch_" + j.status);
+        });
+    });
+  }
+  render();
+
+  function key(b64) {
+    var pad = "=".repeat((4 - b64.length % 4) % 4), raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, function (c) { return c.charCodeAt(0); });
+  }
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    errBox.textContent = ""; okBox.hidden = true;
+    var kind = form.querySelector("input[name=kind]:checked").value;
+    var vin = form.querySelector("input[name=vehicle]:checked"), vehicle = vin.value, vehicleName = vin.parentNode.textContent.trim();
+    if (kind === "point" && !point) { errBox.textContent = NM.tr("js.watch_need_point"); return; }
+    if (!("serviceWorker" in navigator) || !window.PushManager) { errBox.textContent = NM.tr("js.watch_unsupported"); return; }
+    var btn = document.getElementById("watch-go"); btn.disabled = true;
+    navigator.serviceWorker.register("/sw.js", { scope: "/" })
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function (reg) { return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(cfg.key) }); })
+      .then(function (sub) {
+        var body = { subscription: sub.toJSON(), city: cfg.city, vehicle: vehicle, lang: cfg.lang };
+        if (kind === "point") body.point = point; else body.route = { from: cfg.from, to: cfg.to };
+        return fetch("/api/alerts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return j; }); })
+      .then(function (j) {
+        var w = load(); w.push({ id: j.id, token: j.token, where: j.where, vehicle: vehicle, vehicleName: vehicleName, city: cfg.city }); save(w); render();
+        okBox.hidden = false; okBox.textContent = NM.tr("js.watch_done", j.where) + " " + j.message;
+      })
+      .catch(function (err) {
+        errBox.textContent = err && err.name === "NotAllowedError" ? NM.tr("js.watch_denied") : (err && err.message) || NM.tr("js.upload_failed");
+      })
+      .then(function () { btn.disabled = false; });
+  });
+});
+</script>{{end}}

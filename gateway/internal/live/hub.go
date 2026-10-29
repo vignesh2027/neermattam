@@ -14,10 +14,12 @@ import (
 	"neermattam/gateway/internal/upstream"
 )
 
-// Message is one server-sent event for browsers.
+// Message is one server-sent event for browsers. City is the city whose
+// map it belongs to; empty goes to every client.
 type Message struct {
 	Event string
 	Data  []byte
+	City  string
 }
 
 // ErrFull means the hub already serves its maximum number of clients.
@@ -26,11 +28,13 @@ var ErrFull = errors.New("too many live map clients")
 // ErrClosed means the hub is shutting down.
 var ErrClosed = errors.New("live hub closed")
 
-// Sub is one browser connection.
+// Sub is one browser connection. A sub with a city hears only that city's
+// cells and reports (and messages for every city).
 type Sub struct {
 	ch   chan Message
 	hub  *Hub
 	once sync.Once
+	city string
 }
 
 // C delivers messages. It is closed when the hub drops the client.
@@ -41,6 +45,7 @@ func (s *Sub) Close() { s.hub.remove(s, "") }
 
 // FeedItem is one entry in the live report ticker.
 type FeedItem struct {
+	City         string    `json:"city"`
 	Simulated    bool      `json:"simulated"`
 	Source       string    `json:"source"`
 	DepthCm      float64   `json:"depth_cm"`
@@ -66,6 +71,7 @@ type Hub struct {
 	real    []FeedItem // real reports, newest first, kept apart so the demo drip never pushes them out
 
 	upstreamUp atomic.Bool
+	listeners  []func(Message)
 }
 
 // NewHub returns a hub serving at most max clients.
@@ -73,8 +79,19 @@ func NewHub(max int, origins *Origins, log *slog.Logger, m *metrics.Set) *Hub {
 	return &Hub{max: max, buffer: 256, origins: origins, log: log, metrics: m, clients: map[*Sub]struct{}{}}
 }
 
-// Subscribe adds a client or refuses when the hub is full.
-func (h *Hub) Subscribe() (*Sub, error) {
+// Listen registers a function that sees every message, for the gateway's
+// own consumers (alerts, the control room). It must not block.
+func (h *Hub) Listen(fn func(Message)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.listeners = append(h.listeners, fn)
+}
+
+// Subscribe adds a client for every city or refuses when the hub is full.
+func (h *Hub) Subscribe() (*Sub, error) { return h.SubscribeCity("") }
+
+// SubscribeCity adds a client that hears one city ("" for all).
+func (h *Hub) SubscribeCity(city string) (*Sub, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
@@ -83,7 +100,7 @@ func (h *Hub) Subscribe() (*Sub, error) {
 	if len(h.clients) >= h.max {
 		return nil, ErrFull
 	}
-	s := &Sub{ch: make(chan Message, h.buffer), hub: h}
+	s := &Sub{ch: make(chan Message, h.buffer), hub: h, city: city}
 	h.clients[s] = struct{}{}
 	return s, nil
 }
@@ -117,7 +134,11 @@ func (h *Hub) remove(s *Sub, reason string) {
 func (h *Hub) Broadcast(m Message) {
 	h.mu.Lock()
 	var slow []*Sub
+	listeners := h.listeners
 	for s := range h.clients {
+		if s.city != "" && m.City != "" && s.city != m.City {
+			continue
+		}
 		select {
 		case s.ch <- m:
 		default:
@@ -127,6 +148,9 @@ func (h *Hub) Broadcast(m Message) {
 	h.mu.Unlock()
 	for _, s := range slow {
 		h.remove(s, "slow")
+	}
+	for _, fn := range listeners {
+		fn(m)
 	}
 }
 
@@ -163,7 +187,7 @@ func (h *Hub) PublishFeed(item FeedItem) {
 	if err != nil {
 		return
 	}
-	h.Broadcast(Message{Event: "report", Data: b})
+	h.Broadcast(Message{Event: "report", Data: b, City: item.City})
 }
 
 // RestoreFeed adds a past item without broadcasting it.
@@ -181,12 +205,19 @@ func (h *Hub) RestoreFeed(item FeedItem) {
 }
 
 // Feed returns ticker items: real reports first (newest first), then
-// simulated ones.
-func (h *Hub) Feed() []FeedItem {
+// simulated ones; with a city, only that city's.
+func (h *Hub) Feed(city string) []FeedItem {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	out := append([]FeedItem(nil), h.real...)
-	return append(out, h.feed...)
+	var out []FeedItem
+	for _, list := range [][]FeedItem{h.real, h.feed} {
+		for _, it := range list {
+			if city == "" || it.City == "" || it.City == city {
+				out = append(out, it)
+			}
+		}
+	}
+	return out
 }
 
 // Run keeps one connection to the engine stream open until ctx ends,
@@ -231,36 +262,51 @@ func (h *Hub) handle(ev upstream.Event) {
 	if ev.Name != "cell" {
 		return
 	}
-	data, err := DecorateFeature([]byte(ev.Data), h.origins)
+	data, city, err := DecorateFeatureCity([]byte(ev.Data), h.origins)
 	if err != nil {
 		h.log.Warn("engine sent an unreadable cell event", "error", err.Error())
 		return
 	}
-	h.Broadcast(Message{Event: "cell", Data: data})
+	h.Broadcast(Message{Event: "cell", Data: data, City: city})
 }
 
 // keptProps are the cell properties the map and its popup use. The rest
 // (debris factor, upper hazard class, the duplicate top-level id) stay in
 // the engine's own API.
 var keptProps = []string{
-	"cell", "depth_cm", "depth_sigma_cm", "depth_upper_cm",
+	"cell", "city", "depth_cm", "depth_sigma_cm", "depth_upper_cm",
 	"velocity_mps", "velocity_sigma_mps", "velocity_assumed",
-	"hazard_rating", "hazard_class", "unknown", "n_readings", "n_neighbour", "updated_at",
+	"hazard_rating", "hazard_class", "hazard_class_upper", "unknown", "expired", "n_readings", "n_neighbour", "updated_at",
 }
 
 // DecorateFeature compacts one GeoJSON cell feature and adds
 // properties.origin.
 func DecorateFeature(raw []byte, o *Origins) ([]byte, error) {
+	b, _, err := DecorateFeatureCity(raw, o)
+	return b, err
+}
+
+// DecorateFeatureCity is DecorateFeature that also returns the cell's city.
+func DecorateFeatureCity(raw []byte, o *Origins) ([]byte, string, error) {
 	var f map[string]any
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return json.Marshal(compact(f, o))
+	c := compact(f, o)
+	city, _ := c["properties"].(map[string]any)["city"].(string)
+	b, err := json.Marshal(c)
+	return b, city, err
 }
 
 // DecorateCollection compacts every feature, adds properties.origin, and
 // says whether the map holds simulated water.
 func DecorateCollection(raw []byte, o *Origins) ([]byte, error) {
+	return DecorateCollectionFor(raw, o, "", o.HasSimulated())
+}
+
+// DecorateCollectionFor is DecorateCollection for one city's map, with the
+// caller saying whether that city holds the simulated scenario.
+func DecorateCollectionFor(raw []byte, o *Origins, city string, simulated bool) ([]byte, error) {
 	var fc map[string]any
 	if err := json.Unmarshal(raw, &fc); err != nil {
 		return nil, err
@@ -272,13 +318,17 @@ func DecorateCollection(raw []byte, o *Origins) ([]byte, error) {
 			out = append(out, compact(f, o))
 		}
 	}
-	return json.Marshal(map[string]any{
+	body := map[string]any{
 		"type":               "FeatureCollection",
 		"features":           out,
 		"truncated":          fc["truncated"],
 		"generated_at":       fc["generated_at"],
-		"simulated_scenario": o.HasSimulated(),
-	})
+		"simulated_scenario": simulated,
+	}
+	if city != "" {
+		body["city"] = city
+	}
+	return json.Marshal(body)
 }
 
 // compact keeps the properties the map uses and rounds coordinates to five

@@ -97,7 +97,7 @@ func TestFeedKeepsRealReportsAboveTheSimulatedDrip(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		h.PublishFeed(FeedItem{Simulated: true, Place: "sim"})
 	}
-	f := h.Feed()
+	f := h.Feed("")
 	if f[0].Place != "real" || len(f) != 9 {
 		t.Fatalf("feed %+v", f)
 	}

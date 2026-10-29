@@ -35,8 +35,19 @@ type Runner interface {
 	Run(ctx context.Context, sub report.Submission, progress report.Progress) (*report.Outcome, error)
 }
 
+// Watch connects the "watch" and "stop" commands to the alert watcher.
+// Start returns a reply to send now, or "" when the watcher sends its own
+// first message.
+type Watch struct {
+	Start func(ctx context.Context, phone, phoneID string, lat, lon float64, vehicle string) string
+	Stop  func(phone string) int
+}
+
 // Handler serves GET and POST /webhooks/whatsapp.
 type Handler struct {
+	// Watch, when set, enables "watch my street" by WhatsApp.
+	Watch *Watch
+
 	cfg       config.WhatsApp
 	publicURL string
 	limits    map[string]int64
@@ -98,6 +109,8 @@ type Payload struct {
 }
 
 type pending struct {
+	watch   string // a vehicle, when "watch" asked for the next location to be watched
+	watchAt time.Time
 	media   *mediaRef
 	kind    string
 	mediaAt time.Time
@@ -221,13 +234,19 @@ func (h *Handler) handle(m message, phoneID string) {
 		if m.Location == nil {
 			return
 		}
+	case "text":
+		if h.Watch != nil && m.Text != nil && h.command(m.From, phoneID, m.Text.Body) {
+			return
+		}
+		h.replyAsync(m.From, phoneID, h.helpText())
+		return
 	default:
-		h.replyAsync(m.From, phoneID, "Send a photo or short video of the flooded street with a wheel in view, then share your location. Neermattam will measure the depth.")
+		h.replyAsync(m.From, phoneID, h.helpText())
 		return
 	}
 	h.mu.Lock()
 	for k, pe := range h.pending {
-		if now.Sub(pe.mediaAt) > PairWindow && now.Sub(pe.locAt) > PairWindow {
+		if now.Sub(pe.mediaAt) > PairWindow && now.Sub(pe.locAt) > PairWindow && now.Sub(pe.watchAt) > PairWindow {
 			delete(h.pending, k)
 		}
 	}
@@ -237,6 +256,22 @@ func (h *Handler) handle(m message, phoneID string) {
 		h.pending[m.From] = pe
 	}
 	pe.phoneID = phoneID
+	if ref == nil && pe.watch != "" && now.Sub(pe.watchAt) <= PairWindow && (pe.media == nil || pe.watchAt.After(pe.mediaAt)) {
+		// This location answers "watch".
+		vehicle, loc := pe.watch, *m.Location
+		pe.watch = ""
+		h.mu.Unlock()
+		h.wg.Add(1)
+		go func() {
+			defer h.wg.Done()
+			ctx, cancel := context.WithTimeout(h.base, 30*time.Second)
+			defer cancel()
+			if msg := h.Watch.Start(ctx, m.From, phoneID, loc.Latitude, loc.Longitude, vehicle); msg != "" {
+				h.reply(m.From, phoneID, msg)
+			}
+		}()
+		return
+	}
 	if ref != nil {
 		if ref.ID == "" {
 			h.mu.Unlock()
@@ -436,6 +471,79 @@ func (h *Handler) observe(start time.Time, outcome string) {
 	}
 	h.metrics.Upstream.Inc("graph_api", outcome)
 	h.metrics.UpstreamDuration.Observe(time.Since(start).Seconds(), "graph_api")
+}
+
+func (h *Handler) helpText() string {
+	t := "Send a photo or short video of the flooded street with a wheel in view, then share your location. Neermattam will measure the depth."
+	if h.Watch != nil {
+		t += " To be told when the water on a street goes over the limit for your vehicle, send watch (or watch car, watch bus, watch walking), then share the location. Send stop to end every watch."
+	}
+	return t
+}
+
+// command handles "watch [vehicle]" and "stop". It reports whether the
+// text was a command.
+func (h *Handler) command(from, phoneID, body string) bool {
+	words := strings.Fields(strings.ToLower(strings.TrimSpace(body)))
+	if len(words) == 0 {
+		return false
+	}
+	switch words[0] {
+	case "stop", "unwatch":
+		n := h.Watch.Stop(from)
+		if n == 0 {
+			h.replyAsync(from, phoneID, "This number was not watching any street.")
+		} else {
+			h.replyAsync(from, phoneID, fmt.Sprintf("Stopped %d watch(es). You will get no more water alerts.", n))
+		}
+		return true
+	case "watch", "alert", "alerts":
+		vehicle := "two_wheeler"
+		if len(words) > 1 {
+			switch strings.Join(words[1:], "_") {
+			case "car":
+				vehicle = "car"
+			case "bus":
+				vehicle = "bus"
+			case "auto", "auto_rickshaw", "rickshaw":
+				vehicle = "auto"
+			case "walk", "walking", "foot", "on_foot":
+				vehicle = "pedestrian"
+			case "bike", "scooter", "two_wheeler", "two-wheeler", "motorcycle":
+				vehicle = "two_wheeler"
+			default:
+				h.replyAsync(from, phoneID, "Send watch, watch car, watch bus, watch auto or watch walking, then share the location to watch.")
+				return true
+			}
+		}
+		h.mu.Lock()
+		pe := h.pending[from]
+		if pe == nil {
+			pe = &pending{}
+			h.pending[from] = pe
+		}
+		pe.watch, pe.watchAt, pe.phoneID = vehicle, h.now(), phoneID
+		h.mu.Unlock()
+		h.replyAsync(from, phoneID, "Now share the location to watch (attach, then Location), within 10 minutes. You will get a message when the water there goes over the limit, gets more dangerous, and when it is below the limit again. Advisory only.")
+		return true
+	}
+	return false
+}
+
+// Send sends a text message to a number, for alerts.
+func (h *Handler) Send(ctx context.Context, to, phoneID, text string) error {
+	if phoneID == "" {
+		phoneID = h.cfg.PhoneNumberID
+	}
+	if phoneID == "" || to == "" {
+		return errors.New("no WhatsApp phone number id to send from")
+	}
+	body, _ := json.Marshal(map[string]any{
+		"messaging_product": "whatsapp", "to": to, "type": "text",
+		"text": map[string]any{"body": text, "preview_url": false},
+	})
+	_, err := h.graph(ctx, http.MethodPost, h.cfg.GraphURL+"/"+phoneID+"/messages", body, 64<<10)
+	return err
 }
 
 // replyAsync sends a reply without holding up the webhook response.

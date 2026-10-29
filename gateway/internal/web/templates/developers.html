@@ -1,0 +1,136 @@
+{{define "content"}}
+<div class="page dev">
+  <header class="page-head dev-hero">
+    <p class="eyebrow">{{t "dev.eyebrow"}}</p>
+    <h1>{{t "dev.title"}}</h1>
+    <p>{{t "dev.lead"}}</p>
+    <ul class="dev-chips" role="list">
+      <li class="chip">{{t "dev.chip_cities" (len .Dev.Cities)}}</li>
+      <li class="chip">{{t "dev.chip_vehicles"}}</li>
+      <li class="chip">{{t "dev.chip_limits"}}</li>
+      <li class="chip chip-grey">{{t "route.advisory"}}</li>
+    </ul>
+  </header>
+
+  <nav class="dev-toc card" aria-label="{{t "dev.toc"}}">
+    <a href="#start">{{t "dev.start_title"}}</a><a href="#route">GET /api/v1/route</a><a href="#cells">GET /api/v1/cells</a><a href="#usage">GET /api/v1/usage</a><a href="#errors">{{t "dev.errors_title"}}</a><a href="#limits">{{t "dev.limits_title"}}</a><a href="#terms">{{t "dev.terms_title"}}</a>
+  </nav>
+
+  <section class="dev-sec" id="start" aria-labelledby="start-h">
+    <h2 id="start-h">{{t "dev.start_title"}}</h2>
+    <ol class="dev-steps">
+      <li>{{t "dev.start1"}}</li>
+      <li>{{t "dev.start2"}}</li>
+      <li>{{t "dev.start3"}}</li>
+    </ol>
+    <pre class="code"><code>export NEERMATTAM_KEY=nm_live_...
+
+curl -s -H "Authorization: Bearer $NEERMATTAM_KEY" \
+  "{{.Dev.Base}}/api/v1/route?from=12.9791,80.2209&amp;to=13.0418,80.2341&amp;vehicle=car"</code></pre>
+    <p class="small muted">{{t "dev.operator"}}</p>
+    <pre class="code"><code>cd gateway
+go run ./cmd/neermattam-keys create -name "Acme Fleet" -rate 600
+go run ./cmd/neermattam-keys usage</code></pre>
+  </section>
+
+  <section class="dev-sec" id="route" aria-labelledby="route-h">
+    <h2 id="route-h"><code>GET /api/v1/route</code></h2>
+    <p>{{t "dev.route_p"}}</p>
+    <table class="dev-table">
+      <thead><tr><th>{{t "dev.th_param"}}</th><th>{{t "dev.th_meaning"}}</th></tr></thead>
+      <tbody>
+        <tr><td><code>from</code>, <code>to</code></td><td>{{t "dev.p_from"}}</td></tr>
+        <tr><td><code>vehicle</code></td><td>{{t "dev.p_vehicle"}} <code>pedestrian</code> (<code>walking</code>), <code>two_wheeler</code>, <code>auto</code>, <code>car</code>, <code>bus</code></td></tr>
+        <tr><td><code>city</code></td><td>{{t "dev.p_city"}}</td></tr>
+      </tbody>
+    </table>
+    <p>{{t "dev.route_returns"}}</p>
+    <table class="dev-table">
+      <thead><tr><th>{{t "dev.th_field"}}</th><th>{{t "dev.th_meaning"}}</th></tr></thead>
+      <tbody>
+        <tr><td><code>advisory</code>, <code>terms</code></td><td>{{t "dev.f_advisory"}}</td></tr>
+        <tr><td><code>geometry</code></td><td>{{t "dev.f_geometry"}}</td></tr>
+        <tr><td><code>properties.route_kind</code></td><td>{{t "dev.f_kind"}}</td></tr>
+        <tr><td><code>properties.passable</code></td><td>{{t "dev.f_passable"}}</td></tr>
+        <tr><td><code>properties.distance_m</code>, <code>eta_min</code></td><td>{{t "dev.f_distance"}}</td></tr>
+        <tr><td><code>properties.max_depth_cm_on_route</code>, <code>max_depth_sigma_cm</code></td><td>{{t "dev.f_depth"}}</td></tr>
+        <tr><td><code>properties.cells_avoided</code></td><td>{{t "dev.f_avoided"}}</td></tr>
+        <tr><td><code>properties.unknown_cells_crossed</code></td><td>{{t "dev.f_unknown"}}</td></tr>
+        <tr><td><code>properties.depth_limit_cm</code></td><td>{{t "dev.f_limit"}}</td></tr>
+        <tr><td><code>properties.explanation</code></td><td>{{t "dev.f_explanation"}}</td></tr>
+        <tr><td><code>properties.simulated_scenario</code></td><td>{{t "dev.f_simulated"}}</td></tr>
+        <tr><td><code>baseline</code></td><td>{{t "dev.f_baseline"}}</td></tr>
+      </tbody>
+    </table>
+    <pre class="code"><code>{"advisory": true, "terms": "{{.Dev.Base}}/developers#terms",
+ "type": "Feature", "geometry": {"type": "LineString", "coordinates": [[80.22113, 12.979179], ...]},
+ "properties": {"vehicle": "car", "route_kind": "water_aware", "passable": true,
+   "distance_m": 4171.0, "eta_min": 12.5, "max_depth_cm_on_route": null,
+   "cells_avoided": 1, "unknown_cells_crossed": 37, "depth_limit_cm": 15.0,
+   "explanation": "Advisory only. This route avoids 1 map cell ..."},
+ "baseline": {"type": "Feature", "properties": {"route_kind": "baseline", ...}}}</code></pre>
+  </section>
+
+  <section class="dev-sec" id="cells" aria-labelledby="cells-h">
+    <h2 id="cells-h"><code>GET /api/v1/cells</code></h2>
+    <p>{{t "dev.cells_p"}}</p>
+    <pre class="code"><code>curl -s -H "Authorization: Bearer $NEERMATTAM_KEY" "{{.Dev.Base}}/api/v1/cells?city=mumbai"</code></pre>
+    <table class="dev-table">
+      <thead><tr><th>{{t "dev.th_field"}}</th><th>{{t "dev.th_meaning"}}</th></tr></thead>
+      <tbody>
+        <tr><td><code>properties.depth_cm</code>, <code>depth_sigma_cm</code>, <code>depth_upper_cm</code></td><td>{{t "dev.c_depth"}}</td></tr>
+        <tr><td><code>properties.hazard_class</code>, <code>hazard_class_upper</code>, <code>hazard_rating</code></td><td>{{t "dev.c_hazard"}}</td></tr>
+        <tr><td><code>properties.unknown</code>, <code>expired</code></td><td>{{t "dev.c_unknown"}}</td></tr>
+        <tr><td><code>properties.n_readings</code>, <code>updated_at</code></td><td>{{t "dev.c_readings"}}</td></tr>
+        <tr><td><code>properties.origin</code>, <code>simulated_scenario</code></td><td>{{t "dev.c_origin"}}</td></tr>
+        <tr><td><code>properties.city</code></td><td>{{t "dev.c_city"}}</td></tr>
+      </tbody>
+    </table>
+    <p class="small muted">{{t "dev.cells_note"}}</p>
+  </section>
+
+  <section class="dev-sec" id="usage" aria-labelledby="usage-h">
+    <h2 id="usage-h"><code>GET /api/v1/usage</code></h2>
+    <p>{{t "dev.usage_p"}}</p>
+    <pre class="code"><code>{"key": "dztyc2uj", "name": "Acme Fleet", "rate_per_min": 600,
+ "total": {"routes": 1840, "cells": 96},
+ "days": [{"date": "2026-10-29", "routes": 212, "cells": 12}, ...]}</code></pre>
+  </section>
+
+  <section class="dev-sec" id="errors" aria-labelledby="errors-h">
+    <h2 id="errors-h">{{t "dev.errors_title"}}</h2>
+    <p>{{t "dev.errors_p"}}</p>
+    <table class="dev-table">
+      <thead><tr><th>HTTP</th><th><code>code</code></th><th>{{t "dev.th_meaning"}}</th></tr></thead>
+      <tbody>
+        <tr><td>400</td><td><code>bad_point</code>, <code>bad_vehicle</code></td><td>{{t "dev.e_bad"}}</td></tr>
+        <tr><td>400</td><td><code>outside_area</code>, <code>different_cities</code></td><td>{{t "dev.e_area"}}</td></tr>
+        <tr><td>401</td><td><code>missing_key</code>, <code>invalid_key</code></td><td>{{t "dev.e_key"}}</td></tr>
+        <tr><td>403</td><td><code>key_disabled</code></td><td>{{t "dev.e_disabled"}}</td></tr>
+        <tr><td>404</td><td><code>no_road</code></td><td>{{t "dev.e_road"}}</td></tr>
+        <tr><td>429</td><td><code>rate_limited</code></td><td>{{t "dev.e_rate"}}</td></tr>
+        <tr><td>503</td><td><code>routing_unavailable</code>, <code>engine_unavailable</code></td><td>{{t "dev.e_down"}}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="dev-sec" id="limits" aria-labelledby="limits-h">
+    <h2 id="limits-h">{{t "dev.limits_title"}}</h2>
+    <p>{{t "dev.limits_p"}}</p>
+    <p>{{t "dev.billing_p"}}</p>
+    <p class="small muted">{{t "dev.cities_list"}} {{range $i, $c := .Dev.Cities}}{{if $i}}, {{end}}<code>{{$c}}</code>{{end}}.</p>
+  </section>
+
+  <section class="dev-sec card panel dev-terms" id="terms" aria-labelledby="terms-h">
+    <h2 id="terms-h">{{t "dev.terms_title"}}</h2>
+    <ol>
+      <li>{{t "dev.t1"}}</li>
+      <li>{{t "dev.t2"}}</li>
+      <li>{{t "dev.t3"}}</li>
+      <li>{{t "dev.t4"}}</li>
+      <li>{{t "dev.t5"}}</li>
+      <li>{{t "dev.t6"}}</li>
+    </ol>
+  </section>
+</div>
+{{end}}

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"neermattam/gateway/internal/cities"
 	"net/http"
 	"strings"
 	"time"
@@ -67,6 +68,21 @@ func failKey(status int, code, key, format string, args ...any) *Error {
 	return e
 }
 
+// CityID is a city id passed as a message argument, so each language can
+// print the city's name in its own script.
+type CityID string
+
+// String is the English name, for the English message.
+func (c CityID) String() string { return CityName(string(c)) }
+
+// CityName is a city's English name from its id.
+func CityName(id string) string {
+	if id == "" {
+		return id
+	}
+	return strings.ToUpper(id[:1]) + id[1:]
+}
+
 // File is one uploaded part.
 type File struct {
 	Field    string
@@ -78,6 +94,7 @@ type File struct {
 type Submission struct {
 	Channel        string // web, api, whatsapp
 	Files          []File
+	City           string // the city the reporter chose; empty accepts any covered city
 	Lat, Lon       float64
 	HasLocation    bool
 	HintReference  string
@@ -129,6 +146,7 @@ const Advisory = "Advisory only. Check local news and official alerts before you
 // Pipeline wires the services together.
 type Pipeline struct {
 	Cfg        config.Config
+	Cities     *cities.Registry
 	Perception *upstream.Perception
 	Engine     *upstream.Engine
 	Verifier   *verify.Verifier
@@ -188,8 +206,19 @@ func (p *Pipeline) check(sub Submission) (*checked, error) {
 	if !sub.HasLocation {
 		return nil, fail(http.StatusBadRequest, "location_required", "Add a location: tap the map, use your device location, or type coordinates.")
 	}
-	if math.IsNaN(sub.Lat) || math.IsNaN(sub.Lon) || !p.Cfg.ServiceArea.Contains(sub.Lat, sub.Lon) {
-		return nil, fail(http.StatusBadRequest, "outside_area", "That location (%.4f, %.4f) is outside the Chennai service area.", sub.Lat, sub.Lon)
+	if math.IsNaN(sub.Lat) || math.IsNaN(sub.Lon) {
+		return nil, fail(http.StatusBadRequest, "bad_location", "Latitude and longitude must be decimal numbers, such as 12.9791 and 80.2209.")
+	}
+	if sub.City != "" {
+		c, ok := p.Cities.Get(sub.City)
+		if !ok {
+			return nil, fail(http.StatusBadRequest, "unknown_city", "There is no covered city called %q.", sub.City)
+		}
+		if !c.Contains(sub.Lat, sub.Lon) {
+			return nil, fail(http.StatusBadRequest, "outside_city", "That location (%.4f, %.4f) is outside %s. Pick a point in %s, or switch city.", sub.Lat, sub.Lon, CityID(c.ID), CityID(c.ID))
+		}
+	} else if !p.Cities.Contains(sub.Lat, sub.Lon) {
+		return nil, fail(http.StatusBadRequest, "outside_area", "That location (%.4f, %.4f) is outside the cities Neermattam covers: %s.", sub.Lat, sub.Lon, strings.Join(p.Cities.Names(), ", "))
 	}
 	if len(sub.Files) == 0 {
 		return nil, fail(http.StatusBadRequest, "media_required", "Attach a photo, a short video or a voice note.")
@@ -449,8 +478,12 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 	if p.Metrics != nil {
 		p.Metrics.Trust.Observe(verdict.Trust)
 	}
+	city := ""
+	if c, ok := p.Cities.Find(sub.Lat, sub.Lon); ok {
+		city = c.ID
+	}
 	p.Hub.PublishFeed(live.FeedItem{
-		Source: out.Source, DepthCm: depth, DepthSigmaCm: sigma,
+		City: city, Source: out.Source, DepthCm: depth, DepthSigmaCm: sigma,
 		Place: out.Place, Lat: sub.Lat, Lon: sub.Lon, At: start.UTC(),
 	})
 	p.finish(out, start)

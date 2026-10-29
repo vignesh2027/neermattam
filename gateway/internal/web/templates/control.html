@@ -1,0 +1,156 @@
+{{define "content"}}
+<div class="ctl" id="ctl" data-panel="{{.Control.PanelURL}}" data-stream="{{.Control.StreamURL}}">
+  <header class="ctl-head">
+    <div class="ctl-title">
+      <p class="eyebrow">{{if .Control.Demo}}{{t "ctl.eyebrow_demo"}}{{else}}{{t "ctl.eyebrow"}}{{end}}</p>
+      <div class="title-row">
+        <h1><span class="live-dot" id="ctl-live" aria-hidden="true"></span>{{t "ctl.title" (t (printf "city.%s" .Control.City))}}</h1>
+        {{if not .Control.Demo}}{{template "city_switcher" .}}{{end}}
+      </div>
+      <p class="ctl-sub">{{t "ctl.sub"}}</p>
+    </div>
+    <div class="ctl-actions">
+      <a class="btn btn-ghost btn-sm" href="{{.Control.ExportCSV}}" download>{{template "icon-download"}}{{t "ctl.export_csv"}}</a>
+      <a class="btn btn-ghost btn-sm" href="{{.Control.ExportGeoJSON}}" download>{{template "icon-download"}}{{t "ctl.export_geojson"}}</a>
+      {{if .Control.Demo}}<a class="btn btn-ghost btn-sm" href="/control">{{t "ctl.have_key"}}</a>
+      {{else}}<form method="post" action="/control/logout"><button class="btn btn-ghost btn-sm" type="submit">{{t "ctl.logout"}}</button></form>{{end}}
+    </div>
+  </header>
+  {{if .Control.Demo}}
+  <div class="sim-banner ctl-demo" role="note">{{template "icon-flask"}}<span><strong>{{t "ctl.demo_title"}}</strong> {{t "ctl.demo_body"}}</span></div>
+  {{end}}
+  <div id="ctl-panel" aria-live="polite">{{template "control_panel" .Control}}</div>
+  <p class="ctl-advisory" role="note">{{template "icon-alert"}}<span>{{t "ctl.advisory"}}</span></p>
+</div>
+{{end}}
+
+{{define "control_panel"}}
+{{if .Error}}<p class="note-warn" role="alert">{{template "icon-alert"}}<span>{{t .Error}}</span></p>{{end}}
+<p class="ctl-updated">{{if .Generated}}{{t "ctl.updated" .Generated}}{{end}}</p>
+<section class="ctl-tiles" aria-label="{{t "ctl.tiles_aria"}}">
+  {{range .Tiles}}<div class="ctl-tile{{if .Tone}} tone-{{.Tone}}{{end}}{{if .Words}} is-words{{end}}"><span>{{t .Key}}</span><b class="num">{{.Value}}</b>{{if .Sub}}<small>{{.Sub}}</small>{{end}}</div>
+  {{end}}
+</section>
+{{if .Blocked}}<section class="ctl-blocked" aria-label="{{t "ctl.closed_to"}}">
+  <span class="label">{{t "ctl.closed_to"}}</span>
+  {{range .Blocked}}<span class="ctl-veh">{{template "vehicle-icon" .Vehicle}}<span>{{t (printf "vehicle.%s" .Vehicle)}}</span><b class="num">{{.N}}</b></span>{{end}}
+</section>{{end}}
+<div class="ctl-grid">
+  <section class="card ctl-hot" aria-labelledby="ctl-hot-h">
+    <div class="ctl-sec-head">
+      <h2 id="ctl-hot-h">{{t "ctl.hot_title"}}</h2>
+      <span class="score-key" aria-hidden="true"><i class="p-depth"></i>{{t "ctl.part_depth"}}<i class="p-hazard"></i>{{t "ctl.part_hazard"}}<i class="p-freshness"></i>{{t "ctl.part_freshness"}}<i class="p-reports"></i>{{t "ctl.part_reports"}}</span>
+    </div>
+    {{if .Hotspots}}
+    <ol class="hot-list" role="list">
+      {{range .Hotspots}}
+      <li class="hot{{if .Selected}} is-selected{{end}}">
+        <span class="hot-rank">{{.Rank}}</span>
+        <div class="hot-score">
+          <b class="num">{{.Score}}</b>
+          <span class="hot-bar" aria-hidden="true">{{range .Parts}}<i class="p-{{.Key}}" style="width:{{.Pct}}"></i>{{end}}</span>
+          <span class="visually-hidden">{{range .Parts}}{{t (printf "ctl.part_%s" .Key)}} {{.Value}} / {{.Max}}. {{end}}</span>
+        </div>
+        <div class="hot-main">
+          <div class="hot-line">
+            <b class="num">{{t "ctl.up_to" .DepthBlock}}</b>
+            <span class="muted small">{{t "ctl.mean" .Depth .Sigma}}</span>
+            <span class="chip {{if eq .Class "danger_all"}}chip-danger{{else if eq .Class "danger_most"}}chip-violet{{else if eq .Class "unknown"}}chip-grey{{end}}">{{t (printf "hazard.%s" .Class)}}</span>
+            {{if .Unknown}}<span class="chip chip-grey">{{t "ctl.uncertain"}}</span>{{end}}
+          </div>
+          <div class="hot-meta"><span>{{.Age}}</span><span>{{t "ctl.reports_n" .Reports}}</span>{{if .Blocks}}<span class="hot-blocks" title="{{t "ctl.closed_to"}}">{{range .Blocks}}{{template "vehicle-icon" .}}{{end}}</span>{{end}}</div>
+          <details class="hot-why"><summary>{{t "ctl.why"}}</summary><ul>{{range .Reasons}}<li>{{.}}</li>{{end}}</ul></details>
+        </div>
+        <div class="hot-links"><a href="{{.DetailHref}}#ctl-cell">{{t "ctl.details"}}</a><a href="{{.MapHref}}">{{t "ctl.on_map"}}</a></div>
+      </li>
+      {{end}}
+    </ol>
+    {{else}}<p class="ctl-empty">{{t "ctl.no_hotspots"}}</p>{{end}}
+    <p class="small muted ctl-formula">{{t "ctl.formula"}}</p>
+  </section>
+
+  <div class="ctl-side">
+    {{with .Cell}}
+    <section class="card ctl-cell" id="ctl-cell" aria-labelledby="ctl-cell-h">
+      <div class="ctl-sec-head"><h2 id="ctl-cell-h">{{t "ctl.cell_title"}}</h2><a class="small" href="{{.CloseHref}}">{{t "ctl.close"}}</a></div>
+      <p class="mono small muted">{{.Cell}}</p>
+      {{if .Found}}
+      <div class="cell-facts">
+        <div><span>{{t "ctl.now"}}</span><b class="num">{{.Depth}} cm</b></div>
+        <div><span>{{t "legend.hazard"}}</span><b>{{t (printf "hazard.%s" .Class)}}</b></div>
+        <div><span>{{t "js.updated"}}</span><b>{{.Latest}}</b></div>
+      </div>
+      {{if .Conflicts}}<p class="small"><span class="chip chip-amber">{{t "ctl.tile_conflicts"}}</span> {{t "ctl.tile_conflicting" .Conflicts}}</p>{{end}}
+      <div class="spark-wrap">{{.Spark}}</div>
+      <p class="spark-key small muted"><span class="k-pt"></span>{{t "ctl.spark_readings"}} <span class="k-line"></span>{{t "ctl.spark_fused"}} <span class="k-lim"></span>{{t "ctl.spark_limits"}}</p>
+      {{if .Trend}}<p class="drain drain-{{.Trend}}"><b>{{t (printf "ctl.trend_%s" .Trend)}}</b> <span class="num">{{t "ctl.rate" .Rate}}</span>{{if .To15}} · {{t "ctl.to15" .To15}}{{end}}</p>{{end}}
+      <p class="small muted">{{.Note}}</p>
+      {{if .MapHref}}<p class="small"><a href="{{.MapHref}}">{{t "ctl.on_map"}}</a></p>{{end}}
+      {{else}}<p class="ctl-empty">{{t "ctl.cell_none"}}</p>{{end}}
+    </section>
+    {{end}}
+
+    <section class="card ctl-fresh" aria-labelledby="ctl-fresh-h">
+      <div class="ctl-sec-head"><h2 id="ctl-fresh-h">{{t "ctl.fresh_title"}}</h2><span class="chip">{{.FreshAll}}</span></div>
+      <p class="small muted">{{t "ctl.fresh_sub"}}</p>
+      {{if .Fresh}}
+      <ol class="fresh-list" role="list">
+        {{range .Fresh}}<li>
+          <span class="depth-badge{{if lt .LastDepthCm 15.0}} light{{end}}" style="background:{{depthColor .LastDepthCm}}">{{.LastDepth}}</span>
+          <span class="fresh-meta"><b>{{t "ctl.last_seen" .LastDepth}}</b><small>{{.Age}}{{if .Expired}} · {{t "ctl.expired"}}{{end}}</small></span>
+          <span class="fresh-links"><a href="{{.ReportHref}}">{{t "ctl.ask"}}</a><a href="{{.DetailHref}}#ctl-cell">{{t "ctl.details"}}</a></span>
+        </li>{{end}}
+      </ol>
+      {{else}}<p class="ctl-empty">{{t "ctl.fresh_none"}}</p>{{end}}
+    </section>
+
+    <section class="card ctl-routing" aria-labelledby="ctl-routing-h">
+      <h2 id="ctl-routing-h">{{t "ctl.routing_title"}}</h2>
+      <ul role="list">
+        {{range .Routing}}<li{{if .Current}} class="is-current"{{end}}><span>{{t (printf "city.%s" .City)}}</span>
+          <span class="chip {{if eq .Status "ready"}}chip-ok{{else if eq .Status "failed"}}chip-danger{{else}}chip-grey{{end}}">{{t (printf "ctl.routing_%s" .Status)}}</span></li>
+        {{end}}
+      </ul>
+    </section>
+  </div>
+</div>
+{{end}}
+
+{{define "icon-download"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/></svg>{{end}}
+
+{{define "scripts"}}<script nonce="{{.Nonce}}">
+/* Keep the control room live: re-render the panel when the city's water changes. */
+(function () {
+  "use strict";
+  var root = document.getElementById("ctl"), panel = document.getElementById("ctl-panel"), dot = document.getElementById("ctl-live");
+  if (!root || !window.fetch) return;
+  var url = root.getAttribute("data-panel"), timer = null, last = 0, busy = false;
+  function refresh() {
+    timer = null;
+    if (busy) { schedule(); return; }
+    busy = true; last = Date.now();
+    var open = [].map.call(panel.querySelectorAll("details[open]"), function (d) { return d.closest("li") ? [].indexOf.call(d.closest("ol").children, d.closest("li")) : -1; });
+    fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.html) return;
+        panel.innerHTML = j.html;
+        var items = panel.querySelectorAll(".hot-list > li");
+        open.forEach(function (i) { if (i >= 0 && items[i]) { var d = items[i].querySelector("details"); if (d) d.open = true; } });
+      })
+      .catch(function () {})
+      .then(function () { busy = false; });
+  }
+  function schedule() { if (!timer) timer = setTimeout(refresh, Math.max(800, 5000 - (Date.now() - last))); }
+  if (window.EventSource) {
+    var es = new EventSource(root.getAttribute("data-stream"));
+    es.onopen = function () { dot.setAttribute("data-state", "up"); };
+    es.onerror = function () { dot.setAttribute("data-state", "down"); };
+    es.addEventListener("cell", schedule);
+    es.addEventListener("report", schedule);
+    es.addEventListener("resync", schedule);
+    addEventListener("pagehide", function () { es.close(); });
+  }
+  setInterval(schedule, 60000);
+})();
+</script>{{end}}

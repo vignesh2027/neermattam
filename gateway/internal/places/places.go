@@ -1,7 +1,8 @@
-// Package places is a tiny gazetteer of Chennai localities, used to say
-// "near Velachery" instead of raw coordinates, and the route presets. The
-// coordinates are approximate locality centres taken from OpenStreetMap; they
-// label places, they are never used for measurement.
+// Package places is a tiny gazetteer of localities, used to say "near
+// Velachery" instead of raw coordinates, and the route presets for each
+// city. The coordinates are approximate centres taken from OpenStreetMap;
+// they label places and seed route forms, they are never used for
+// measurement.
 package places
 
 import (
@@ -20,21 +21,65 @@ type Place struct {
 // Coord formats lat,lon the way the engine's route API expects.
 func (p Place) Coord() string { return fmt.Sprintf("%.4f,%.4f", p.Lat, p.Lon) }
 
-// Presets are the route page's quick picks. Each has been checked to snap to
-// the road graph for every vehicle.
-var Presets = []Place{
-	{"velachery", "Velachery station", 12.9791, 80.2209},
-	{"guindy", "Guindy", 13.0067, 80.2206},
-	{"tnagar", "T. Nagar", 13.0418, 80.2341},
-	{"tambaram", "Tambaram", 12.9249, 80.1275},
-	{"central", "Chennai Central", 13.0827, 80.2707},
+// Presets are Chennai's route quick picks.
+var Presets = CityPresets["chennai"]
+
+// CityPresets are each city's route quick picks, the first two being the
+// form's default ends. Every one was checked to snap to its city's road
+// graph and to route between each pair for a car (gateway tests and
+// docs/GATEWAY.md). Several are places that are known to flood.
+var CityPresets = map[string][]Place{
+	"chennai": {
+		{"velachery", "Velachery station", 12.9791, 80.2209},
+		{"tnagar", "T. Nagar", 13.0418, 80.2341},
+		{"guindy", "Guindy", 13.0067, 80.2206},
+		{"tambaram", "Tambaram", 12.9249, 80.1275},
+		{"central", "Chennai Central", 13.0827, 80.2707},
+	},
+	"mumbai": {
+		{"dadar", "Dadar station", 19.0186, 72.8424},
+		{"andheri", "Andheri station", 19.1197, 72.8464},
+		{"csmt", "CSMT station", 18.9402, 72.8353},
+		{"kurla", "Kurla station", 19.0655, 72.8794},
+		{"bandra", "Bandra station", 19.0544, 72.8406},
+	},
+	"bengaluru": {
+		{"majestic", "KSR Bengaluru station", 12.9781, 77.5697},
+		{"silkboard", "Silk Board junction", 12.9172, 77.6227},
+		{"mgroad", "MG Road", 12.9755, 77.6068},
+		{"hebbal", "Hebbal", 13.0358, 77.5970},
+		{"whitefield", "Whitefield", 12.9698, 77.7500},
+	},
+	"hyderabad": {
+		{"secunderabad", "Secunderabad station", 17.4337, 78.5016},
+		{"hitec", "HITEC City", 17.4474, 78.3762},
+		{"ameerpet", "Ameerpet", 17.4375, 78.4483},
+		{"charminar", "Charminar", 17.3616, 78.4747},
+		{"lbnagar", "LB Nagar", 17.3457, 78.5522},
+	},
+	"kolkata": {
+		{"howrah", "Howrah station", 22.5839, 88.3426},
+		{"parkstreet", "Park Street", 22.5535, 88.3525},
+		{"sealdah", "Sealdah station", 22.5678, 88.3707},
+		{"saltlake", "Salt Lake Sector V", 22.5735, 88.4331},
+		{"garia", "Garia", 22.4636, 88.3946},
+	},
+	"delhi": {
+		{"ndls", "New Delhi station", 28.6427, 77.2197},
+		{"ito", "ITO", 28.6286, 77.2410},
+		{"cp", "Connaught Place", 28.6315, 77.2167},
+		{"aiims", "AIIMS", 28.5672, 77.2100},
+		{"dwarka", "Dwarka Sector 21", 28.5523, 77.0583},
+	},
 }
 
-// PresetByID finds a preset.
+// PresetByID finds a preset in any city.
 func PresetByID(id string) (Place, bool) {
-	for _, p := range Presets {
-		if p.ID == id {
-			return p, true
+	for _, list := range CityPresets {
+		for _, p := range list {
+			if p.ID == id {
+				return p, true
+			}
 		}
 	}
 	return Place{}, false
@@ -90,10 +135,17 @@ func Landmarks() []Place {
 	return out
 }
 
-// Near names the closest locality within 2.5 km, or returns coordinates.
+// Near names the closest locality (or city preset) within 2.5 km, or
+// returns coordinates.
 func Near(lat, lon float64) string {
 	best, bestD := "", math.Inf(1)
-	for _, p := range localities {
+	all := localities
+	for id, list := range CityPresets {
+		if id != "chennai" {
+			all = append(all[:len(all):len(all)], list...)
+		}
+	}
+	for _, p := range all {
 		d := distanceM(lat, lon, p.Lat, p.Lon)
 		if d < bestD {
 			best, bestD = p.Name, d

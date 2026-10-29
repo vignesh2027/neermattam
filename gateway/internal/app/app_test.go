@@ -49,12 +49,17 @@ func newFakeEngine(t *testing.T) *fakeEngine {
 	mux.HandleFunc("GET /v1/cells", func(w http.ResponseWriter, r *http.Request) {
 		e.cellsCalls.Add(1)
 		time.Sleep(time.Duration(e.cellsDelay.Load()))
-		if r.URL.Query().Get("bbox") == "" {
-			http.Error(w, `{"error":"bbox is required"}`, 400)
+		if r.URL.Query().Get("bbox") == "" && r.URL.Query().Get("city") == "" {
+			http.Error(w, `{"error":"at least one of bbox and city is required"}`, 400)
+			return
+		}
+		if c := r.URL.Query().Get("city"); c != "" && c != "chennai" {
+			w.Write([]byte(`{"type":"FeatureCollection","truncated":false,"features":[]}`))
 			return
 		}
 		fmt.Fprintf(w, `{"type":"FeatureCollection","truncated":false,"features":[%s]}`, cellJSON)
 	})
+	addAnalytics(mux)
 	mux.HandleFunc("POST /v1/readings", func(w http.ResponseWriter, r *http.Request) {
 		var m map[string]any
 		json.NewDecoder(r.Body).Decode(&m)
@@ -64,6 +69,10 @@ func newFakeEngine(t *testing.T) *fakeEngine {
 		w.Write([]byte(`{"reading_id":"r_x","cell":"8a618c4e2d47fff","depth_cm":31.0,"depth_sigma_cm":2.4,"depth_upper_cm":34.6,"velocity_mps":null,"velocity_sigma_mps":null,"unknown":false,"n_readings":2,"updated_at":"2026-10-27T09:11:14Z","hazard":{"rating":1.1,"class":"danger_some","class_upper":"danger_most","debris_factor":1.0,"velocity_mps":1.0,"velocity_assumed":true},"duplicate":false}`))
 	})
 	mux.HandleFunc("GET /v1/route", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Query().Get("from"), "28.") {
+			http.Error(w, `{"error":"routes in delhi are not available: its road graph is still loading"}`, 503)
+			return
+		}
 		if r.URL.Query().Get("vehicle") != "pedestrian" && r.URL.Query().Get("vehicle") != "car" {
 			http.Error(w, `{"error":"bad vehicle"}`, 400)
 			return
@@ -185,11 +194,12 @@ func newHarnessAt(t *testing.T, env map[string]string, usable bool, now func() t
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	a, err := New(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Rainfall: noRain{}, Now: now})
 	if err != nil {
+		cancel()
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { cancel(); a.Wait() })
 	a.Run(ctx)
 	srv := httptest.NewServer(a.Handler())
 	t.Cleanup(func() { a.Shutdown(); srv.Close() })
@@ -284,7 +294,8 @@ func TestUploadLimits(t *testing.T) {
 		{"video without header", loc, map[string][]byte{"video": append(testmedia.MP4("isom", 0, 0)[:20], make([]byte, 50)...)}, 400, "bad_video"},
 		{"html disguised as a photo", loc, map[string][]byte{"image": []byte("<html><script>x</script></html>")}, 415, "unsupported_media"},
 		{"no location", nil, map[string][]byte{"image": photo(3)}, 400, "location_required"},
-		{"outside Chennai", map[string]string{"lat": "28.61", "lon": "77.21"}, map[string][]byte{"image": photo(3)}, 400, "outside_area"},
+		{"outside every city", map[string]string{"lat": "15.3", "lon": "75.1"}, map[string][]byte{"image": photo(3)}, 400, "outside_area"},
+		{"outside the chosen city", map[string]string{"lat": "28.61", "lon": "77.21", "city": "chennai"}, map[string][]byte{"image": photo(3)}, 400, "outside_city"},
 		{"no file", loc, nil, 400, "media_required"},
 		{"bad hint", map[string]string{"lat": "12.98", "lon": "80.22", "hint_reference": "boat"}, map[string][]byte{"image": photo(3)}, 400, "bad_hint"},
 	}
@@ -807,10 +818,10 @@ func TestCellsAreCompactWithETagAndInlinedInThePage(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	etag := resp.Header.Get("ETag")
-	if etag == "" || strings.Contains(string(body), "debris_factor") || strings.Contains(string(body), "hazard_class_upper") || strings.Contains(string(body), "80.218229") {
+	if etag == "" || strings.Contains(string(body), "debris_factor") || strings.Contains(string(body), "80.218229") {
 		t.Fatalf("etag %q, body %s", etag, body)
 	}
-	for _, want := range []string{`"depth_upper_cm"`, `"origin"`, `[80.21823,12.99153]`, `"n_neighbour"`} {
+	for _, want := range []string{`"depth_upper_cm"`, `"hazard_class_upper"`, `"origin"`, `[80.21823,12.99153]`, `"n_neighbour"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("compact cells lack %s", want)
 		}
@@ -843,16 +854,18 @@ func TestRealReportsKeepTheirLabelAcrossARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A new gateway in demo mode, on the same data directory and engine.
-	h2 := newHarness(t, env, true)
-	h2.engine.srv.Close()
-	h2.app.Engine = h.app.Engine
+	env2 := map[string]string{"ENGINE_URL": h.engine.srv.URL}
+	for k, v := range env {
+		env2[k] = v
+	}
+	h2 := newHarness(t, env2, true)
 	if got := h2.app.Origins.Label("8a618c4e2d47fff", 12.9912, 80.2176); got != "reported" {
 		t.Fatalf("after a restart the real cell reads %q, want reported", got)
 	}
 	if got := h2.app.Origins.Label("8a61aaaaaaaaaaa", 13.05, 80.25); got != "simulated" {
 		t.Fatalf("in a demo a cell with no record reads %q, want simulated", got)
 	}
-	feed := h2.app.Hub.Feed()
+	feed := h2.app.Hub.Feed("")
 	if len(feed) == 0 || feed[0].Simulated || feed[0].DepthCm != 23.4 {
 		t.Fatalf("the real report should be back in the ticker: %+v", feed)
 	}

@@ -21,6 +21,14 @@ window.NM = (function () {
     if (p.indexOf("near ") === 0) return tr("js.place_near", p.slice(5));
     return p.charAt(0).toUpperCase() + p.slice(1);
   }
+  // The page's city: its box frames the map; cells and the stream are its.
+  var CITY = { id: "chennai", bbox: [80.10, 12.85, 80.33, 13.24], centre: [80.215, 13.045] };
+  try { CITY = JSON.parse(document.getElementById("city").textContent) || CITY; } catch (e) {}
+  function cityView(extra) {
+    var o = CITY.id === "chennai" ? { center: [80.2209, 13.0], zoom: 11.3 }
+      : { bounds: [[CITY.bbox[0], CITY.bbox[1]], [CITY.bbox[2], CITY.bbox[3]]], fitBoundsOptions: { padding: 24 } };
+    return Object.assign(o, extra || {});
+  }
   var HAZ_TEXT = { low: tr("hazard.low"), danger_some: tr("hazard.danger_some"), danger_most: tr("hazard.danger_most"), danger_all: tr("hazard.danger_all"), unknown: tr("hazard.unknown") };
   var HAZ_CHIP = { low: "chip", danger_some: "chip", danger_most: "chip chip-violet", danger_all: "chip chip-danger", unknown: "chip chip-grey" };
 
@@ -103,8 +111,9 @@ window.NM = (function () {
 
   function create(id, opts) {
     var m = new maplibregl.Map(Object.assign({
-      container: id, style: STYLE, center: [80.2209, 13.0], zoom: 11.3, minZoom: 9, maxZoom: 18,
-      maxBounds: [[79.85, 12.6], [80.6, 13.45]], attributionControl: false, dragRotate: false, pitchWithRotate: false
+      container: id, style: STYLE, center: CITY.centre, zoom: 11, minZoom: 8.5, maxZoom: 18,
+      maxBounds: [[CITY.bbox[0] - 0.3, CITY.bbox[1] - 0.3], [CITY.bbox[2] + 0.3, CITY.bbox[3] + 0.3]],
+      attributionControl: false, dragRotate: false, pitchWithRotate: false
     }, opts || {}));
     m.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: "Flood cells: Neermattam" }), "bottom-right");
     if (m.getContainer().clientWidth < 720) {
@@ -193,7 +202,7 @@ window.NM = (function () {
     function load() {
       var h = { Accept: "application/json" };
       if (etag) h["If-None-Match"] = etag;
-      return fetch("/api/cells", { headers: h })
+      return fetch("/api/cells?city=" + encodeURIComponent(CITY.id), { headers: h })
         .then(function (r) {
           if (r.status === 304) return null;
           if (!r.ok) throw new Error(r.status);
@@ -211,7 +220,7 @@ window.NM = (function () {
     }
     function connect() {
       if (!window.EventSource) return;
-      es = new EventSource("/api/stream");
+      es = new EventSource("/api/stream?city=" + encodeURIComponent(CITY.id));
       es.onopen = function () { if (hooks.onStatus) hooks.onStatus("up"); };
       es.onerror = function () { if (hooks.onStatus) hooks.onStatus("down"); };
       es.addEventListener("cell", function (e) {
@@ -279,7 +288,7 @@ window.NM = (function () {
     });
   }
 
-  var api = { maps: maps, create: create, addCells: addCells, live: live, popups: popups, colourBy: colourBy, depthColor: depthColor, el: el, ago: ago, tr: tr, place: place, firstPaintMs: null };
+  var api = { city: CITY, cityView: cityView, maps: maps, create: create, addCells: addCells, live: live, popups: popups, colourBy: colourBy, depthColor: depthColor, el: el, ago: ago, tr: tr, place: place, firstPaintMs: null };
   return api;
 })();
 </script>{{end}}

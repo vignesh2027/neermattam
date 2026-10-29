@@ -2,10 +2,12 @@
 <div class="route-layout">
   <section class="route-panel" aria-labelledby="route-title">
     <p class="eyebrow">{{t "route.eyebrow"}}</p>
-    <h1 id="route-title">{{t "route.title"}}</h1>
+    <div class="title-row"><h1 id="route-title">{{t "route.title"}}</h1>{{template "city_switcher" .}}</div>
     <p class="lead">{{t "route.lead"}}</p>
+    {{if ne .City.Routing "ready"}}{{if ne .City.Routing "unknown"}}<p class="note-warn" role="note">{{template "icon-alert"}}<span>{{if eq .City.Routing "failed"}}{{t "err.route_failed" (t (printf "city.%s" .City.ID))}}{{else}}{{t "err.route_loading" (t (printf "city.%s" .City.ID))}}{{end}}</span></p>{{end}}{{end}}
 
     <form id="route-form" method="get" action="/route">
+      <input type="hidden" name="city" value="{{.City.ID}}">
       <div class="endpoints">
         <div class="endpoint">
           <span class="pin pin-a" aria-hidden="true"><span>A</span></span>
@@ -80,6 +82,7 @@
     {{range .Stats}}<div class="rs-stat{{if .Warn}} warn{{end}}"><span>{{.Label}}</span><b>{{.Value}}</b>{{if .Note}}<small>{{.Note}}</small>{{end}}</div>{{end}}
   </div>
   <p class="rs-explain">{{.Explanation}}</p>
+  {{if .WatchHref}}<p style="margin-top:12px"><a class="btn btn-ghost btn-sm" href="{{.WatchHref}}">{{template "icon-bell"}}{{t "route.watch"}}</a></p>{{end}}
   {{if .Limit}}<p class="small muted" style="margin-top:10px">{{.Limit}} {{t "route.unknown_note"}}</p>{{end}}
   {{if .Simulated}}<p class="small" style="margin-top:10px;color:var(--violet)">{{t "route.sim_note"}}</p>{{end}}
 </div>
@@ -93,7 +96,7 @@ document.addEventListener("DOMContentLoaded", function () {
   "use strict";
   var form = document.getElementById("route-form"), from = document.getElementById("from"), to = document.getElementById("to");
   var summary = document.getElementById("route-summary"), errBox = document.getElementById("route-error"), busy = document.getElementById("route-busy");
-  var map = NM.create("route-map", { center: [80.215, 13.0], zoom: 11 }), markers = {};
+  var map = NM.create("route-map", NM.cityView({ zoom: 11 })), markers = {};
   var colours = { from: "#2563EB", to: "#4C1D95" };
 
   function parse(v) { var a = (v || "").split(",").map(Number); return a.length === 2 && isFinite(a[0]) && isFinite(a[1]) && v.trim() ? a : null; }

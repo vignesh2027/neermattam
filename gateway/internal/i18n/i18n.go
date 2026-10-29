@@ -41,7 +41,21 @@ var Languages = []Lang{
 
 // Catalogs maps a language code to its messages.
 var Catalogs = map[string]map[string]string{
-	"en": en, "ta": ta, "hi": hi, "te": te, "kn": kn, "ml": ml, "bn": bn, "mr": mr,
+	"en": merge(enPages, enOps), "ta": merge(ta, taOps), "hi": merge(hi, hiOps), "te": merge(te, teOps),
+	"kn": merge(kn, knOps), "ml": merge(ml, mlOps), "bn": merge(bn, bnOps), "mr": merge(mr, mrOps),
+}
+
+// merge joins a language's two message files: the pages
+// (messages_<code>.go) and the city, control room, alerts and developer
+// texts (messages_<code>_ops.go).
+func merge(parts ...map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, p := range parts {
+		for k, v := range p {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // Default is the fallback language.
@@ -66,7 +80,7 @@ func Get(code string) (Lang, bool) {
 func T(lang, key string, args ...any) string {
 	msg, ok := Catalogs[lang][key]
 	if !ok {
-		msg, ok = en[key]
+		msg, ok = Catalogs[Default][key]
 		if !ok {
 			return key
 		}

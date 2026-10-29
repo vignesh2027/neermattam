@@ -7,21 +7,24 @@
       <h1 id="h-title">{{t "hero.line1"}} <em>{{t "hero.line2"}}</em></h1>
       <p class="h-lead">{{t "home.lead"}}</p>
       <div class="h-cta">
-        <a class="btn btn-primary btn-lg" href="/map">{{template "icon-map"}}{{t "home.cta_map"}}</a>
-        <a class="btn btn-ghost btn-lg" href="/report">{{template "icon-camera"}}{{t "cta.report_water"}}</a>
+        <a class="btn btn-primary btn-lg" href="/map?city={{.City.ID}}">{{template "icon-map"}}{{t "home.cta_map"}}</a>
+        <a class="btn btn-ghost btn-lg" href="/report?city={{.City.ID}}">{{template "icon-camera"}}{{t "cta.report_water"}}</a>
       </div>
       <p class="h-advisory">{{template "icon-alert"}}<span>{{t "advisory.short"}}</span></p>
     </div>
 
-    <a class="h-preview card" href="/map" aria-label="{{t "home.preview_aria"}}">
+    <div class="h-preview card">
       <div class="h-preview-head">
         <span class="live-dot" aria-hidden="true"></span>
         <b>{{t "home.preview_title"}}</b>
+        {{template "city_switcher" .}}
         <span class="muted small" id="pv-count">{{t "home.preview_count" .Home.Preview.Count}}</span>
-        {{if .Demo}}<span class="chip chip-violet">{{t "sim.title_plain"}}</span>{{end}}
+        {{if .City.Simulated}}<span class="chip chip-violet">{{t "sim.title_plain"}}</span>{{end}}
       </div>
+      <a class="h-map-link" href="/map?city={{.City.ID}}" aria-label="{{t "home.preview_aria"}}">
+      {{if eq .Home.Preview.Count 0}}<p class="h-empty" role="note">{{template "icon-pin"}}<span><b>{{t "city.no_reports" (t (printf "city.%s" .City.ID))}}</b> {{t "city.no_reports_sub"}}</span></p>{{end}}
       {{with .Home.Preview}}
-      <svg class="h-map" id="pv" viewBox="0 0 {{.W}} {{.H}}" width="{{.W}}" height="{{.H}}" role="img" aria-label="{{t "home.preview_img"}}" data-bounds="{{.Bounds}}">
+      <svg class="h-map" id="pv" viewBox="0 0 {{.W}} {{.H}}" width="{{.W}}" height="{{.H}}" role="img" aria-label="{{t "home.preview_img"}}" data-bounds="{{.Bounds}}" data-city="{{$.City.ID}}">
         <defs>
           <pattern id="pv-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#F1F4F9"/><rect width="2" height="6" fill="#8A99B2"/></pattern>
           <radialGradient id="pv-bg" cx="50%" cy="40%" r="75%"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E7F0FB"/></radialGradient>
@@ -33,7 +36,8 @@
       </svg>
       {{end}}
       <div class="h-preview-foot"><span>{{t "home.preview_foot"}}</span><span class="h-arrow" aria-hidden="true">{{template "icon-chev-right"}}</span></div>
-    </a>
+      </a>
+    </div>
   </section>
 
   <section class="h-section" aria-labelledby="h-how">
@@ -77,11 +81,11 @@
     <p class="eyebrow">{{t "home.who_eyebrow"}}</p>
     <h2 id="h-who">{{t "home.who_title"}}</h2>
     <ul class="h-who" role="list">
-      <li class="card">{{template "vehicle-icon-car"}}<h3>{{t "home.who_commuters"}}</h3><p>{{t "home.who_commuters_p"}}</p></li>
-      <li class="card">{{template "vehicle-icon-bike"}}<h3>{{t "home.who_riders"}}</h3><p>{{t "home.who_riders_p"}}</p></li>
+      <li class="card">{{template "vehicle-icon-car"}}<h3>{{t "home.who_commuters"}}</h3><p>{{t "home.who_commuters_p"}}</p><a class="h-who-link" href="/alerts">{{t "home.who_link_alerts"}}</a></li>
+      <li class="card">{{template "vehicle-icon-bike"}}<h3>{{t "home.who_riders"}}</h3><p>{{t "home.who_riders_p"}}</p><a class="h-who-link" href="/developers">{{t "home.who_link_api"}}</a></li>
       <li class="card">{{template "vehicle-icon-auto"}}<h3>{{t "home.who_autos"}}</h3><p>{{t "home.who_autos_p"}}</p></li>
       <li class="card">{{template "icon-family"}}<h3>{{t "home.who_families"}}</h3><p>{{t "home.who_families_p"}}</p></li>
-      <li class="card">{{template "icon-control"}}<h3>{{t "home.who_control"}}</h3><p>{{t "home.who_control_p"}}</p></li>
+      <li class="card">{{template "icon-control"}}<h3>{{t "home.who_control"}}</h3><p>{{t "home.who_control_p"}}</p><a class="h-who-link" href="{{if .Demo}}/control/demo{{else}}/control{{end}}">{{t "home.who_link_control"}}</a></li>
     </ul>
   </section>
 
@@ -146,7 +150,7 @@
     var d = p.depth_cm || 0;
     return d < 15 ? "#BAE6FD" : d < 30 ? "#38BDF8" : d < 50 ? "#2563EB" : d < 80 ? "#4C1D95" : "#9F1239";
   }
-  var es = new EventSource("/api/stream");
+  var es = new EventSource("/api/stream?city=" + encodeURIComponent(svg.getAttribute("data-city")));
   es.addEventListener("cell", function (e) {
     var f = JSON.parse(e.data), p = f.properties || {}, id = p.cell;
     var el = g.querySelector('[data-cell="' + id + '"]');

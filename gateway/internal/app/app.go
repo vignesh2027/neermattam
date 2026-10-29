@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"neermattam/gateway/internal/alerts"
+	"neermattam/gateway/internal/apikeys"
+	"neermattam/gateway/internal/cities"
 	"neermattam/gateway/internal/config"
 	"neermattam/gateway/internal/facts"
 	"neermattam/gateway/internal/live"
@@ -38,6 +41,10 @@ type App struct {
 	WhatsApp   *whatsapp.Handler
 	Overlays   *overlay.Store
 	Facts      facts.Facts
+	Cities     *cities.Registry
+	AlertStore *alerts.Store
+	Alerts     *alerts.Service // nil when ALERTS=0
+	Keys       *apikeys.Store
 
 	reportLimit *ratelimit.Limiter
 	apiLimit    *ratelimit.Limiter
@@ -45,7 +52,11 @@ type App struct {
 	started     time.Time
 	saveMu      sync.Mutex
 	saveErr     string
+	bg          sync.WaitGroup // the saver, joined by Wait
 }
+
+// Wait blocks until the background saver has stopped (after ctx ends).
+func (a *App) Wait() { a.bg.Wait() }
 
 // Options let tests replace external dependencies.
 type Options struct {
@@ -76,6 +87,12 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 		started:     time.Now(),
 	}
 	a.Origins.Demo = cfg.Demo
+	a.Cities = cities.NewRegistry(log)
+	if c, ok := a.Cities.Get(cities.Default); ok {
+		// Only the default city holds the simulated scenario, so only there
+		// can a cell with no record read as simulated.
+		a.Origins.DemoArea = c.Contains
+	}
 	if path := a.provenancePath(); path != "" {
 		n, err := a.Origins.Load(path)
 		if err != nil {
@@ -93,7 +110,11 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 	recs := a.Origins.Records()
 	for i := min(len(recs), 8) - 1; i >= 0; i-- {
 		r := recs[i]
-		a.Hub.RestoreFeed(live.FeedItem{Source: r.Source, DepthCm: r.DepthCm, DepthSigmaCm: r.DepthSigmaCm, Place: r.Place, Lat: r.Lat, Lon: r.Lon, At: r.ReceivedAt})
+		city := ""
+		if c, ok := a.Cities.Find(r.Lat, r.Lon); ok {
+			city = c.ID
+		}
+		a.Hub.RestoreFeed(live.FeedItem{City: city, Source: r.Source, DepthCm: r.DepthCm, DepthSigmaCm: r.DepthSigmaCm, Place: r.Place, Lat: r.Lat, Lon: r.Lon, At: r.ReceivedAt})
 	}
 	a.Overlays = overlay.NewStore(time.Hour, 300, 96<<20)
 	rain := opts.Rainfall
@@ -102,6 +123,7 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 	}
 	a.Pipeline = &report.Pipeline{
 		Cfg:        cfg,
+		Cities:     a.Cities,
 		Perception: a.Perception,
 		Engine:     a.Engine,
 		Verifier: &verify.Verifier{
@@ -122,10 +144,27 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 		a.Pipeline.SetClock(opts.Now)
 	}
 	a.Pipeline.Init()
+	if err := a.setupAlerts(); err != nil {
+		return nil, err
+	}
 	if cfg.WhatsApp.Enabled() {
 		limits := map[string]int64{"image": cfg.MaxImageBytes, "video": cfg.MaxVideoBytes, "audio": cfg.MaxAudioBytes}
 		a.WhatsApp = whatsapp.New(base, cfg.WhatsApp, cfg.PublicURL, limits, a.Pipeline, log, m)
+		if a.Alerts != nil {
+			a.WhatsApp.Watch = a.whatsAppWatch()
+			a.Alerts.WhatsApp = a.WhatsApp.Send
+		}
 	}
+	keysDir := cfg.DataDir
+	if keysDir == "" {
+		keysDir = os.TempDir() // no persistence: keys can still be made with -dir
+	}
+	keys, err := apikeys.Open(keysDir)
+	if err != nil {
+		log.Warn("developer API keys not loaded", "error", err.Error())
+		keys, _ = apikeys.Open(filepath.Join(os.TempDir(), "neermattam-no-keys"))
+	}
+	a.Keys = keys
 	m.Registry.NewGaugeFunc("neermattam_sse_clients", "Browsers connected to the live stream.", func() float64 { return float64(a.Hub.Clients()) })
 	m.Registry.NewGaugeFunc("neermattam_engine_stream_up", "1 when the engine stream is connected.", func() float64 {
 		if a.Hub.UpstreamConnected() {
@@ -152,6 +191,28 @@ func (a *App) Handler() http.Handler {
 	mux.Handle("GET /route", page(a.routePage))
 	mux.Handle("GET /route/plan", http.HandlerFunc(a.routePlan))
 	mux.Handle("GET /about", page(a.aboutPage))
+	mux.Handle("GET /alerts", page(a.alertsPage))
+	mux.Handle("GET /developers", page(a.developersPage))
+	mux.HandleFunc("GET /sw.js", a.serviceWorker)
+
+	mux.Handle("GET /control", page(a.controlPage))
+	mux.HandleFunc("POST /control/login", a.controlLogin)
+	mux.HandleFunc("POST /control/logout", a.controlLogout)
+	mux.HandleFunc("GET /control/panel", a.controlPanel)
+	mux.HandleFunc("GET /control/export", a.controlExport)
+	mux.Handle("GET /control/demo", page(a.controlDemoPage))
+	mux.HandleFunc("GET /control/demo/panel", a.controlDemoPanel)
+	mux.HandleFunc("GET /control/demo/export", a.controlDemoExport)
+
+	mux.HandleFunc("GET /api/cities", a.apiCities)
+	mux.HandleFunc("GET /api/alerts/key", a.apiAlertKey)
+	mux.HandleFunc("POST /api/alerts", a.apiAlertCreate)
+	mux.HandleFunc("GET /api/alerts/{id}", a.apiAlertGet)
+	mux.HandleFunc("DELETE /api/alerts/{id}", a.apiAlertDelete)
+
+	mux.HandleFunc("GET /api/v1/route", a.devRoute)
+	mux.HandleFunc("GET /api/v1/cells", a.devCells)
+	mux.HandleFunc("GET /api/v1/usage", a.devUsage)
 
 	mux.HandleFunc("POST /api/report", a.apiReport)
 	mux.HandleFunc("GET /api/cells", a.apiCells)
@@ -227,15 +288,26 @@ func (a *App) SaveProvenance() {
 // provenance saver.
 func (a *App) Run(ctx context.Context) {
 	go a.Hub.Run(ctx, a.Engine)
+	go a.citiesRefresh(ctx)
+	if a.Alerts != nil {
+		go a.Alerts.Run(ctx)
+	}
+	a.bg.Add(1)
 	go func() {
+		defer a.bg.Done()
 		t := time.NewTicker(3 * time.Second)
 		defer t.Stop()
+		n := 0
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
 				a.SaveProvenance()
+				a.saveAlerts()
+				if n++; n%10 == 0 {
+					a.saveKeyUsage()
+				}
 			}
 		}
 	}()
@@ -262,4 +334,14 @@ func (a *App) Shutdown() {
 		a.WhatsApp.Wait()
 	}
 	a.SaveProvenance()
+	a.saveAlerts()
+	a.saveKeyUsage()
+}
+
+func (a *App) saveKeyUsage() {
+	if a.Keys != nil && a.Cfg.DataDir != "" {
+		if err := a.Keys.Save(); err != nil {
+			a.Log.Warn("API key usage not saved", "error", err.Error())
+		}
+	}
 }

@@ -407,6 +407,7 @@ type RouteView struct {
 	Explanation string
 	Limit       string
 	GeoJSON     template.JS
+	WatchHref   string // /alerts with this route, set by the caller
 }
 
 type routeProps struct {

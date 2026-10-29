@@ -2,7 +2,7 @@ package i18n
 
 // en is the reference catalog: every key used anywhere must be here.
 // Keys ending in ".html" carry trusted markup and must keep it.
-var en = map[string]string{
+var enPages = map[string]string{
 	// Page chrome
 	"meta.description":    "Neermattam measures floodwater depth on Chennai streets from one photo of a wheel, fuses reports into a live map, and routes each vehicle around water it cannot cross.",
 	"meta.og_description": "Street-level flood depth for Chennai, from one photo. Live depth map and water-aware routes. Advisory only.",
@@ -325,7 +325,7 @@ var en = map[string]string{
 	"dur.years":                "about %s years",
 
 	"err.location_required":      "Add a location: tap the map, use your device location, or type coordinates.",
-	"err.outside_area":           "That location (%.4f, %.4f) is outside the Chennai service area.",
+	"err.outside_area":           "That location (%.4f, %.4f) is outside the cities Neermattam covers: %s.",
 	"err.media_required":         "Attach a photo, a short video or a voice note.",
 	"err.empty_file":             "The file is empty.",
 	"err.unsupported_media":      "That file is not a JPEG or PNG photo, an MP4 or MOV video, or an Ogg, WAV, M4A or MP3 voice note.",

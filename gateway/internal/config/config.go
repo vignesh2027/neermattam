@@ -107,7 +107,24 @@ type Config struct {
 	// time is used.
 	RepoRoot string
 
+	// ServiceArea is the simulated scenario's area (Chennai). The covered
+	// cities themselves come from the engine's /v1/cities.
 	ServiceArea BBox
+
+	// ControlRoomKey unlocks /control. Empty leaves only the public demo.
+	ControlRoomKey string
+
+	// Alerts ("Watch my street").
+	Alerts          bool
+	AlertsMax       int
+	AlertsPerClient int
+	AlertTTL        time.Duration
+	AlertMinGap     time.Duration
+	AlertSweep      time.Duration
+	VAPIDPublic     string
+	VAPIDPrivate    string
+	VAPIDSubject    string
+	PushHosts       []string
 
 	MaxImageBytes   int64
 	MaxVideoBytes   int64
@@ -175,6 +192,18 @@ func fromLookup(lookup func(string) (string, bool)) (Config, error) {
 		MaxSSEClients: int(r.int64("MAX_SSE_CLIENTS", 200)),
 		CellsCacheTTL: r.dur("CELLS_CACHE_TTL", 2*time.Second),
 
+		ControlRoomKey: r.str("CONTROL_ROOM_KEY", ""),
+
+		Alerts:          r.bool("ALERTS", true),
+		AlertsMax:       int(r.int64("ALERTS_MAX", 5000)),
+		AlertsPerClient: int(r.int64("ALERTS_PER_CLIENT", 10)),
+		AlertTTL:        r.dur("ALERT_TTL", 14*24*time.Hour),
+		AlertMinGap:     r.dur("ALERT_MIN_GAP", 2*time.Minute),
+		AlertSweep:      r.dur("ALERT_SWEEP", 2*time.Minute),
+		VAPIDPublic:     r.str("VAPID_PUBLIC_KEY", ""),
+		VAPIDPrivate:    r.str("VAPID_PRIVATE_KEY", ""),
+		VAPIDSubject:    r.str("VAPID_SUBJECT", ""),
+
 		Demo:             r.bool("DEMO", false),
 		DemoDrip:         r.dur("DEMO_DRIP_INTERVAL", 6*time.Second),
 		DemoReseedEvery:  r.dur("DEMO_RESEED_INTERVAL", 30*time.Minute),
@@ -196,6 +225,23 @@ func fromLookup(lookup func(string) (string, bool)) (Config, error) {
 			r.err = fmt.Errorf("GATEWAY_BBOX: %w", err)
 		}
 		c.ServiceArea = b
+	}
+	if hosts := r.str("PUSH_HOSTS", ""); hosts != "" {
+		for _, h := range strings.Split(hosts, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				c.PushHosts = append(c.PushHosts, h)
+			}
+		}
+	}
+	if c.VAPIDSubject == "" {
+		// RFC 8292 asks for a contact; an https PUBLIC_URL is one.
+		c.VAPIDSubject = "mailto:alerts@localhost"
+		if strings.HasPrefix(c.PublicURL, "https://") {
+			c.VAPIDSubject = c.PublicURL
+		}
+	}
+	if r.err == nil && c.ControlRoomKey != "" && len(c.ControlRoomKey) < 12 {
+		r.err = fmt.Errorf("CONTROL_ROOM_KEY must be at least 12 characters")
 	}
 	if r.err == nil && c.MaxSSEClients < 1 {
 		r.err = fmt.Errorf("MAX_SSE_CLIENTS must be at least 1")

@@ -1,6 +1,6 @@
 # Neermattam gateway
 
-The gateway is the Go service at `gateway/` (port 8080) and the only service the public can reach. It serves the five pages in eight languages, takes reports from the web and WhatsApp, checks them, hands them to perception and the engine, and fans the engine's live cell stream out to browsers. It is written with the standard library only: `net/http` with method patterns, `log/slog`, `html/template` and `embed`. There are no third-party Go modules.
+The gateway is the Go service at `gateway/` (port 8080) and the only service the public can reach. It serves the pages in eight languages for six cities, takes reports from the web and WhatsApp, checks them, hands them to perception and the engine, and fans the engine's live cell stream out to browsers. It is written with the standard library only: `net/http` with method patterns, `log/slog`, `html/template` and `embed`. There are no third-party Go modules.
 
 ![Landing page](img/gateway-home.png)
 
@@ -13,6 +13,11 @@ The gateway is the Go service at `gateway/` (port 8080) and the only service the
 | `/report` | Upload a photo, a short video or a voice note, with a location from a map tap, the device or typed coordinates. Shows the real pipeline stages as they happen and ends with the result card. |
 | `/route` | Pick start and end on the map or from presets (Velachery station, Guindy, T. Nagar, Tambaram, Chennai Central) and a vehicle. Draws the water-aware route and the shortest route in two styles, with the engine's summary and explanation. |
 | `/about` | How it works, the hazard formula and vehicle limits, checks, credits and limitations. |
+| `/alerts` | "Watch my street": pick a point or a planned route and a vehicle, and get a notification when the water there crosses the vehicle's limit, gets more dangerous, or clears. See [Watch my street](#watch-my-street). |
+| `/control` | The control room for ward officers and city control rooms, behind an access key; `/control/demo` is a public read-only copy over the simulated Chennai scenario. See [Control room](#control-room). |
+| `/developers` | The developer API for fleets, with curl examples, response fields, errors, limits and the advisory terms. See [Developer API](#developer-api). |
+
+Every route is in docs/CONTRACTS.md section 3.
 
 Pages are server-rendered. The only script is the vendored MapLibre GL JS 5.6.0 (`gateway/internal/web/static/vendor/maplibre-gl-5.6.0/`, BSD licence) and short inline glue. Every inline script carries a per-request nonce, and the Content-Security-Policy allows only those scripts, the gateway's own files and OpenFreeMap (style, tiles, glyphs, sprites). Without script, the report form and the route form still work: they post or get to the same paths and the server renders the result.
 
@@ -68,7 +73,7 @@ The whole English page is in `img/gateway-home-full.png`.
 
 Every page, every message the server renders (result cards, verification reasons, errors, the trace, route summaries, durations, months) and the text the inline glue shows are available in English, Tamil, Hindi, Telugu, Kannada, Malayalam, Bengali and Marathi.
 
-- **Catalogues** are Go maps in `internal/i18n/messages_<code>.go`, 467 keys each, with English as the reference and the fallback for any missing key. Messages use `fmt` verbs, and `%[2]s` style indexes where a language puts the arguments in another order. Keys ending in `.html` carry a little trusted markup (bold numbers with `data-count` hooks for the live trace); every other message is escaped. Numbers and units stay as numerals (`34 cm`, `0.28 ms`). Place names, model names and model output are not translated.
+- **Catalogues** are Go maps in two files per language: `internal/i18n/messages_<code>.go` for the pages (467 keys) and `messages_<code>_ops.go` for cities, the control room, alerts and the developer page (236 keys), 703 keys each, with English as the reference and the fallback for any missing key. Messages use `fmt` verbs, and `%[2]s` style indexes where a language puts the arguments in another order. Keys ending in `.html` carry a little trusted markup (bold numbers with `data-count` hooks for the live trace); every other message is escaped. Numbers and units stay as numerals (`34 cm`, `0.28 ms`). Place names, model names and model output are not translated.
 - **Choice of language**: `?lang=` first (remembered in a one-year `nm_lang` cookie, `SameSite=Lax`, `HttpOnly`), then that cookie, then `Accept-Language` with its q-values, then English. The header has a language menu, a plain `<details>` list of links that keep the current path and query, so it works without script. HTML responses carry `Vary: Cookie, Accept-Language, Accept-Encoding`; static files and the JSON API vary only on encoding.
 - **Templates** are parsed once per language at start with the language bound into the `t` and `th` functions, so rendering does no lookups by language. Text for the glue (popups, ticker, ages, errors) is rendered into a `<script type="application/json" id="i18n">` block and read with `NM.tr`.
 - **Server-made text** carries a key and arguments as well as its English sentence: verification reasons (`verify.RuleResult.Key`), pipeline errors (`report.Error.Key`), durations and ages. The English page uses the original sentences; other languages build theirs from the catalogue. The engine's route explanation is in English, so for other languages the route summary is rebuilt from the route's own numbers.
@@ -109,6 +114,84 @@ The machine was running other builds at the time (load average 2 to 3; an earlie
 The per-viewer spread in events is viewers joining during the 2-second ramp. Revalidations all return 200 because the demo changes the map faster than the 15-second interval; the p95 is the moment the 2-second cache expires and one viewer waits for the engine query and compression. Concurrent misses for the same area share that one query and one compression (`TestConcurrentCellMissesShareOneQuery`); before that change the first run's `/map` p95 was 229 ms.
 
 The load test found a real bug: the demo's reading ids came from a fixed seed, so a gateway restarted against a running engine replayed ids the engine had already seen, the engine dropped them as duplicates, and the live map stopped moving. Reading ids now mix in a random salt chosen at start; the scenario itself still comes from the fixed seed and looks the same every run (`TestReadingIDsDifferBetweenRuns`).
+
+## Cities
+
+The engine covers Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata and Delhi (docs/ENGINE.md, Cities). The gateway starts from a built-in copy of that list, so pages work before the engine answers, and refreshes it from `GET /v1/cities` every 30 seconds, which adds each city's cell count and routing state (`internal/cities`).
+
+- **Choosing a city.** `/map`, `/route`, `/report`, `/alerts`, `/control` and the landing preview have a city menu (a `<details>` list of links, so it works without script). The choice comes from `?city=`, then the city holding `?at=` (so a WhatsApp link opens the right city), then the `nm_city` cookie, then Chennai; an explicit `?city=` is remembered for a year. Switching city drops `at`, `from`, `to` and `cell` from the link, since they belong to the old city.
+- **Scoped data.** The map, landing preview and their glue ask for `/api/cells?city=` and `/api/stream?city=`. The gateway keeps one connection to the engine's stream for every city and filters per browser by each cell's `city` property, so six cities cost no extra upstream connections. The ticker shows the city's own reports.
+- **The simulated scenario stays in Chennai.** Only Chennai's map, cells, routes and preview carry `simulated_scenario` and the violet banner. In demo mode a cell with no provenance record reads "simulated" only inside Chennai's box; anywhere else it reads "reported", so another city can never show invented water. A city with no reports says so: "No reports yet in Mumbai. Water shows here as soon as people report it. A street with no reports is unknown, never safe."
+- **Routes and reports use the city.** The route form's presets are the city's: five well-known places each, such as Dadar and Andheri stations in Mumbai, Silk Board junction in Bengaluru, Howrah station in Kolkata and ITO in Delhi (`internal/places`). All 60 preset pairs were routed for a car against the engine, 10 of 10 in every city. Both ends must lie in the chosen city; the report pin must lie in the chosen city (or, through the API without a city, in any covered city).
+- **Engine errors in plain words**, in the page's language, with a stable `code` in JSON: `different_cities` ("The start and the end are in different cities. A route has to start and end in the same city."), `outside_area` ("The start or the end is outside Mumbai. Pick both points in Mumbai, or switch city."), `routing_unavailable` from the engine's 503 ("Routes in Delhi are not available yet: its road map is still loading. Try again in a minute.", or "could not be loaded" when the graph failed, while the map and reports keep working), `no_road` from its 404. The route page warns before any request when the city's routing is loading or failed.
+- **Readiness.** `/readyz` says `degraded`, with the engine's reason, when some city's routing is loading or failed; it stays 200.
+
+| City switcher, desktop | On a phone |
+|---|---|
+| ![City switcher on the Mumbai map](img/gateway-city-switcher.png) | ![City switcher on a phone](img/gateway-city-switcher-mobile.png) |
+
+![Landing preview for Delhi, with no reports yet](img/gateway-home-delhi.png)
+
+## Control room
+
+`/control` is for ward officers and city control rooms: per city, everything the engine's analytics endpoints know, laid out to be read at a glance.
+
+- **Summary tiles** from `/v1/summary`: cells by hazard class (danger for all, most, some, caution), unknown, stale (6 hours or more, with how many expired), cells in conflict (with conflicting readings), cells needing a fresh report, and the newest reading with the total. Below them, the number of cells closed to each vehicle.
+- **Hotspots** from `/v1/hotspots` (top 15): the score out of 100 with a bar split into its four parts (depth 40, hazard 30, freshness 20, reports 10), the blocking depth and the mean plus or minus, the class, age, independent reports, the vehicles the cell is closed to, the reasons, and links to the cell's history and to the map. English shows the engine's own sentences; other languages build theirs from the same parts.
+- **Needs a fresh report** from the summary: stale or expired cells last seen deeper than 15 cm, deepest first, each with "Ask for a report" (the report page, pinned there) and its history.
+- **Cell history** (`?cell=`) from `/v1/recession`: now, hazard, last update, a conflict marker, and an SVG drawn on the server: each direct reading with its plus or minus, the fused estimate as a line with its band, the 15 cm and 30 cm limits, and the time span. Then the drain rate, its plus or minus and trend, the hours to 15 cm when falling, and the engine's note that it is a straight-line fit of the recent past, not a forecast, and never opens a road. No script and no chart library.
+- **Routing by city**: each city's road graph state.
+- **Exports**: CSV and GeoJSON buttons pass the engine's `/v1/export` through, with its file name and the `X-Neermattam-Truncated` and `X-Neermattam-Total-Cells` headers.
+- **Live.** The page listens to `/api/stream?city=` and, at most every 5 seconds when the city's water changes (and once a minute regardless), fetches the panel re-rendered on the server (`/control/panel`) and swaps it in, keeping any open "why" lists open.
+
+**Access.** Set `CONTROL_ROOM_KEY` (at least 12 characters). `/control` without a session shows a key page; `POST /control/login` compares the key in constant time and sets `nm_ctl`, an HMAC-SHA256 of a fixed label under the key (never the key), `HttpOnly`, `SameSite=Strict`, `Secure` when `PUBLIC_URL` is https, scoped to `/control`, for 12 hours. Changing the key ends every session. Logins are limited to 5 a minute per address. Without `CONTROL_ROOM_KEY` the keyed room is off and the page says so.
+
+**Public demo.** With `DEMO=1`, `/control/demo` is the same room over the simulated Chennai scenario only, read only, with a violet "Public demo with simulated data" banner, so judges can see it without a key. Its panel and exports are rate limited like the public API.
+
+| Control room, desktop | On a phone |
+|---|---|
+| ![Control room with a cell's history](img/gateway-control.png) | ![Control room on a phone](img/gateway-control-mobile.png) |
+| ![Control room in Tamil](img/gateway-control-ta.png) | ![Cell history on a phone](img/gateway-control-cell-mobile.png) |
+| ![Key page](img/gateway-control-login.png) | ![Public demo](img/gateway-control-demo.png) |
+
+## Watch my street
+
+A visitor picks a point on the map, or a route planned on `/route` ("Watch this route"), and a vehicle, and turns on notifications. The gateway sends a message:
+
+- when reports show water there **over the vehicle's limit** (15 cm for two-wheelers, autos and cars, 30 cm for buses, at the blocking depth routing uses; for people on foot, a hazard class of "danger for some" or worse);
+- when the hazard there **worsens** a class;
+- when the latest reports show it **below the limit again**;
+- and, when water that was over the limit is reported no more, that the reports are **out of date** and it should be treated as flooded. Water that ages out is never called clear.
+
+The first message says what is watched and what the water is now ("unknown, not safe" when nobody has reported it). Every message says it is advisory. A route is planned on the server for the chosen vehicle and watched at points every 25 m along it, so water in the middle of a long route is found.
+
+**How it is checked.** `internal/alerts` keeps an index of each watched city's cells (a 0.002 degree grid of cell centres; a point is matched to the hexagon that contains it). Cell events from the engine stream update the index and re-check only the watches near the changed cell; every `ALERT_SWEEP` (2 minutes) each watched city is reloaded and every watch re-checked, which catches water that drains without a new report and cells the engine forgets. Two messages to one watch are at least `ALERT_MIN_GAP` (2 minutes) apart; a change inside the gap is held for the next check.
+
+**Web Push, standard library only.** RFC 8291 message encryption (an ephemeral P-256 key with `crypto/ecdh`, HKDF-SHA-256 with `crypto/hkdf`, AES-128-GCM, one aes128gcm record) and RFC 8292 VAPID (an ES256 JWT signed with `crypto/ecdsa`). No dependency was needed: every primitive is in Go's standard library. A test checks the output byte for byte against the worked example in RFC 8291 section 5; another decrypts what the gateway posts to a fake push service with the subscriber's private key. The VAPID key comes from `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`, or is made once and kept in `vapid.json` (mode 0600) in the data directory; `VAPID_SUBJECT` is the contact. Messages go only to the push services of the major browsers (`fcm.googleapis.com`, Mozilla's `push.services.mozilla.com`, `push.apple.com`, `notify.windows.com` and their subdomains; `PUSH_HOSTS` replaces the list), so a subscription cannot make the gateway post to an arbitrary host. A push service's 404 or 410 deletes the watch; five failures in a row end it. `GET /sw.js` is the only file of script besides the vendored MapLibre and inline glue: a short service worker that shows the notification and opens its link, and nothing else. On iPhones, Safari delivers web push only to web apps added to the home screen; the page says so.
+
+**Storage and limits.** Watches are kept in `alerts.json` (mode 0600) in the data directory, saved every few seconds when changed. Each holds the place, vehicle, city, language, the push endpoint and keys (or the WhatsApp number), the last state, and a SHA-256 of the token that reads or deletes it. A watch ends after `ALERT_TTL` (14 days). At most `ALERTS_PER_CLIENT` (10) per browser or number and `ALERTS_MAX` (5,000) in all. The browser keeps the ids and tokens of its own watches in `localStorage`, and the page lists them with their current state and a Stop button.
+
+**WhatsApp**, the same watcher. With the WhatsApp variables set, `watch` (or `watch car`, `watch bus`, `watch auto`, `watch walking`) followed by a shared location watches that point; `stop` ends every watch for the number. Messages are plain text with the same wording and a link. WhatsApp only delivers free-form business messages within 24 hours of the person's last message; outside that window Meta requires a pre-approved template, which this gateway does not send, so a long-lived WhatsApp watch can go quiet. Web Push has no such limit.
+
+| Desktop | On a phone |
+|---|---|
+| ![Watch my street](img/gateway-alerts.png) | ![Watch my street on a phone](img/gateway-alerts-mobile.png) |
+
+## Developer API
+
+For fleets and apps, with a key per customer: `GET /api/v1/route`, `GET /api/v1/cells` and `GET /api/v1/usage` (contract in docs/CONTRACTS.md section 3, documentation for customers at `/developers`). Answers are the public API's plus top-level `"advisory": true` and a `terms` link.
+
+- **Keys.** `go run ./cmd/neermattam-keys create -name "Acme Fleet" -rate 600` makes a key `nm_live_` plus 32 base32 characters (160 random bits), prints it once, and stores only its SHA-256, the first 8 characters as its public id, the name, the rate and whether it is disabled, in `apikeys.json` (mode 0600) in the data directory. `list`, `usage [id]`, `disable`, `enable` and `delete` manage them. The gateway re-reads the file within 2 seconds of a change, so a new or disabled key needs no restart. The CLI is the file's only writer.
+- **Authentication.** `Authorization: Bearer <key>` or `X-API-Key`. The hash is compared in constant time, against a dummy for unknown ids. 401 `missing_key` or `invalid_key`, 403 `key_disabled`.
+- **Limits.** A token bucket per key at its own rate per minute, with a burst of ten seconds' worth (at least 5). Every answer carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`; a 429 `rate_limited` carries `Retry-After`.
+- **Usage for billing.** Each returned route and each cells read is counted per key and per UTC day (a failed route is not counted), kept for 90 days in `apikey-usage.json`, which only the gateway writes (every 30 seconds and at shutdown). A customer reads its own counts at `/api/v1/usage`; the operator reads everyone's with `neermattam-keys usage`. Pricing is agreed with the operator; nothing on the page invents a price.
+- **Terms**, on the page: every route and depth is advisory and must be shown as such; unknown is not dry; depths carry uncertainty; `simulated_scenario` answers are invented and must not be used for real decisions; OpenStreetMap attribution; no guarantee of availability or accuracy.
+
+Checked against the running gateway: no key 401, a made-up key 401, a 6-a-minute trial key refused with 429 after its burst of 5, the 600-a-minute key served routes and cells with the headers, usage counted, and a key disabled with the CLI answered 403 within 3 seconds.
+
+| Desktop | On a phone |
+|---|---|
+| ![Developer API page](img/gateway-developers.png) | ![Developer API page on a phone](img/gateway-developers-mobile.png) |
 
 ## Request path
 
@@ -270,9 +353,16 @@ The header shows the mark (64 or 128 pixels for high-density screens) beside the
 | `OPEN_METEO_URL` | `https://api.open-meteo.com` | Rainfall API |
 | `ENGINE_TIMEOUT`, `ROUTE_TIMEOUT`, `PERCEPTION_TIMEOUT`, `WEATHER_TIMEOUT` | `5s`, `20s`, `240s`, `4s` | Upstream timeouts |
 | `REPLY_DEADLINE` | `4m30s` | Deadline for every non-streaming reply, from the start of the request |
-| `GATEWAY_DATA_DIR` | `../data/gateway` | Where `provenance.json` is kept; empty disables it |
+| `GATEWAY_DATA_DIR` | `../data/gateway` | Where `provenance.json`, `alerts.json`, `vapid.json`, `apikeys.json` and `apikey-usage.json` are kept; empty disables persistence |
+| `CONTROL_ROOM_KEY` | empty | Unlocks `/control` (at least 12 characters); empty leaves only the public demo |
+| `ALERTS` | `true` | "Watch my street" |
+| `ALERTS_MAX`, `ALERTS_PER_CLIENT` | `5000`, `10` | Watches in all, and per browser or WhatsApp number |
+| `ALERT_TTL`, `ALERT_MIN_GAP`, `ALERT_SWEEP` | `336h`, `2m`, `2m` | Watch lifetime, least time between two messages to one watch, full re-check interval |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | empty | Web Push key pair (base64url); empty makes one and keeps it in `vapid.json` |
+| `VAPID_SUBJECT` | `PUBLIC_URL` if https, else `mailto:alerts@localhost` | Contact sent to push services |
+| `PUSH_HOSTS` | the major browsers' push services | Comma-separated hosts push messages may go to |
 | `REPO_ROOT` | `..` | Where the landing page reads its numbers live (`docs/`, `eval/`); the embedded copy is used when they are absent |
-| `GATEWAY_BBOX` | `80.10,12.85,80.33,13.24` | Service area, same as the engine |
+| `GATEWAY_BBOX` | `80.10,12.85,80.33,13.24` | The simulated scenario's area (Chennai); the covered cities come from the engine |
 | `MAX_IMAGE_BYTES`, `MAX_VIDEO_BYTES`, `MAX_AUDIO_BYTES` | 12 MiB, 40 MiB, 8 MiB | Upload sizes |
 | `MAX_VIDEO_SECONDS` | `30` | Video length |
 | `MAX_IMAGE_PIXELS` | `50000000` | Decompression bomb guard |
@@ -319,4 +409,4 @@ gofmt -l .
 go generate ./internal/facts   # after ENGINE.md, GEOMETRY.md or RESULTS_REAL.md change
 ```
 
-The tests use `httptest` fakes for the engine (including its SSE stream) and perception, a fake Graph API and a fake rainfall source. They cover a fixed clock for every check of capture times (no test depends on today's date), the overlay re-encode and its LRU, a report reply under 30 KB with a multi-megabyte overlay, compact cells with ETag and 304, the cells inlined in the map page, provenance surviving a restart in demo mode, the stage and live step events in order, the fallback when perception has no stream (and that it is probed once), the model-estimate card and its trust, both readings beside a measurement, perception's `captured_at` winning over the photo's own EXIF and an explicit null meaning none, voice reports end to end with a Tamil transcript, trace step classification, upload limits (size, video length, missing header, disguised files, location, area), rate limiting and `Retry-After`, exact and near duplicates, the full report path with the reading the engine receives, the NDJSON stages, every verification rule, Open-Meteo summing and caching, WhatsApp signatures (good, tampered, missing, wrong secret), the handshake, pairing and the pairing window, template rendering of every page (no rejected values, no em dashes or arrows, every inline script carrying the CSP nonce) and of every page in all eight languages (`lang` attribute, font link, language cookie), the translation catalogues (every key in every language, placeholders and markup kept, every used key defined, language detection), the landing numbers matching the documents they come from, concurrent cell-cache misses sharing one engine query, demo reading ids differing between runs, the cell cache and origin labels, the SSE fan-out with its client limit and resync, readiness, metrics format, gzip of static files, MP4 duration parsing, EXIF capture times and the demo scenario's validity.
+The tests use `httptest` fakes for the engine (including its SSE stream) and perception, a fake Graph API and a fake rainfall source. They cover a fixed clock for every check of capture times (no test depends on today's date), the overlay re-encode and its LRU, a report reply under 30 KB with a multi-megabyte overlay, compact cells with ETag and 304, the cells inlined in the map page, provenance surviving a restart in demo mode, the stage and live step events in order, the fallback when perception has no stream (and that it is probed once), the model-estimate card and its trust, both readings beside a measurement, perception's `captured_at` winning over the photo's own EXIF and an explicit null meaning none, voice reports end to end with a Tamil transcript, trace step classification, upload limits (size, video length, missing header, disguised files, location, area), rate limiting and `Retry-After`, exact and near duplicates, the full report path with the reading the engine receives, the NDJSON stages, every verification rule, Open-Meteo summing and caching, WhatsApp signatures (good, tampered, missing, wrong secret), the handshake, pairing and the pairing window, template rendering of every page (no rejected values, no em dashes or arrows, every inline script carrying the CSP nonce) and of every page in all eight languages (`lang` attribute, font link, language cookie), the translation catalogues (every key in every language, placeholders and markup kept, every used key defined, language detection), the landing numbers matching the documents they come from, concurrent cell-cache misses sharing one engine query, demo reading ids differing between runs, the cell cache and origin labels, the city switcher (cookie, `?at=`, presets, Mumbai empty and never simulated, the API scoped by city), route errors in plain words in English and Tamil, the control room (key page, wrong and right key, the session cookie's flags, panel, export pass-through, the history drill-down against the engine's real recession shape, the labelled public demo, the room off without a key), the developer API (missing, invalid and disabled keys, picking up a new key file, the advisory wrapper, ETag, per-key limits with Retry-After, usage counted and saved, failed routes not counted), the alerts API (foreign endpoints refused, points outside the city refused, create, token, route watches planned on the server, delete), Web Push encryption against RFC 8291's example and a VAPID JWT that verifies, a watch going over, worse, clear and out of date with every message decrypted and marked advisory, a sweep catching drained water, a gone subscription dropped, route sampling, store caps and persistence, the WhatsApp watch and stop commands, the SSE fan-out with its client limit and resync, readiness, metrics format, gzip of static files, MP4 duration parsing, EXIF capture times and the demo scenario's validity.

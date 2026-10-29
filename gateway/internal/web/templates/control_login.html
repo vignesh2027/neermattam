@@ -1,0 +1,27 @@
+{{define "content"}}
+<div class="page ctl-login">
+  <section class="card panel ctl-login-card" aria-labelledby="ctl-login-h">
+    {{template "mark"}}
+    <p class="eyebrow">{{t "ctl.eyebrow"}}</p>
+    <h1 id="ctl-login-h">{{t "ctl.login_title"}}</h1>
+    <p class="muted">{{t "ctl.login_lead"}}</p>
+    {{with .Control}}{{if .Error}}<p class="note-warn" role="alert">{{template "icon-alert"}}<span>{{t .Error}}</span></p>{{end}}{{end}}
+    <form method="post" action="/control/login" class="ctl-login-form">
+      <div class="field">
+        <label for="ctl-key">{{t "ctl.login_key"}}</label>
+        <input class="input" id="ctl-key" name="key" type="password" autocomplete="current-password" required minlength="12" spellcheck="false">
+      </div>
+      <button class="btn btn-primary" type="submit">{{t "ctl.login_go"}}</button>
+    </form>
+    <p class="small muted">{{t "ctl.login_note"}}</p>
+  </section>
+  {{if .Control.Demo}}
+  <section class="card panel ctl-login-demo" aria-labelledby="ctl-demo-h">
+    {{template "icon-flask"}}
+    <h2 id="ctl-demo-h">{{t "ctl.demo_cta_title"}}</h2>
+    <p class="muted">{{t "ctl.demo_cta_body"}}</p>
+    <a class="btn btn-ghost" href="/control/demo">{{t "ctl.demo_cta"}}</a>
+  </section>
+  {{end}}
+</div>
+{{end}}

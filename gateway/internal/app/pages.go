@@ -3,26 +3,27 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"neermattam/gateway/internal/cities"
 	"neermattam/gateway/internal/i18n"
-	"neermattam/gateway/internal/places"
 	"neermattam/gateway/internal/ratelimit"
 	"neermattam/gateway/internal/report"
 	"neermattam/gateway/internal/upstream"
 	"neermattam/gateway/internal/web"
 )
 
-func (a *App) page(r *http.Request, active string, needsMap bool) *web.Page {
+func (a *App) page(w http.ResponseWriter, r *http.Request, active string, needsMap bool) *web.Page {
 	lang := langFrom(r.Context())
+	city := a.cityFor(w, r)
 	info, _ := i18n.Get(lang)
 	p := &web.Page{
 		Request:     r,
@@ -50,6 +51,15 @@ func (a *App) page(r *http.Request, active string, needsMap bool) *web.Page {
 		q.Set("lang", l.Code)
 		p.LangLinks = append(p.LangLinks, web.LangLink{Code: l.Code, Name: l.Name, Native: l.Native, Href: r.URL.Path + "?" + q.Encode(), Current: l.Code == lang})
 	}
+	p.City = web.NewCityView(city.ID, city.Name, city.BBox, city.CentreLat, city.CentreLon, city.Cells, city.Routing, a.simulatedIn(city.ID))
+	for _, c := range a.Cities.All() {
+		q := r.URL.Query()
+		for _, k := range []string{"at", "from", "to", "cell"} {
+			q.Del(k) // points belong to the old city
+		}
+		q.Set("city", c.ID)
+		p.CityLinks = append(p.CityLinks, web.CityLink{ID: c.ID, Href: r.URL.Path + "?" + q.Encode(), Current: c.ID == city.ID, Simulated: a.simulatedIn(c.ID)})
+	}
 	return p
 }
 
@@ -62,11 +72,11 @@ func (a *App) render(w http.ResponseWriter, status int, name string, p *web.Page
 // mapPage is GET /map. Stats are filled server-side when the engine answers
 // quickly, so the page reads correctly before any script runs.
 func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
-	p := a.page(r, "map", true)
+	p := a.page(w, r, "map", true)
 	p.Stats = web.MapStats{Cells: "0", Deep: "0", Max: i18n.T(p.Lang, "js.none")}
 	ctx, cancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
 	defer cancel()
-	if e, err := a.cellsFor(ctx, a.Cfg.ServiceArea); err == nil {
+	if e, err := a.cellsForCity(ctx, p.City.ID); err == nil {
 		// The first paint needs no second round trip: the cells ride in
 		// the page. json.Marshal escapes <, > and &, so the JSON cannot
 		// close its script element.
@@ -85,13 +95,14 @@ func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
 				maxD = max(maxD, c.Props.DepthCm)
 			}
 			p.Stats.Cells = strconv.Itoa(len(cells))
+			p.Stats.Empty = len(cells) == 0
 			p.Stats.Deep = strconv.Itoa(deep)
 			if known > 0 {
 				p.Stats.Max = fmt.Sprintf("%.0f cm", maxD)
 			}
 		}
 	}
-	p.Feed = a.Hub.Feed()
+	p.Feed = a.Hub.Feed(p.City.ID)
 	if len(p.Feed) > 5 {
 		p.Feed = p.Feed[:5]
 	}
@@ -99,7 +110,7 @@ func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) reportPage(w http.ResponseWriter, r *http.Request) {
-	p := a.page(r, "report", true)
+	p := a.page(w, r, "report", true)
 	p.LiveTrace = &web.TraceView{Live: true}
 	if at := r.URL.Query().Get("at"); at != "" {
 		if lat, lon, ok := strings.Cut(at, ","); ok {
@@ -126,7 +137,7 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 			writeEvent(w, "error", map[string]any{"code": re.Code, "error": re.Message, "html": html})
 			return
 		}
-		p := a.page(r, "report", true)
+		p := a.page(w, r, "report", true)
 		p.LiveTrace = &web.TraceView{Live: true}
 		p.Report.Error = web.ErrorText(p.Lang, re)
 		a.render(w, re.Status, "report", p)
@@ -149,7 +160,7 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !streaming {
-		p := a.page(r, "report", true)
+		p := a.page(w, r, "report", true)
 		p.LiveTrace = &web.TraceView{Live: true}
 		p.Report.Lat, p.Report.Lon = strconv.FormatFloat(sub.Lat, 'f', 6, 64), strconv.FormatFloat(sub.Lon, 'f', 6, 64)
 		out, err := a.Pipeline.Run(r.Context(), sub, nil)
@@ -238,12 +249,13 @@ func clientKey(r *http.Request, trust bool) string {
 	return ratelimit.ClientIP(r, trust)
 }
 
-func (a *App) routeForm(r *http.Request) web.RouteForm {
-	velachery, _ := places.PresetByID("velachery")
-	tnagar, _ := places.PresetByID("tnagar")
-	f := web.RouteForm{
-		From: velachery.Coord(), To: tnagar.Coord(), Vehicle: "two_wheeler",
-		Presets: places.Presets, Vehicles: web.Vehicles,
+func (a *App) routeForm(r *http.Request, city cities.City) web.RouteForm {
+	f := web.RouteForm{Vehicle: "two_wheeler", Presets: city.Presets, Vehicles: web.Vehicles}
+	if len(city.Presets) >= 2 {
+		f.From, f.To = city.Presets[0].Coord(), city.Presets[1].Coord()
+	} else {
+		f.From = fmt.Sprintf("%.4f,%.4f", city.CentreLat, city.CentreLon)
+		f.To = f.From
 	}
 	q := r.URL.Query()
 	if v := q.Get("from"); v != "" {
@@ -258,40 +270,43 @@ func (a *App) routeForm(r *http.Request) web.RouteForm {
 	return f
 }
 
-// planRoute runs a route and builds the summary view.
-func (a *App) planRoute(ctx context.Context, r *http.Request) (*web.RouteView, int, error) {
-	q, err := a.parseRoute(r)
-	if err != nil {
-		return nil, http.StatusBadRequest, err
+// planRoute runs a route in the page's city and builds the summary view.
+// Errors come back in the page's language.
+func (a *App) planRoute(ctx context.Context, r *http.Request, city string) (*web.RouteView, int, string) {
+	lang := langFrom(r.Context())
+	q, perr := a.parseRoute(r, city)
+	if perr != nil {
+		return nil, perr.Status, perr.Text(lang)
 	}
 	raw, err := a.routeJSON(ctx, q)
 	if err != nil {
-		var ue *upstream.Error
-		if errors.As(err, &ue) {
-			return nil, ue.Status, fmt.Errorf("%s", capitalise(ue.Message))
-		}
-		return nil, http.StatusServiceUnavailable, fmt.Errorf("the route service is not reachable right now; try again shortly")
+		re := a.engineRouteError(err, q.City)
+		return nil, re.Status, re.Text(lang)
 	}
-	v, err := web.NewRouteView(raw, q.Vehicle, a.Origins.HasSimulated(), langFrom(r.Context()))
+	v, err := web.NewRouteView(raw, q.Vehicle, a.simulatedIn(q.City), lang)
 	if err != nil {
-		return nil, http.StatusBadGateway, fmt.Errorf("the route could not be read")
+		return nil, http.StatusBadGateway, i18n.T(lang, "err.route_down")
 	}
-	return v, http.StatusOK, nil
+	if a.Alerts != nil {
+		v.WatchHref = "/alerts?" + url.Values{"city": {q.City}, "from": {q.From}, "to": {q.To}, "vehicle": {q.Vehicle}}.Encode()
+	}
+	return v, http.StatusOK, ""
 }
 
 // routePage is GET /route; with from, to and vehicle it also plans.
 func (a *App) routePage(w http.ResponseWriter, r *http.Request) {
-	p := a.page(r, "route", true)
-	p.Route = a.routeForm(r)
+	p := a.page(w, r, "route", true)
+	city, _ := a.Cities.Get(p.City.ID)
+	p.Route = a.routeForm(r, city)
 	status := http.StatusOK
 	q := r.URL.Query()
 	if q.Get("from") != "" && q.Get("to") != "" {
 		if !a.limit(w, r, a.apiLimit, "route") {
 			return
 		}
-		v, code, err := a.planRoute(r.Context(), r)
-		if err != nil {
-			p.Route.Error = capitalise(err.Error()) + "."
+		v, code, msg := a.planRoute(r.Context(), r, city.ID)
+		if msg != "" {
+			p.Route.Error = msg
 			status = code
 		} else {
 			p.Route.View = v
@@ -306,9 +321,10 @@ func (a *App) routePlan(w http.ResponseWriter, r *http.Request) {
 	if !a.limit(w, r, a.apiLimit, "route") {
 		return
 	}
-	v, code, err := a.planRoute(r.Context(), r)
-	if err != nil {
-		writeJSON(w, code, map[string]string{"error": capitalise(err.Error()) + "."})
+	city := a.cityFor(nil, r)
+	v, code, msg := a.planRoute(r.Context(), r, city.ID)
+	if msg != "" {
+		writeJSON(w, code, map[string]string{"error": msg})
 		return
 	}
 	html, err := a.Renderer.Fragment(langFrom(r.Context()), "route_summary", v)
@@ -321,7 +337,7 @@ func (a *App) routePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) aboutPage(w http.ResponseWriter, r *http.Request) {
-	p := a.page(r, "about", false)
+	p := a.page(w, r, "about", false)
 	p.Home = &web.HomeView{Facts: &a.Facts}
 	a.render(w, http.StatusOK, "about", p)
 }
@@ -333,14 +349,15 @@ func (a *App) homePage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/map?"+r.URL.RawQuery, http.StatusFound)
 		return
 	}
-	p := a.page(r, "home", false)
+	p := a.page(w, r, "home", false)
 	h := &web.HomeView{Facts: &a.Facts, Trace: web.NewHomeTrace(p.Lang, a.Facts.Trace)}
 	ctx, cancel := context.WithTimeout(r.Context(), 1200*time.Millisecond)
 	defer cancel()
-	if e, err := a.cellsFor(ctx, a.Cfg.ServiceArea); err == nil {
+	if e, err := a.cellsForCity(ctx, p.City.ID); err == nil {
 		h.Preview = e.Preview()
 	} else {
-		h.Preview = web.NewPreview(nil)
+		c, _ := a.Cities.Get(p.City.ID)
+		h.Preview = web.NewPreview(nil, web.FrameFor(c.ID, c.BBox.MinLon, c.BBox.MinLat, c.BBox.MaxLon, c.BBox.MaxLat))
 	}
 	p.Home = h
 	a.render(w, http.StatusOK, "home", p)

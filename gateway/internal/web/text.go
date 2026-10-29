@@ -72,6 +72,8 @@ func localArgs(lang string, args []any) []any {
 	for i, a := range args {
 		if age, ok := a.(verify.Age); ok {
 			out[i] = AgeText(lang, age)
+		} else if c, ok := a.(report.CityID); ok {
+			out[i] = i18n.T(lang, "city."+string(c))
 		} else {
 			out[i] = a
 		}

@@ -2,12 +2,13 @@
 <div class="page">
   <header class="page-head">
     <p class="eyebrow">{{t "report.eyebrow"}}</p>
-    <h1>{{t "report.title"}}</h1>
+    <div class="title-row"><h1>{{t "report.title"}}</h1>{{template "city_switcher" .}}</div>
     <p>{{t "report.lead"}}</p>
   </header>
 
   <div class="split">
     <form class="card panel" id="report-form" method="post" action="/report" enctype="multipart/form-data" novalidate>
+      <input type="hidden" name="city" value="{{.City.ID}}">
       <div class="step">
         <span class="step-n" aria-hidden="true">1</span>
         <div>
@@ -37,8 +38,8 @@
           <p class="hint">{{t "report.step2_hint"}}</p>
           <div id="pick-map" class="pick-map" role="region" aria-label="{{t "report.pick_aria"}}"></div>
           <div class="row">
-            <div class="field"><label for="lat">{{t "report.lat"}}</label><input class="input" id="lat" name="lat" inputmode="decimal" autocomplete="off" placeholder="12.9791" value="{{.Report.Lat}}" required></div>
-            <div class="field"><label for="lon">{{t "report.lon"}}</label><input class="input" id="lon" name="lon" inputmode="decimal" autocomplete="off" placeholder="80.2209" value="{{.Report.Lon}}" required></div>
+            <div class="field"><label for="lat">{{t "report.lat"}}</label><input class="input" id="lat" name="lat" inputmode="decimal" autocomplete="off" placeholder="{{printf "%.4f" .City.CentreLat}}" value="{{.Report.Lat}}" required></div>
+            <div class="field"><label for="lon">{{t "report.lon"}}</label><input class="input" id="lon" name="lon" inputmode="decimal" autocomplete="off" placeholder="{{printf "%.4f" .City.CentreLon}}" value="{{.Report.Lon}}" required></div>
             <button type="button" class="btn btn-ghost" id="geo">{{template "icon-pin"}}{{t "report.use_location"}}</button>
           </div>
         </div>
@@ -125,7 +126,7 @@ document.addEventListener("DOMContentLoaded", function () {
   "use strict";
   var form = document.getElementById("report-form"), lat = document.getElementById("lat"), lon = document.getElementById("lon");
   var err = document.getElementById("form-error"), result = document.getElementById("result"), submit = document.getElementById("submit");
-  var map = NM.create("pick-map", { zoom: 12, center: [80.2209, 13.0] }), marker = null;
+  var map = NM.create("pick-map", NM.city.id === "chennai" ? { zoom: 12, center: [80.2209, 13.0] } : NM.cityView()), marker = null;
 
   function setLoc(la, lo, fly) {
     lat.value = la.toFixed(6); lon.value = lo.toFixed(6);

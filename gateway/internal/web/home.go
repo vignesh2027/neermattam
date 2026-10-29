@@ -50,34 +50,57 @@ type PreviewPlace struct {
 	Name string
 }
 
-// The preview frames south and central Chennai, where the 2023 low points
-// are: Velachery, Pallikaranai, Madipakkam, Guindy, Saidapet, T. Nagar.
+// Frame is the part of a city the preview draws. Chennai's frames the
+// south and centre, where the 2023 low points are (Velachery,
+// Pallikaranai, Madipakkam, Guindy, Saidapet, T. Nagar); other cities fit
+// their whole box.
+type Frame struct {
+	City                   string
+	MinLon, MaxLon, MaxLat float64
+	W, H                   int
+}
+
 const (
-	pvW, pvH = 600, 640
-	pvMinLon = 80.165
-	pvMaxLon = 80.275
-	pvMaxLat = 13.047
-	pvCosLat = 0.9744 // cos(13 degrees): metres per degree of longitude over latitude
+	pvW      = 600
+	pvCosLat = 0.9744 // cos(13 degrees), for Chennai's fixed frame
 )
 
-// NewPreview projects cells into the preview.
-func NewPreview(cells []upstream.CellFeature) PreviewView {
-	kx := float64(pvW) / (pvMaxLon - pvMinLon)
-	ky := kx / pvCosLat
-	minLat := pvMaxLat - float64(pvH)/ky
-	v := PreviewView{W: pvW, H: pvH, Bounds: fmt.Sprintf("%g,%g,%.3f,%.3f", pvMinLon, pvMaxLat, kx, ky), Count: len(cells)}
-	for x := 40; x < pvW; x += 80 {
-		v.Grid = append(v.Grid, fmt.Sprintf("M%d 0V%d", x, pvH))
+// FrameFor returns the preview frame for a city and its box.
+func FrameFor(city string, minLon, minLat, maxLon, maxLat float64) Frame {
+	if city == "chennai" || city == "" {
+		return Frame{City: "chennai", MinLon: 80.165, MaxLon: 80.275, MaxLat: 13.047, W: pvW, H: 640}
 	}
-	for y := 40; y < pvH; y += 80 {
-		v.Grid = append(v.Grid, fmt.Sprintf("M0 %dH%d", y, pvW))
+	kx := float64(pvW) / (maxLon - minLon)
+	ky := kx / math.Cos((minLat+maxLat)/2*math.Pi/180)
+	h := int(math.Round((maxLat - minLat) * ky))
+	return Frame{City: city, MinLon: minLon, MaxLon: maxLon, MaxLat: maxLat, W: pvW, H: min(max(h, 360), 820)}
+}
+
+// NewPreview projects cells into a frame.
+func NewPreview(cells []upstream.CellFeature, f Frame) PreviewView {
+	if f.W == 0 {
+		f = FrameFor("chennai", 0, 0, 0, 0)
+	}
+	kx := float64(f.W) / (f.MaxLon - f.MinLon)
+	cos := pvCosLat
+	if f.City != "chennai" {
+		cos = math.Cos((f.MaxLat - float64(f.H)/2/kx) * math.Pi / 180)
+	}
+	ky := kx / cos
+	minLat := f.MaxLat - float64(f.H)/ky
+	v := PreviewView{W: f.W, H: f.H, Bounds: fmt.Sprintf("%g,%g,%.3f,%.3f", f.MinLon, f.MaxLat, kx, ky), Count: len(cells)}
+	for x := 40; x < f.W; x += 80 {
+		v.Grid = append(v.Grid, fmt.Sprintf("M%d 0V%d", x, f.H))
+	}
+	for y := 40; y < f.H; y += 80 {
+		v.Grid = append(v.Grid, fmt.Sprintf("M0 %dH%d", y, f.W))
 	}
 	proj := func(lon, lat float64) (float64, float64) {
-		return (lon - pvMinLon) * kx, (pvMaxLat - lat) * ky
+		return (lon - f.MinLon) * kx, (f.MaxLat - lat) * ky
 	}
 	paths := map[string]*strings.Builder{}
 	for _, c := range cells {
-		if c.Lat < minLat || c.Lat > pvMaxLat || c.Lon < pvMinLon || c.Lon > pvMaxLon || len(c.RawPolygon) == 0 {
+		if c.Lat < minLat || c.Lat > f.MaxLat || c.Lon < f.MinLon || c.Lon > f.MaxLon || len(c.RawPolygon) == 0 {
 			continue
 		}
 		fill := DepthColor(c.Props.DepthCm)
@@ -120,14 +143,33 @@ func NewPreview(cells []upstream.CellFeature) PreviewView {
 			v.Bands = append(v.Bands, PreviewBand{Fill: fill, D: b.String()})
 		}
 	}
-	for _, p := range places.Landmarks() {
-		if p.Lat < minLat+0.004 || p.Lat > pvMaxLat-0.004 || p.Lon < pvMinLon+0.003 || p.Lon > pvMaxLon-0.02 {
+	marks := places.Landmarks()
+	if f.City != "chennai" {
+		marks = places.CityPresets[f.City]
+	}
+	var placed [][2]float64
+	for _, p := range marks {
+		if p.Lat < minLat+0.004 || p.Lat > f.MaxLat-0.004 || p.Lon < f.MinLon+0.003 || p.Lon > f.MaxLon-0.02 {
 			continue
 		}
 		x, y := proj(p.Lon, p.Lat)
+		if clashes(placed, x, y) {
+			continue // a label already sits there
+		}
+		placed = append(placed, [2]float64{x, y})
 		v.Places = append(v.Places, PreviewPlace{X: fmt.Sprintf("%.1f", x), Y: fmt.Sprintf("%.1f", y), Name: p.Name})
 	}
 	return v
+}
+
+// clashes reports whether a label at x, y would overlap one already placed.
+func clashes(placed [][2]float64, x, y float64) bool {
+	for _, q := range placed {
+		if math.Abs(q[1]-y) < 14 && math.Abs(q[0]-x) < 110 {
+			return true
+		}
+	}
+	return false
 }
 
 // num prints a coordinate to 0.1 with no leading zero: 1.5, -.9, 12.

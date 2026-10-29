@@ -82,6 +82,9 @@ type Origins struct {
 	// Demo makes a cell with no record at all read as simulated: in a demo,
 	// a label is never allowed to pass simulated water off as real.
 	Demo bool
+	// DemoArea, when set, limits that default to the scenario's own area:
+	// a cell elsewhere with no record reads as reported, never simulated.
+	DemoArea func(lat, lon float64) bool
 
 	mu      sync.RWMutex
 	sim     map[string]time.Time
@@ -212,7 +215,7 @@ func (o *Origins) Label(cell string, lat, lon float64) string {
 	}
 	_, s := o.sim[cell]
 	_, r := o.real[cell]
-	demo := o.Demo
+	demo := o.Demo && (o.DemoArea == nil || o.DemoArea(lat, lon))
 	o.mu.Unlock()
 	switch {
 	case s && r:

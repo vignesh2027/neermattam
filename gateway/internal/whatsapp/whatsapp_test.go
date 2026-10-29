@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -226,5 +227,45 @@ func TestReplyNamesAnEstimateAsAnEstimate(t *testing.T) {
 	txt := ReplyText(out, "")
 	if !strings.Contains(txt, "visual estimate") || strings.Contains(txt, "measured about") || strings.Contains(txt, "ruler") {
 		t.Fatalf("%q", txt)
+	}
+}
+
+func TestWatchThenLocationStartsAWatchAndStopEndsIt(t *testing.T) {
+	g := newGraph(t)
+	run := &fakeRunner{}
+	h := newHandler(t, g, run)
+	var mu sync.Mutex
+	var started []string
+	stopped := 0
+	h.Watch = &Watch{
+		Start: func(_ context.Context, phone, phoneID string, lat, lon float64, vehicle string) string {
+			mu.Lock()
+			defer mu.Unlock()
+			started = append(started, fmt.Sprintf("%s %s %.4f,%.4f %s", phone, phoneID, lat, lon, vehicle))
+			return ""
+		},
+		Stop: func(phone string) int { mu.Lock(); defer mu.Unlock(); stopped++; return 1 },
+	}
+	text := func(id, body string) string {
+		return payload(`{"from":"9190000","id":"` + id + `","type":"text","text":{"body":"` + body + `"}}`)
+	}
+	for _, p := range []string{text("t1", "Watch car"), payload(`{"from":"9190000","id":"l1","type":"location","location":{"latitude":12.9791,"longitude":80.2209}}`), text("t2", "stop")} {
+		if code := deliver(t, h, p, sign([]byte(p))); code != 200 {
+			t.Fatalf("delivery: %d", code)
+		}
+		h.Wait()
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(started) != 1 || started[0] != "9190000 555 12.9791,80.2209 car" || stopped != 1 {
+		t.Fatalf("started %v, stopped %d", started, stopped)
+	}
+	if len(run.subs) != 0 {
+		t.Fatal("a watched location must not run a report")
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.replies) != 2 || !strings.Contains(g.replies[0], "share the location") || !strings.Contains(g.replies[0], "Advisory only") || !strings.Contains(g.replies[1], "Stopped 1") {
+		t.Fatalf("replies %q", g.replies)
 	}
 }

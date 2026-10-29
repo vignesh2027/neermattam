@@ -318,7 +318,7 @@ var hi = map[string]string{
 	"dur.years":                "लगभग %s वर्ष",
 
 	"err.location_required":      "स्थान जोड़ें: नक्शे पर टैप करें, डिवाइस का स्थान इस्तेमाल करें, या निर्देशांक लिखें।",
-	"err.outside_area":           "यह स्थान (%.4f, %.4f) चेन्नई सेवा क्षेत्र से बाहर है।",
+	"err.outside_area":           "यह स्थान (%.4f, %.4f) नीरमट्टम के दायरे वाले शहरों से बाहर है: %s।",
 	"err.media_required":         "तस्वीर, छोटा वीडियो या वॉइस नोट जोड़ें।",
 	"err.empty_file":             "फ़ाइल खाली है।",
 	"err.unsupported_media":      "यह फ़ाइल JPEG या PNG तस्वीर, MP4 या MOV वीडियो, या Ogg, WAV, M4A या MP3 वॉइस नोट नहीं है।",

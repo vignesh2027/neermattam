@@ -59,6 +59,14 @@ type Page struct {
 	LiveTrace *TraceView
 	Route     RouteForm
 	Home      *HomeView
+
+	// City.
+	City      CityView
+	CityLinks []CityLink
+
+	Control *ControlView
+	Alerts  *AlertsView
+	Dev     *DevView
 }
 
 // LangLink is one entry of the language menu.
@@ -70,6 +78,7 @@ type LangLink struct {
 // MapStats are the counters shown before the live data loads.
 type MapStats struct {
 	Cells, Deep, Max string
+	Empty            bool // no reports at all in the city yet
 }
 
 // Limits are the upload limits shown on the report page.
@@ -116,7 +125,7 @@ type Renderer struct {
 }
 
 // Page templates.
-var pageNames = []string{"home", "map", "report", "route", "about"}
+var pageNames = []string{"home", "map", "report", "route", "about", "control", "control_login", "alerts", "developers"}
 
 func langFuncs(a *Assets, lang string) template.FuncMap {
 	f := template.FuncMap{
@@ -216,9 +225,13 @@ func (rd *Renderer) Render(w http.ResponseWriter, r *http.Request, status int, n
 
 // Fragment renders a named partial to a string in a language.
 func (r *Renderer) Fragment(lang, name string, data any) (string, error) {
-	t, ok := r.partials[lang]
-	if !ok {
-		t = r.partials[i18n.Default]
+	if _, ok := r.pages[lang]; !ok {
+		lang = i18n.Default
+	}
+	t := r.partials[lang]
+	if strings.HasPrefix(name, "control_") {
+		// The control room's live panel lives in control.html.
+		t = r.pages[lang]["control"]
 	}
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
