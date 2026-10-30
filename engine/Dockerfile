@@ -4,6 +4,7 @@ FROM rust:1.97-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY assets ./assets
 COPY benches ./benches
 COPY tests ./tests
 RUN cargo build --release --locked --bin neermattam-engine \

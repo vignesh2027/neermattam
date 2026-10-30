@@ -10,6 +10,7 @@
       <p class="ctl-sub">{{t "ctl.sub"}}</p>
     </div>
     <div class="ctl-actions">
+      <a class="btn btn-ghost btn-sm" href="/sites?city={{.Control.City}}">{{template "icon-pin"}}{{t "sites.ctl_link"}}</a>
       <a class="btn btn-ghost btn-sm" href="{{.Control.ExportCSV}}" download>{{template "icon-download"}}{{t "ctl.export_csv"}}</a>
       <a class="btn btn-ghost btn-sm" href="{{.Control.ExportGeoJSON}}" download>{{template "icon-download"}}{{t "ctl.export_geojson"}}</a>
       {{if .Control.Demo}}<a class="btn btn-ghost btn-sm" href="/control">{{t "ctl.have_key"}}</a>

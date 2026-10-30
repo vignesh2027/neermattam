@@ -403,6 +403,8 @@ pub struct BlockedCounts {
     pub car: usize,
     /// Closed to buses.
     pub bus: usize,
+    /// Closed to diesel tankers and trucks.
+    pub truck: usize,
 }
 
 impl BlockedCounts {
@@ -413,6 +415,7 @@ impl BlockedCounts {
             Vehicle::Auto => self.auto += 1,
             Vehicle::Car => self.car += 1,
             Vehicle::Bus => self.bus += 1,
+            Vehicle::Truck => self.truck += 1,
         }
     }
 }

@@ -41,13 +41,14 @@ var Languages = []Lang{
 
 // Catalogs maps a language code to its messages.
 var Catalogs = map[string]map[string]string{
-	"en": merge(enPages, enOps), "ta": merge(ta, taOps), "hi": merge(hi, hiOps), "te": merge(te, teOps),
-	"kn": merge(kn, knOps), "ml": merge(ml, mlOps), "bn": merge(bn, bnOps), "mr": merge(mr, mrOps),
+	"en": merge(enPages, enOps, enSites), "ta": merge(ta, taOps, taSites), "hi": merge(hi, hiOps, hiSites), "te": merge(te, teOps, teSites),
+	"kn": merge(kn, knOps, knSites), "ml": merge(ml, mlOps, mlSites), "bn": merge(bn, bnOps, bnSites), "mr": merge(mr, mrOps, mrSites),
 }
 
-// merge joins a language's two message files: the pages
-// (messages_<code>.go) and the city, control room, alerts and developer
-// texts (messages_<code>_ops.go).
+// merge joins a language's message files: the pages (messages_<code>.go),
+// the city, control room, alerts and developer texts
+// (messages_<code>_ops.go) and the Critical sites page and its alerts
+// (messages_<code>_sites.go).
 func merge(parts ...map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, p := range parts {

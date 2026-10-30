@@ -67,6 +67,9 @@ type Page struct {
 	Control *ControlView
 	Alerts  *AlertsView
 	Dev     *DevView
+
+	// Sites is the Critical sites page (sites.go).
+	Sites *SitesView
 }
 
 // LangLink is one entry of the language menu.

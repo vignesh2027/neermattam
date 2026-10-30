@@ -34,6 +34,18 @@
 //! | auto        | 15 cm       | 0.30 m2/s   | No auto-rickshaw source found. Treated like a small car: lighter than 1250 kg with low clearance. Unverified. |
 //! | two_wheeler | 15 cm       | 0.30 m2/s   | No two-wheeler source found. Riders and exhausts on Indian commuter bikes sit low, so the car limit is used as a floor. Unverified. |
 //! | bus         | 30 cm       | 0.60 m2/s   | No bus source found. Kept at the NWS "a foot of water will float many vehicles" figure, with the ARR large 4WD D x V. Unverified. |
+//! | truck       | 30 cm       | 0.60 m2/s   | AIDR Guideline 7-3, Tables 1 and 2: above 0.5 m still water, or D x V above 0.6 m2/s, floodwater is "unsafe for vehicles" of every size (class H3). The D x V limit is that figure; the depth limit keeps the NWS one-foot figure, 20 cm under the ceiling. |
+//!
+//! - Australian Institute for Disaster Resilience, *Australian Disaster
+//!   Resilience Guideline 7-3: Technical flood risk management guideline:
+//!   Flood hazard*, 2014 (CC BY-NC), Table 1 (H2 "unsafe for small vehicles",
+//!   H3 "unsafe for vehicles, children and the elderly") and Table 2 (H2: D x V
+//!   at most 0.6 m2/s and still water at most 0.5 m; H3 above that), modelled
+//!   after Smith and Wasko (2012) and, for vehicles, Shand et al. (2011).
+//!   <https://knowledge.aidr.org.au/media/1891/guideline-7-3-technical-flood-risk-management.pdf>,
+//!   checked 2026-10-30. The guideline has no separate class for heavy goods
+//!   vehicles; its H3 boundary is where every vehicle is unsafe, so it is the
+//!   ceiling for a tanker, not a crossing depth.
 //!
 //! No Indian government or Indian Roads Congress figure for safe crossing
 //! depth was found during the build. If one is found it should replace the
@@ -60,6 +72,9 @@ pub enum Vehicle {
     Car,
     /// City bus.
     Bus,
+    /// Diesel tanker or other heavy goods vehicle, for access to critical
+    /// sites.
+    Truck,
 }
 
 /// What limits a vehicle's crossing of water.
@@ -87,12 +102,13 @@ pub struct Profile {
 
 impl Vehicle {
     /// Every vehicle, in bit order.
-    pub const ALL: [Vehicle; 5] = [
+    pub const ALL: [Vehicle; 6] = [
         Vehicle::Pedestrian,
         Vehicle::TwoWheeler,
         Vehicle::Auto,
         Vehicle::Car,
         Vehicle::Bus,
+        Vehicle::Truck,
     ];
 
     /// The access bit for this vehicle in [`crate::graph`] masks.
@@ -104,6 +120,7 @@ impl Vehicle {
             Vehicle::Auto => 4,
             Vehicle::Car => 8,
             Vehicle::Bus => 16,
+            Vehicle::Truck => 32,
         }
     }
 
@@ -116,6 +133,7 @@ impl Vehicle {
             Vehicle::Auto => "auto",
             Vehicle::Car => "car",
             Vehicle::Bus => "bus",
+            Vehicle::Truck => "truck",
         }
     }
 
@@ -128,6 +146,7 @@ impl Vehicle {
             Vehicle::Auto => "an auto-rickshaw",
             Vehicle::Car => "a car",
             Vehicle::Bus => "a bus",
+            Vehicle::Truck => "a diesel tanker or truck",
         }
     }
 
@@ -167,6 +186,15 @@ impl Vehicle {
                 },
                 speed_kmh: 15.0,
             },
+            // AIDR 7-3 Table 2: every vehicle is unsafe above 0.5 m or
+            // D x V 0.6 m2/s. The depth limit stays 20 cm under that ceiling.
+            Vehicle::Truck => Profile {
+                limit: CrossingLimit::Depth {
+                    max_depth_cm: 30.0,
+                    max_dv_m2s: 0.60,
+                },
+                speed_kmh: 15.0,
+            },
         }
     }
 }
@@ -184,7 +212,7 @@ impl FromStr for Vehicle {
             .into_iter()
             .find(|v| v.as_str() == s)
             .ok_or_else(|| {
-                format!("unknown vehicle '{s}', expected pedestrian, two_wheeler, auto, car or bus")
+                format!("unknown vehicle '{s}', expected pedestrian, two_wheeler, auto, car, bus or truck")
             })
     }
 }
@@ -211,6 +239,18 @@ mod tests {
             CrossingLimit::HazardClass => f64::NAN,
         };
         assert!(depth(Vehicle::Bus) > depth(Vehicle::Car));
+        // The tanker limit stays under the AIDR ceiling where every vehicle
+        // is unsafe (0.5 m, D x V 0.6 m2/s) and above the car's.
+        match Vehicle::Truck.profile().limit {
+            CrossingLimit::Depth {
+                max_depth_cm,
+                max_dv_m2s,
+            } => {
+                assert!(max_depth_cm < 50.0 && max_depth_cm > depth(Vehicle::Car));
+                assert!(max_dv_m2s <= 0.6);
+            }
+            CrossingLimit::HazardClass => panic!("a truck has a depth limit"),
+        }
         assert_eq!(
             Vehicle::Pedestrian.profile().limit,
             CrossingLimit::HazardClass

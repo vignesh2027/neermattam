@@ -15,6 +15,7 @@ Neermattam answers that question with a measurement. A phone photo of a wheel al
 | Delivery and ride-hailing riders | Fewer drowned engines and abandoned orders; routes that stay usable |
 | Ward and city control rooms | A street-level depth layer from the public, with uncertainty and age on every cell, to dispatch pumps and close the right roads |
 | Researchers and planners | A record of where water stood, how deep and for how long, street by street |
+| Data-centre, hospital and telecom operators | Water near each site, whether tankers and staff can still reach it, and where water has stood for choosing the next site (docs/SITES.md) |
 
 ## Why it is built the way it is
 - **Measure, do not guess.** The depth comes from geometry on a reference of known size, not from a model's impression. When no wheel can be measured, the answer is labelled as a model estimate with a wide band, never passed off as a measurement.
@@ -42,6 +43,22 @@ These are directions, not claims of revenue. Each would need pilots and agreemen
 | Data licences | Urban planners, researchers, real-estate and infrastructure firms | The depth-history archive, anonymised and aggregated |
 
 The public map and reporting stay free. A sensible first milestone is one ward pilot with a city control room during a monsoon, measuring how many reports arrive, how quickly cells refresh and whether dispatch decisions change.
+
+## Data-centre operators
+
+These are directions, not claims of revenue; no operator has been approached or has paid.
+
+India's cloud capacity is being built now by the largest operators: Google's AI hub in Visakhapatnam at about USD 15 billion over 2026 to 2030, Microsoft's USD 17.5 billion for India over 2026 to 2029, AWS's USD 8.3 billion for its Mumbai Region by 2030, and a 168 MW data centre in Jamnagar that Reliance will build and Meta will lease. Chennai is one of the main hubs, with clusters in Ambattur and Siruseri, and press coverage of the 2025 XDI report put more than one in ten Tamil Nadu data centres already at high physical climate risk. Each figure, with its date and source, is in docs/SITES.md.
+
+A siting or operations team asks: which parcels flood, how deep and how often, and can we reach the site in a flood. The "Critical sites" view (docs/SITES.md) answers with what Neermattam already measures:
+
+| Question | What it gives | What it is not |
+|---|---|---|
+| Is water coming at the site? | Live depth within 300 m and 1 km, with sigma, freshness, trend and "unknown" | A gauge at the site, or a forecast |
+| Can staff and fuel reach it? | Water-aware routes to the nearest main road and fuel station for a tanker, a two-wheeler and a car, with alerts when one closes | A guarantee that a road is passable |
+| Where should the next one go? | Per area: days with water, peak depth, time to go down, from reports since the record began | A flood frequency study; it builds up over a monsoon |
+
+What an operator might pay for: private sites and alerts through the developer API, an export of its sites' records for its own risk team, and, during a monsoon, the same ward-level evidence a city control room sees. The free public page lists only OpenStreetMap sites; an operator's own sites stay private to its key. A pilot would need an operator willing to share where its staff and tankers actually go, and would be judged by whether the access routes matched what its drivers found.
 
 ## What we expect from Meta's tooling, and what we already use
 - **Muse Spark Open** reads scenes, points at reference objects, checks masks and understands voice notes in Indian languages.

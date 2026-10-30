@@ -107,6 +107,12 @@ async fn main() -> ExitCode {
 
     let state = AppState::new(config);
     load_snapshot(&state);
+    neermattam_engine::sites_api::load_state(&state);
+    info!(
+        osm_sites = state.sites.registry.osm_len(),
+        operator_sites = state.sites.registry.operator_len(),
+        "critical sites loaded"
+    );
     if state.grid.read().history_points() > 0 {
         state.mark_history_dirty();
     }
@@ -225,6 +231,13 @@ async fn main() -> ExitCode {
         Ok(Ok(n)) => info!(cells = n, "final snapshot saved"),
         Ok(Err(e)) => error!(error = %e, "final snapshot failed"),
         Err(e) => error!(error = %e, "final snapshot task failed"),
+    }
+    let st = Arc::clone(&state);
+    match tokio::task::spawn_blocking(move || neermattam_engine::sites_api::save_ledger(&st)).await
+    {
+        Ok(Ok(_)) => info!("risk ledger saved"),
+        Ok(Err(e)) => error!(error = %e, "final risk ledger save failed"),
+        Err(e) => error!(error = %e, "final risk ledger task failed"),
     }
     match tokio::task::spawn_blocking(move || state.save_history()).await {
         Ok(Ok(n)) => info!(points = n, "final history saved"),

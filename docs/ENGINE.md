@@ -7,6 +7,7 @@ The engine is the Rust service at `engine/` (crate `neermattam-engine`, port 830
 3. Loads each city's road network from OpenStreetMap into a compact directed graph.
 4. Routes pedestrians, two-wheelers, autos, cars and buses around water each of them should not cross, and returns the plain shortest route next to it for comparison.
 5. Gives city control rooms ranked hotspots, a summary, each cell's depth history with a drain rate, and an export for their own tools.
+6. Watches critical sites (data centres first, then hospitals and telephone exchanges): the water in rings around each site, access routes for a diesel tanker, a two-wheeler and a car, and a long-lived risk record per area for siting. See [Critical sites](#critical-sites) and docs/SITES.md.
 
 Every route is advisory. A cell with too little evidence is reported as `unknown`, never as safe, and every depth the engine returns comes with its standard deviation. The rules that keep a flooded road from being shown as safe are collected in [Safety model](#safety-model).
 
@@ -133,6 +134,7 @@ A vehicle may cross a cell that holds evidence only when the blocking depth (rul
 | auto | 15 cm | 0.30 m2/s | No auto-rickshaw source found; treated like a small car. Unverified. |
 | two_wheeler | 15 cm | 0.30 m2/s | No two-wheeler source found; car figure used as a floor. Unverified. |
 | bus | 30 cm | 0.60 m2/s | No bus source found. NWS: "A foot of water will float many vehicles." ARR large 4WD D x V. Unverified. |
+| truck | 30 cm | 0.60 m2/s | A diesel tanker or heavy goods vehicle, for access to critical sites. AIDR Guideline 7-3, Tables 1 and 2: above 0.5 m still water or D x V 0.6 m2/s, water is "unsafe for vehicles" of every size. The D x V limit is that figure; the depth limit keeps the NWS one-foot figure, 20 cm under the ceiling. |
 | pedestrian | hazard class | | Blocked at `danger_some` and above, since a router cannot know whether the walker is a child or elderly. |
 
 Sources:
@@ -140,9 +142,11 @@ Sources:
 - US National Weather Service, *Turn Around Don't Drown*, https://www.weather.gov/tsa/hydro_tadd (checked 26 October 2026).
 - Smith, Modra, Tucker and Cox, *Vehicle Stability Testing for Flood Flows*, WRL Technical Report 2017/07, UNSW Water Research Laboratory, May 2017, Table ES-1, which confirms the interim Australian Rainfall and Runoff Project 10 thresholds (after Shand et al., 2011): small passenger vehicles 0.3 m still water and D x V at most 0.3 m2/s; large passenger vehicles 0.4 m and 0.45; large 4WD 0.5 m and 0.6. These are the depths at which vehicles start to float or slide, which is why the engine's driving limits sit lower.
 
+- Australian Institute for Disaster Resilience, *Australian Disaster Resilience Guideline 7-3: Technical flood risk management guideline: Flood hazard*, 2014 (CC BY-NC), Table 1 (H2 "unsafe for small vehicles", H3 "unsafe for vehicles, children and the elderly") and Table 2 (H2: D x V at most 0.6 m2/s, still water at most 0.5 m), https://knowledge.aidr.org.au/media/1891/guideline-7-3-technical-flood-risk-management.pdf (checked 30 October 2026). It has no class for heavy vehicles; its H3 boundary is the ceiling for a tanker, not a crossing depth.
+
 No Indian government or Indian Roads Congress figure for a safe crossing depth was found during the build. If one exists it should replace the three unverified rows.
 
-Speeds used for `eta_min` (pedestrian 4, two-wheeler 20, auto 18, car 20, bus 15 km/h) are rough assumptions, not measured city values. The same limits and speeds apply in every city.
+Speeds used for `eta_min` (pedestrian 4, two-wheeler 20, auto 18, car 20, bus 15, truck 15 km/h) are rough assumptions, not measured city values. The same limits and speeds apply in every city.
 
 ## Cities
 
@@ -197,7 +201,8 @@ Each city's road graph is built from `data/osm/<city>-roads.osm.pbf` with the `o
 
 - Every node on a kept way is a graph node, and each pair of consecutive nodes is a segment, stored once with its length and the H3 cells it passes through (sampled every quarter of a hex edge).
 - Directed edges point at segments, so both directions of a two-way street share one segment. Out-edges are stored in compressed sparse row form, so the graph is a handful of flat vectors.
-- Access is per vehicle and per direction. Pedestrians use everything except motorways, in both directions. Motor vehicles skip footways, paths, steps, pedestrian streets and cycleways. Two-wheelers and autos skip motorways. Buses skip service roads and living streets.
+- Access is per vehicle and per direction. Pedestrians use everything except motorways, in both directions. Motor vehicles skip footways, paths, steps, pedestrian streets and cycleways. Two-wheelers and autos skip motorways. Buses skip service roads and living streets. Trucks skip living streets and honour `hgv`.
+- A node on a `motorway`, `trunk`, `primary` or `secondary` way (or their links) is marked as on a main road, in a spare bit of its access mask, for critical-site access routes.
 - `access`, `foot`, `motor_vehicle`, `motorcar`, `motorcycle`, `psv` and `bus` tags are honoured. `oneway` (including `-1`), implied one-way on motorways and roundabouts, and `oneway:bus=no` are honoured for motor vehicles.
 - Route ends snap to the nearest node, within 1.5 km, that lies in the vehicle's largest connected component, so a request never starts on a disconnected scrap of road.
 - When both ends snap to the same node there is no route to plan, but the response still reports the water in that node's cell, and `passable` is false when it is too deep.
@@ -418,12 +423,22 @@ Exports are capped at `ENGINE_MAX_CELLS` rows. Under the cap, rows are in cell-i
 
 **Cost.** Hotspots, the summary, the export and the city list run on the blocking thread pool, so a large map never stalls the workers that take readings and plan routes. Hotspots score every cell but write the explanation only for the cells returned. On a worst-case Chennai map, with a reading every 0.001 degrees so that all 68,295 cells in the box hold state, building the views took about 23 ms, ranking the top 20 hotspots about 7 ms (about 140 ms before the explanation was limited to the cells returned) and the summary about 3 ms (`cargo bench --bench engine -- analytics_full`, measured with other work running, load average about 10, so indicative only).
 
+## Critical sites
+
+The full description, data sources, limits and how an operator uses it are in docs/SITES.md; the contract is in docs/CONTRACTS.md section 2. In the engine:
+
+- `sites.rs` holds the sites: OpenStreetMap ones from `assets/sites-osm.json` (written by `scripts/extract_sites.py`, embedded in the binary, or read from `ENGINE_SITES_OSM_PATH`), kept only when they lie in a configured city's box, and operator ones added through the gateway, each visible only to its owner. A watch zone is every map cell whose centre is within a ring's radius; a ring is `over` when any cell with evidence in force has a blocking depth over the threshold, `under` only when at least half its cells are known, and otherwise `unknown`. Access routes call `plan_route` from the site to up to three of the nearest main-road nodes and fuel stations, for the truck, the two-wheeler and the car, and keep the best.
+- `ledger.rs` is the risk ledger: per H3 resolution 8 area (`ENGINE_LEDGER_RESOLUTION`), the readings, wet readings (fused level at or over 15 cm), India Standard Time days with water, the peak, and wet spells per map cell from the first wet reading to the first dry one, with spells that go quiet for 48 hours counted as unresolved. It is fed from `POST /v1/readings`, keeps readings with a `source` apart from those without, is never trimmed by the forget window, and never feeds routing.
+- `sites_api.rs` serves `/v1/sites`, `/v1/sites/{id}` and `/v1/siting` on the blocking pool. Listing Chennai's 834 hospitals with both rings took about 100 ms, and one site's six access routes about 100 ms, on the local release build with the demo map (one run, indicative).
+
 ## Persistence
 
 The map is saved as two files, each written to a temporary file in the same directory, flushed to disk and renamed over the old one, so a crash mid-write never leaves a half-written file.
 
 - **Cell snapshot**, `data/engine/cells.json` (set `ENGINE_SNAPSHOT_PATH`; empty disables persistence). Every cell of every city with its full state, which is what routing reads. Written at most once every 5 seconds (`ENGINE_SNAPSHOT_INTERVAL_SECS`), only when something changed. Format version 5.
 - **History file**, next to it with `.history.json` in place of `.json` (`data/engine/cells.history.json`). Every cell's depth history for the recession view. It can be many times larger than the cell snapshot, so it is written on its own slower cadence, at most once every 60 seconds (`ENGINE_HISTORY_SNAPSHOT_SECS`), only when the history changed. Format `neermattam-engine-history` version 1, with the same format, version and resolution checks as the cell snapshot.
+
+- **Risk ledger**, `cells.ledger.json` beside it, written with the cell snapshot's cadence when it changed, and **operator sites**, `cells.sites.json`, written whenever one is added or removed. A file that cannot be read is moved aside on its own; nothing else is lost.
 
 Both are written once more on shutdown, cell state first. A crash therefore loses at most one minute of history and at most one snapshot interval of cell state. On start the cell snapshot is loaded first, then the history file. Any cell whose history does not reach its latest direct reading (the readings made after the last history save, or a missing history file) gets that reading back as one history point marked `migrated`, rebuilt from the level and time the cell state keeps; migrated points are shown but left out of drain rates, so a crash costs the recession view at most a minute of readings and never its latest level. History for a cell the map no longer holds is skipped.
 
@@ -481,12 +496,16 @@ The road graphs load in the background, all cities in parallel; `/readyz` return
 | `ENGINE_REQUEST_TIMEOUT_SECS` | `15` | Timeout for non-streaming requests |
 | `ENGINE_MAX_CELLS` | `20000` | Most features one `/v1/cells` call returns, and most rows one export returns |
 | `ENGINE_LOG_FORMAT` | `json` | `json` or `pretty`; filter with `RUST_LOG` |
+| `ENGINE_SITES_PER_OWNER` | `100` | Operator sites one API key may add |
+| `ENGINE_SITES_MAX` | `10000` | Operator sites in all |
+| `ENGINE_LEDGER_RESOLUTION` | `8` | H3 resolution of the risk ledger's areas (5 to 10, not finer than the map) |
+| `ENGINE_SITES_OSM_PATH` | embedded | An OpenStreetMap site file to use instead of the embedded `assets/sites-osm.json` |
 
 ## Tests
 
 ```sh
 cd engine
-cargo test                                   # 112 tests: unit, HTTP and real-graph
+cargo test                                   # 135 tests: unit, HTTP and real-graph
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
@@ -497,6 +516,7 @@ cargo fmt --check
 - `tests/multicity.rs` loads all six real extracts in parallel, checks every city reports ready, routes a car across each city through the HTTP API (Chennai Central to Velachery, CSMT to Bandra, Majestic to MG Road, Secunderabad to Charminar, Howrah to Sealdah, New Delhi station to India Gate), seeds 50 cm of water at the middle of each shortest path and checks each route goes around it, and checks a Mumbai to Kolkata request is refused. It takes about 2.5 s. A missing extract is skipped with a message unless `NEERMATTAM_REQUIRE_OSM=1`.
 - `tests/cities.rs` covers multi-city behaviour and the control-room endpoints on synthetic street grids: city tagging, cross-city and out-of-coverage routes, loading and failed graphs, city-scoped cells, stream and export, a deep reading on a city's edge reaching every city-scoped view, readiness following the primary city, a capped export keeping the most dangerous cells, the global history total in the summary, hotspot ordering and reasons, summary counts, the recession history and drain rate, and every new 400 and 404.
 - Unit tests in `analytics.rs` pin the hotspot ordering (deep and fresh first, more reports higher, deep water hours old above fresh shallow water), summary counts, and the drain-rate fit (exact rate and error on a clean line, refusals on thin data, scatter widening the error). `persist.rs` checks the round trip of both files, a crash between history saves (cell state intact, the lost readings' latest level recovered), a bad history file never costing the cell state, the version 4 and version 3 migrations, refuses version 2, refuses truncated and corrupt cell snapshots whole, and orders and bounds a loaded history; `tests/http.rs` checks the two cadences; `fusion.rs` checks the history is bounded and in time order; `config.rs` checks the city variables.
+- `tests/sites.rs` covers critical sites over HTTP on a flooded synthetic grid: open routes on a dry map, water that detours a car and a two-wheeler but not a tanker, deep water at the site closing every route, the list's order and validation, operator sites private to their owner and reloaded after a restart, and the risk ledger keeping unattributed (simulated) readings out of the reported record. Unit tests in `sites.rs` and `ledger.rs` cover ring cells, unknown versus known rings, old deep water, the trend, fuel candidates, the embedded file, wet spells, India dates and unresolved spells; `vehicle.rs` checks the truck limit against the AIDR ceiling and `graph.rs` truck access and main-road candidates.
 - `tests/http.rs` drives the full router with `tower::ServiceExt`: health, readiness, validation messages, body limit, duplicates, GeoJSON cells, routes, the SSE stream and its shutdown, and a snapshot restart.
 
 ## Benchmarks

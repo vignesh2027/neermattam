@@ -16,6 +16,7 @@ The gateway is the Go service at `gateway/` (port 8080) and the only service the
 | `/alerts` | "Watch my street": pick a point or a planned route and a vehicle, and get a notification when the water there crosses the vehicle's limit, gets more dangerous, or clears. See [Watch my street](#watch-my-street). |
 | `/control` | The control room for ward officers and city control rooms, behind an access key; `/control/demo` is a public read-only copy over the simulated Chennai scenario. See [Control room](#control-room). |
 | `/developers` | The developer API for fleets, with curl examples, response fields, errors, limits and the advisory terms. See [Developer API](#developer-api). |
+| `/sites` | Critical sites: OpenStreetMap data centres (and hospitals and telephone exchanges) with their watch-zone status, access routes for a tanker, a two-wheeler and a car, site alerts, and the flood record for siting. Linked from the control room. See [Critical sites](#critical-sites) and docs/SITES.md. |
 
 Every route is in docs/CONTRACTS.md section 3.
 
@@ -73,7 +74,7 @@ The whole English page is in `img/gateway-home-full.png`.
 
 Every page, every message the server renders (result cards, verification reasons, errors, the trace, route summaries, durations, months) and the text the inline glue shows are available in English, Tamil, Hindi, Telugu, Kannada, Malayalam, Bengali and Marathi.
 
-- **Catalogues** are Go maps in two files per language: `internal/i18n/messages_<code>.go` for the pages (467 keys) and `messages_<code>_ops.go` for cities, the control room, alerts and the developer page (236 keys), 703 keys each, with English as the reference and the fallback for any missing key. Messages use `fmt` verbs, and `%[2]s` style indexes where a language puts the arguments in another order. Keys ending in `.html` carry a little trusted markup (bold numbers with `data-count` hooks for the live trace); every other message is escaped. Numbers and units stay as numerals (`34 cm`, `0.28 ms`). Place names, model names and model output are not translated.
+- **Catalogues** are Go maps in three files per language: `internal/i18n/messages_<code>.go` for the pages (467 keys), `messages_<code>_ops.go` for cities, the control room, alerts and the developer page (236 keys), and `messages_<code>_sites.go` for the Critical sites page and its alerts (128 keys), with English as the reference and the fallback for any missing key. Messages use `fmt` verbs, and `%[2]s` style indexes where a language puts the arguments in another order. Keys ending in `.html` carry a little trusted markup (bold numbers with `data-count` hooks for the live trace); every other message is escaped. Numbers and units stay as numerals (`34 cm`, `0.28 ms`). Place names, model names and model output are not translated.
 - **Choice of language**: `?lang=` first (remembered in a one-year `nm_lang` cookie, `SameSite=Lax`, `HttpOnly`), then that cookie, then `Accept-Language` with its q-values, then English. The header has a language menu, a plain `<details>` list of links that keep the current path and query, so it works without script. HTML responses carry `Vary: Cookie, Accept-Language, Accept-Encoding`; static files and the JSON API vary only on encoding.
 - **Templates** are parsed once per language at start with the language bound into the `t` and `th` functions, so rendering does no lookups by language. Text for the glue (popups, ticker, ages, errors) is rendered into a `<script type="application/json" id="i18n">` block and read with `NM.tr`.
 - **Server-made text** carries a key and arguments as well as its English sentence: verification reasons (`verify.RuleResult.Key`), pipeline errors (`report.Error.Key`), durations and ages. The English page uses the original sentences; other languages build theirs from the catalogue. The engine's route explanation is in English, so for other languages the route summary is rebuilt from the route's own numbers.
@@ -153,6 +154,17 @@ The engine covers Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata and Delhi (docs
 | ![Control room with a cell's history](img/gateway-control.png) | ![Control room on a phone](img/gateway-control-mobile.png) |
 | ![Control room in Tamil](img/gateway-control-ta.png) | ![Cell history on a phone](img/gateway-control-cell-mobile.png) |
 | ![Key page](img/gateway-control-login.png) | ![Public demo](img/gateway-control-demo.png) |
+
+## Critical sites
+
+`/sites` (code in `internal/app/sites.go`, `internal/web/sites.go`, `templates/sites.html`, `static/sites.css` and `internal/sites`) reads the engine's `/v1/sites`, `/v1/sites/{id}` and `/v1/siting` and shows, per city: tabs for data centres, hospitals, telephone exchanges and cable landing stations with OpenStreetMap's real counts; a card per site with its 300 m and 1 km rings (deepest blocking depth with mean and sigma, cells with recent reports, freshness, trend, old deep reports); a map with the live cells, the sites coloured by status, the chosen site's rings and the tanker's access routes; the chosen site's six access routes; its area's flood record; and the city's record for siting, with the simulated scenario's record shown apart and labelled in demo mode. A short intro frames it for siting and operations teams, including the large cloud operators building in India. The public page only ever shows OpenStreetMap sites. Everything is in all eight languages. Full description: docs/SITES.md.
+
+- **Site alerts.** "Notify me about this site" uses the same Web Push key and sender as street watches. `internal/sites` keeps its own store (`site-alerts.json`, mode 0600, the same caps and lifetime), checks each watched site every `ALERT_SWEEP` with one engine call per site, and messages on water over the threshold within 300 m, water over it within 1 km, an access route closing or opening again, back under, and reports aging out (never called clear).
+- **Developer API.** `GET /api/v1/sites`, `POST /api/v1/sites`, `GET` and `DELETE /api/v1/sites/{id}` and `GET /api/v1/siting`, with the same keys, limits and advisory wrapper as the rest of the API. The gateway passes the key's id as the engine's `owner`, so an operator's own sites are visible only to its key, and counts site reads as `sites` in usage.
+
+| Desktop | On a phone |
+|---|---|
+| ![Critical sites](img/gateway-sites.png) | ![Critical sites on a phone](img/gateway-sites-mobile.png) |
 
 ## Watch my street
 

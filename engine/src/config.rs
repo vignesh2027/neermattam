@@ -96,6 +96,32 @@ pub struct Config {
     /// The city whose road graph must be loaded for `/readyz` to answer 200.
     /// Other cities' graphs are reported but do not make the service unready.
     pub primary_city: String,
+    /// Critical sites: limits and the risk ledger (see [`crate::sites`]).
+    pub sites: SitesConfig,
+}
+
+/// Configuration of critical sites and the risk ledger.
+#[derive(Clone, Debug)]
+pub struct SitesConfig {
+    /// Operator sites one owner may add.
+    pub per_owner: usize,
+    /// Operator sites in all.
+    pub max_total: usize,
+    /// H3 resolution of the risk ledger's areas.
+    pub ledger_resolution: Resolution,
+    /// An OpenStreetMap site file to use instead of the embedded one.
+    pub osm_path: Option<PathBuf>,
+}
+
+impl Default for SitesConfig {
+    fn default() -> Self {
+        SitesConfig {
+            per_owner: 100,
+            max_total: 10_000,
+            ledger_resolution: Resolution::Eight,
+            osm_path: None,
+        }
+    }
 }
 
 impl Default for Config {
@@ -116,6 +142,7 @@ impl Default for Config {
             log_json: true,
             dedupe_capacity: 100_000,
             primary_city: "chennai".into(),
+            sites: SitesConfig::default(),
         }
     }
 }
@@ -407,6 +434,41 @@ impl Config {
             }
         })?;
         c.log_json = fmt == "json";
+
+        let s = &mut c.sites;
+        parse(&get, "ENGINE_SITES_PER_OWNER", &mut s.per_owner, |n| {
+            if (1..=10_000).contains(n) {
+                Ok(())
+            } else {
+                Err("must be between 1 and 10000".into())
+            }
+        })?;
+        parse(&get, "ENGINE_SITES_MAX", &mut s.max_total, |n| {
+            if (1..=1_000_000).contains(n) {
+                Ok(())
+            } else {
+                Err("must be between 1 and 1000000".into())
+            }
+        })?;
+        let mut lres: u8 = u8::from(s.ledger_resolution);
+        parse(&get, "ENGINE_LEDGER_RESOLUTION", &mut lres, |r| {
+            if (5..=10).contains(r) {
+                Ok(())
+            } else {
+                Err("must be between 5 and 10".into())
+            }
+        })?;
+        s.ledger_resolution = Resolution::try_from(lres).expect("checked range");
+        if u8::from(s.ledger_resolution) > u8::from(c.resolution) {
+            return Err(ConfigError {
+                var: "ENGINE_LEDGER_RESOLUTION",
+                value: lres.to_string(),
+                reason: "must not be finer than ENGINE_H3_RESOLUTION".into(),
+            });
+        }
+        if let Some(p) = get("ENGINE_SITES_OSM_PATH") {
+            s.osm_path = (!p.trim().is_empty()).then(|| PathBuf::from(p.trim()));
+        }
         Ok(c)
     }
 }
