@@ -17,10 +17,10 @@
   },
   "real": {
     "photos": 11,
-    "wheel_geometry": 1,
-    "person_reference": 0,
-    "model_estimate": 10,
-    "date": "2026-10-29",
+    "wheel_geometry": 0,
+    "person_reference": 2,
+    "model_estimate": 9,
+    "date": "2026-10-30",
     "source": "eval/RESULTS_REAL.md"
   },
   "trace": {
