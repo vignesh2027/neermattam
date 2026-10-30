@@ -7,3 +7,4 @@ __pycache__/
 .pytest_cache/
 /gateway/neermattam-gateway
 .DS_Store
+.claude/

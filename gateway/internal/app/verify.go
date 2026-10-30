@@ -49,15 +49,19 @@ func (a *App) setupCertificates() error {
 }
 
 // fetchCertKeys asks perception for its public keys and trusts the new
-// ones. force skips the throttle used for on-demand fetches.
+// ones. force skips the throttle used for on-demand fetches. Only on-demand
+// fetches start the throttle, so the scheduled fetch at start-up never blocks
+// the first certificate that names a key perception published later.
 func (a *App) fetchCertKeys(ctx context.Context, force bool) {
-	a.keysMu.Lock()
-	if !force && time.Since(a.keysFetched) < keysRetry {
+	if !force {
+		a.keysMu.Lock()
+		if time.Since(a.keysFetched) < keysRetry {
+			a.keysMu.Unlock()
+			return
+		}
+		a.keysFetched = time.Now()
 		a.keysMu.Unlock()
-		return
 	}
-	a.keysFetched = time.Now()
-	a.keysMu.Unlock()
 	doc, err := a.Perception.Keys(ctx)
 	if err != nil {
 		a.Log.Debug("perception keys not fetched", "error", err.Error())
