@@ -16,16 +16,17 @@
     "source": "docs/GEOMETRY.md"
   },
   "real": {
-    "photos": 6,
-    "wheel_geometry": 0,
-    "model_estimate": 6,
-    "date": "2026-10-28",
+    "photos": 11,
+    "wheel_geometry": 1,
+    "person_reference": 0,
+    "model_estimate": 10,
+    "date": "2026-10-29",
     "source": "eval/RESULTS_REAL.md"
   },
   "trace": {
     "photo": "India - Chennai - Monsoon - 02",
     "credit": "McKay Savage, CC BY 2.0, via Wikimedia Commons",
-    "date": "2026-10-28",
+    "date": "2026-10-27",
     "steps": [
       {
         "step": "scene",
@@ -92,6 +93,6 @@
       }
     ],
     "total_steps": 18,
-    "source": "eval/out/x2.json"
+    "source": "gateway/internal/facts/testdata/x2.json"
   }
 }

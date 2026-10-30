@@ -41,12 +41,16 @@ func NewPerception(base string, timeout time.Duration, m *metrics.Set) *Percepti
 	}
 }
 
-// Reference is the object used as a ruler.
+// Reference is the object used as a ruler. A wheel has a diameter; a
+// person (kind "person") has the stature prior the depth was scaled by,
+// and null diameters.
 type Reference struct {
 	Kind            string   `json:"kind"`
 	DiameterCm      *float64 `json:"diameter_cm"`
 	DiameterSigmaCm *float64 `json:"diameter_sigma_cm"`
 	Source          string   `json:"source"`
+	HeightCm        *float64 `json:"height_cm"`
+	HeightSigmaCm   *float64 `json:"height_sigma_cm"`
 }
 
 // Waterline describes how the water surface was located.
@@ -72,9 +76,12 @@ type Measurement struct {
 	Models           map[string]string  `json:"models"`
 	TimingsMs        map[string]float64 `json:"timings_ms"`
 	CostUSD          *float64           `json:"cost_usd"`
-	// Method is "wheel_geometry" (measured from a wheel of known size) or
-	// "model_estimate" (the scene model's visual estimate, wide sigma);
-	// null when the photo is unusable.
+	// Method is "wheel_geometry" (measured from a wheel of known size),
+	// "person_reference" (measured against an adult standing in the water,
+	// sigma typically 10 to 15 cm) or "model_estimate" (the scene model's
+	// visual estimate, wide sigma); null when the photo is unusable. Read it
+	// through Kind or MethodIs, which treat a method this gateway does not
+	// know as an estimate.
 	Method        *string        `json:"method"`
 	ModelEstimate *ModelEstimate `json:"model_estimate"`
 	AgentTrace    []AgentStep    `json:"agent_trace"`
@@ -88,14 +95,45 @@ type Measurement struct {
 
 // Methods perception reports.
 const (
-	MethodWheelGeometry = "wheel_geometry"
-	MethodModelEstimate = "model_estimate"
+	MethodWheelGeometry   = "wheel_geometry"
+	MethodPersonReference = "person_reference"
+	MethodModelEstimate   = "model_estimate"
 )
 
-// MethodIs reports whether the measurement used the given method.
-func (m *Measurement) MethodIs(method string) bool {
-	return m != nil && m.Method != nil && *m.Method == method
+// NormalizeMethod maps perception's method to one this gateway handles. A
+// method it does not know (a newer perception) is treated as an estimate,
+// never as a measurement, so it can only ever count for less. The empty
+// string (an older perception that sent no method) stays empty.
+func NormalizeMethod(method string) string {
+	switch method {
+	case "", MethodWheelGeometry, MethodPersonReference, MethodModelEstimate:
+		return method
+	}
+	return MethodModelEstimate
 }
+
+// KnownMethod reports whether this gateway knows the method by name.
+func KnownMethod(method string) bool {
+	return NormalizeMethod(method) == method
+}
+
+// Kind is the measurement's method after NormalizeMethod: empty when there
+// is none.
+func (m *Measurement) Kind() string {
+	if m == nil || m.Method == nil {
+		return ""
+	}
+	return NormalizeMethod(*m.Method)
+}
+
+// MethodIs reports whether the measurement used the given method, reading
+// an unknown method as a model estimate.
+func (m *Measurement) MethodIs(method string) bool {
+	return m != nil && m.Method != nil && m.Kind() == method
+}
+
+// IsPerson reports whether the ruler was a person.
+func (r *Reference) IsPerson() bool { return r != nil && r.Kind == "person" }
 
 // ModelEstimate is the scene model's own visual estimate of the depth.
 type ModelEstimate struct {

@@ -361,11 +361,15 @@ func ReplyText(o *report.Outcome, publicURL string) string {
 			fmt.Fprintf(&b, "From your voice note, about %.0f cm of water %s (plus or minus %.0f cm, a rough spoken estimate)", deref(o.DepthCm), o.Place, deref(o.DepthSigmaCm))
 		case o.Measurement.MethodIs(upstream.MethodModelEstimate):
 			fmt.Fprintf(&b, "No wheel could be measured, so this is the scene model's visual estimate: about %.0f cm of water %s (plus or minus %.0f cm)", deref(o.DepthCm), o.Place, deref(o.DepthSigmaCm))
+		case o.Measurement.MethodIs(upstream.MethodPersonReference):
+			fmt.Fprintf(&b, "No wheel could be measured, so Neermattam measured against a person standing in the water: about %.0f cm of water %s (plus or minus %.0f cm, assuming an adult of average height)", deref(o.DepthCm), o.Place, deref(o.DepthSigmaCm))
 		default:
 			fmt.Fprintf(&b, "Neermattam measured about %.0f cm of water %s (plus or minus %.0f cm)", deref(o.DepthCm), o.Place, deref(o.DepthSigmaCm))
 		}
 		if o.Measurement.MethodIs(upstream.MethodModelEstimate) {
 			// No ruler to name.
+		} else if o.Measurement.MethodIs(upstream.MethodPersonReference) {
+			fmt.Fprintf(&b, ". Confidence %.2f", o.Measurement.Confidence)
 		} else if o.Measurement != nil && o.Measurement.Reference != nil {
 			fmt.Fprintf(&b, ", using a %s as the ruler", strings.ReplaceAll(o.Measurement.Reference.Kind, "_", " "))
 			fmt.Fprintf(&b, ". Confidence %.2f", o.Measurement.Confidence)

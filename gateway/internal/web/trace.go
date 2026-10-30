@@ -12,7 +12,7 @@ import (
 // TraceStepView is one step of perception's agent, ready to draw.
 type TraceStepView struct {
 	Index    int
-	Kind     string // scene, segment, verify, confirm, refine, giveup, geometry, estimate, other
+	Kind     string // scene, segment, verify, confirm, refine, giveup, geometry, estimate, budget, other
 	Label    string
 	Target   string
 	Model    string
@@ -43,6 +43,7 @@ type TraceView struct {
 var stepKinds = map[string]bool{
 	"scene": true, "segment": true, "verify": true, "confirm": true,
 	"refine": true, "giveup": true, "geometry": true, "estimate": true,
+	"budget": true, // perception's time budget stopped the checks still open
 }
 
 // NewTraceStep classifies one step. A verify whose decision is a refinement

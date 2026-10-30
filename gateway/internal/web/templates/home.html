@@ -108,9 +108,15 @@
         <p class="h-src">{{t "home.source" .Depth.Source}}</p>
       </article>
       <article class="card h-num h-num-honest">
+        {{if .Real.Person}}
+        <b class="num">{{.Real.Measured}} / {{.Real.Photos}}</b>
+        <h3>{{t "home.num_real_person"}}</h3>
+        <p>{{t "home.num_real_person_p" .Real.Geometry .Real.Person .Real.Estimates}}</p>
+        {{else}}
         <b class="num">{{.Real.Geometry}} / {{.Real.Photos}}</b>
         <h3>{{t "home.num_real"}}</h3>
         <p>{{t "home.num_real_p" .Real.Estimates .Real.Photos}}</p>
+        {{end}}
         <p class="h-src">{{t "home.source" .Real.Source}}</p>
       </article>
     </div>

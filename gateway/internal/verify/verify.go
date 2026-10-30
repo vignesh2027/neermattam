@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"neermattam/gateway/internal/metrics"
+	"neermattam/gateway/internal/upstream"
 )
 
 // Outcome of one rule.
@@ -62,7 +63,8 @@ type Input struct {
 	// has none (a voice note).
 	Confidence float64
 	Source     string // photo, video, voice
-	// Method is perception's method: wheel_geometry or model_estimate.
+	// Method is perception's method: wheel_geometry, person_reference or
+	// model_estimate. Any other non-empty value is read as model_estimate.
 	Method string
 	// CapturedAt is the EXIF DateTimeOriginal in UTC, when present.
 	CapturedAt *time.Time
@@ -95,15 +97,25 @@ type Thresholds struct {
 	// EstimateConfidenceReject is the floor for model estimates, whose
 	// confidence perception keeps low by design.
 	EstimateConfidenceReject float64
-	FreshFor                 time.Duration // full trust
-	StaleAfter               time.Duration // heavier reduction
-	MaxAge                   time.Duration // reject; the engine refuses older readings too
-	FutureSkew               time.Duration // photo clock ahead of server by more than this
-	NearbyRadiusM            float64
-	SpatialSigmaPer100m      float64 // cm of expected depth difference per 100 m
-	DryRainMM                float64 // 48-hour rain below this counts as dry
-	WetRainMM                float64 // 48-hour rain at or above this is heavy
-	DeepWithoutRainCm        float64 // depth above this is surprising on a dry day
+	// PersonConfidenceReject is the floor for measurements against a
+	// person. Perception's confidence falls with sigma relative to the
+	// ruler, and a 10 to 15 cm sigma on a 159 cm stature prior caps it near
+	// 0.3, so the wheel floor would reject every one of them.
+	PersonConfidenceReject float64
+	// PersonFactor is the source weight of a person measurement: between a
+	// wheel (1) and a model estimate (EstimateFactor).
+	PersonFactor float64
+	// EstimateFactor is the source weight of a model estimate.
+	EstimateFactor      float64
+	FreshFor            time.Duration // full trust
+	StaleAfter          time.Duration // heavier reduction
+	MaxAge              time.Duration // reject; the engine refuses older readings too
+	FutureSkew          time.Duration // photo clock ahead of server by more than this
+	NearbyRadiusM       float64
+	SpatialSigmaPer100m float64 // cm of expected depth difference per 100 m
+	DryRainMM           float64 // 48-hour rain below this counts as dry
+	WetRainMM           float64 // 48-hour rain at or above this is heavy
+	DeepWithoutRainCm   float64 // depth above this is surprising on a dry day
 }
 
 // DefaultThresholds are the values the gateway runs with.
@@ -112,6 +124,9 @@ func DefaultThresholds() Thresholds {
 		ConfidenceReject:         0.35,
 		ConfidenceFull:           0.6,
 		EstimateConfidenceReject: 0.15,
+		PersonConfidenceReject:   0.1,
+		PersonFactor:             0.85,
+		EstimateFactor:           0.7,
 		FreshFor:                 2 * time.Hour,
 		StaleAfter:               6 * time.Hour,
 		MaxAge:                   24 * time.Hour,
@@ -177,8 +192,23 @@ func (v *Verifier) Verify(ctx context.Context, in Input) Result {
 func (v *Verifier) confidence(in Input) RuleResult {
 	r := RuleResult{Rule: "confidence_floor"}
 	c := in.Confidence
-	estimate := in.Method == "model_estimate"
+	method := upstream.NormalizeMethod(in.Method)
+	estimate := method == upstream.MethodModelEstimate
 	switch {
+	case method == upstream.MethodPersonReference && c >= v.T.PersonConfidenceReject:
+		// A person ruler is coarse, so perception's confidence is low by
+		// construction. The wide sigma already cuts its weight in fusion
+		// and the source rule cuts it again a little; scaling by the
+		// confidence as well would count the same doubt a third time.
+		r.Outcome, r.Factor = Pass, 1
+		r.Reason = fmt.Sprintf("confidence %.2f, as expected when a person is the ruler; the wider uncertainty limits its weight", c)
+		r.Key, r.Args = "conf_person", []any{c}
+		return r
+	case method == upstream.MethodPersonReference:
+		r.Outcome, r.Factor = Reject, 0
+		r.Reason = fmt.Sprintf("confidence %.2f of the measurement against a person is below the floor of %.2f", c, v.T.PersonConfidenceReject)
+		r.Key, r.Args = "conf_person_low", []any{c, v.T.PersonConfidenceReject}
+		return r
 	case estimate && c >= v.T.EstimateConfidenceReject:
 		// Perception gives its visual estimates a low confidence on purpose.
 		// Their weight is already cut by the wide sigma (at least 20 cm) and
@@ -259,19 +289,32 @@ func (v *Verifier) freshness(in Input) (RuleResult, time.Time, string) {
 
 func (v *Verifier) source(in Input) RuleResult {
 	r := RuleResult{Rule: "source", Outcome: Pass, Factor: 1}
+	method := upstream.NormalizeMethod(in.Method)
 	switch {
 	case in.Source == "voice":
 		r.Outcome, r.Factor = Lower, 0.6
 		r.Reason = "a spoken depth is a rough estimate, so it counts for less than a measured photo"
 		r.Key = "src_voice"
-	case in.Method == "model_estimate":
-		r.Outcome, r.Factor = Lower, 0.7
+	case method != in.Method:
+		name := in.Method
+		if len(name) > 40 {
+			name = name[:40]
+		}
+		r.Outcome, r.Factor = Lower, v.T.EstimateFactor
+		r.Reason = fmt.Sprintf("perception used a method this gateway does not know (%s), so it is treated as a visual estimate and counts for less than a measurement", name)
+		r.Key, r.Args = "src_unknown", []any{name}
+	case method == upstream.MethodModelEstimate:
+		r.Outcome, r.Factor = Lower, v.T.EstimateFactor
 		r.Reason = "no wheel could be measured, so this is the scene model's visual estimate; it counts for less than a measurement"
 		r.Key = "src_estimate"
-	case in.Method == "wheel_geometry" && in.Source == "video":
+	case method == upstream.MethodPersonReference:
+		r.Outcome, r.Factor = Lower, v.T.PersonFactor
+		r.Reason = "measured against a person standing in the water, assuming an adult of average height; it counts for less than a wheel and more than a visual estimate"
+		r.Key = "src_person"
+	case method == upstream.MethodWheelGeometry && in.Source == "video":
 		r.Reason = "video measured from a wheel of known size"
 		r.Key = "src_video_geo"
-	case in.Method == "wheel_geometry":
+	case method == upstream.MethodWheelGeometry:
 		r.Reason = "photo measured from a wheel of known size"
 		r.Key = "src_photo_geo"
 	case in.Source == "video":

@@ -230,6 +230,23 @@ func TestReplyNamesAnEstimateAsAnEstimate(t *testing.T) {
 	}
 }
 
+func TestReplyNamesAPersonAndAnUnknownMethod(t *testing.T) {
+	d, s := 49.0, 12.7
+	h, hs := 158.75, 9.0
+	method := upstream.MethodPersonReference
+	out := &report.Outcome{Status: report.StatusFused, Place: "near Velachery", DepthCm: &d, DepthSigmaCm: &s,
+		Measurement: &upstream.Measurement{Method: &method, Confidence: 0.23, Reference: &upstream.Reference{Kind: "person", HeightCm: &h, HeightSigmaCm: &hs}}, Advisory: report.Advisory}
+	txt := ReplyText(out, "")
+	if !strings.Contains(txt, "against a person standing in the water") || !strings.Contains(txt, "Confidence 0.23") || strings.Contains(txt, "ruler") {
+		t.Fatalf("%q", txt)
+	}
+	future := "stereo_depth"
+	out.Measurement = &upstream.Measurement{Method: &future, Confidence: 0.5}
+	if txt := ReplyText(out, ""); !strings.Contains(txt, "visual estimate") || strings.Contains(txt, "measured about") {
+		t.Fatalf("an unknown method must read as an estimate: %q", txt)
+	}
+}
+
 func TestWatchThenLocationStartsAWatchAndStopEndsIt(t *testing.T) {
 	g := newGraph(t)
 	run := &fakeRunner{}

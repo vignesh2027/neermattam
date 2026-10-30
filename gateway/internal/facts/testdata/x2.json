@@ -1,0 +1,202 @@
+{
+  "note": "A recorded perception response for eval photo x2 (India - Chennai - Monsoon - 02, McKay Savage, CC BY 2.0), copied from eval/out/x2.json, which is not in git. The landing page quotes an excerpt of its agent_trace.",
+  "recorded_on": "2026-10-27",
+  "measurement_id": "m_01M5Z693PT0D85XJ4606PJ3X9Y",
+  "usable": true,
+  "reasons": [
+    "standing water visible",
+    "two-wheeler wheel 1: the scene model did not confirm the mask (Magenta follows tyre but also encloses exhaust pipe and swingarm/chain area giving wrong depth measurement.)",
+    "two-wheeler wheel 2: the scene model did not confirm the mask (Magenta outline includes front mudguard, fork and brake disc so it does not follow tyre rubber alone.)",
+    "no wheel could be measured; depth is the scene model's visual estimate, not a measurement",
+    "estimate based on: water reaches lower third of motorcycle wheels standing on flooded road"
+  ],
+  "depth_cm": 23.0,
+  "depth_sigma_cm": 20.0,
+  "reference": null,
+  "waterline": null,
+  "velocity_mps": null,
+  "velocity_sigma_mps": null,
+  "confidence": 0.22,
+  "models": {
+    "scene": "muse-spark-open",
+    "masks": "sam-2.1-hiera-small"
+  },
+  "timings_ms": {
+    "scene": 15161,
+    "agent": 51264,
+    "geometry": 0
+  },
+  "cost_usd": 0.04331,
+  "method": "model_estimate",
+  "model_estimate": {
+    "depth_cm": 23.0,
+    "depth_sigma_cm": 20.0,
+    "basis": "water reaches lower third of motorcycle wheels standing on flooded road",
+    "model": "muse-spark-open"
+  },
+  "agent_trace": [
+    {
+      "step": "scene",
+      "target": "photo",
+      "model": "muse-spark-open",
+      "input": "photo 2048x1536 px",
+      "output": "water visible; references: two_wheeler_wheel, two_wheeler_wheel; own estimate 23 cm",
+      "decision": "segment and verify 2 wheels and the water",
+      "latency_ms": 15161
+    },
+    {
+      "step": "segment",
+      "target": "water",
+      "model": "sam-2.1-hiera-small",
+      "input": "box [246,799,964,1445] px + points [[588, 1083]]",
+      "output": "mask 325606 px (10% of photo)",
+      "decision": "verify",
+      "latency_ms": 2250
+    },
+    {
+      "step": "verify",
+      "target": "water",
+      "model": "muse-spark-open",
+      "input": "photo with the proposed region tinted",
+      "output": "is_water=true, coverage partial; Magenta is water but misses the flooded area directly around the motorcycles standing in it.",
+      "decision": "refine with box [717,922,1188,1352] px + point [922, 1152]",
+      "latency_ms": 22107
+    },
+    {
+      "step": "segment",
+      "target": "water",
+      "model": "sam-2.1-hiera-small",
+      "input": "box [717,922,1188,1352] px + points [[922, 1152]]",
+      "output": "mask 264388 px (8% of photo)",
+      "decision": "verify",
+      "latency_ms": 4106
+    },
+    {
+      "step": "verify",
+      "target": "water",
+      "model": "muse-spark-open",
+      "input": "photo with the proposed region tinted",
+      "output": "is_water=true, coverage good; Magenta region lies on the brown floodwater surface immediately beside the submerged motorcycle and covers open water.",
+      "decision": "accept",
+      "latency_ms": 22357
+    },
+    {
+      "step": "segment",
+      "target": "two wheeler wheel 1",
+      "model": "sam-2.1-hiera-small",
+      "input": "box [1198,1026,1441,1245] px + point [1313,1106]",
+      "output": "mask 21928 px, bbox [1247,998,1478,1134] px, score 0.202",
+      "decision": "verify",
+      "latency_ms": 3049
+    },
+    {
+      "step": "verify",
+      "target": "two wheeler wheel 1",
+      "model": "muse-spark-open",
+      "input": "crop [638,422,2038,1536] px with the outline drawn",
+      "output": "is_target=false, outline wrong, view side, edge visible 0.65, waterline visible; Magenta traces only a small bottom fragment at the waterline instead of the tyre's outer edge above water, missing the main visible arc.",
+      "decision": "refine with box [1205,856,1506,1057] px + points [1359,862], [1212,962]",
+      "latency_ms": 21994
+    },
+    {
+      "step": "segment",
+      "target": "two wheeler wheel 1",
+      "model": "sam-2.1-hiera-small",
+      "input": "box [1205,856,1506,1057] px + points [1359,862], [1212,962]",
+      "output": "mask 47658 px, bbox [1215,841,1529,1095] px, score 0.522",
+      "decision": "verify",
+      "latency_ms": 4361
+    },
+    {
+      "step": "verify",
+      "target": "two wheeler wheel 1",
+      "model": "muse-spark-open",
+      "input": "crop [946,547,1788,1389] px with the outline drawn",
+      "output": "is_target=false, outline wrong, view side, edge visible 0.55, waterline visible; Magenta outline strays far beyond tyre to include exhaust, rear suspension, mudguard and bodywork instead of following tyre outer edge.",
+      "decision": "refine with box [1245,901,1472,1170] px + points [1354,922], [1270,1048] - points [1401,985], [1245,880]",
+      "latency_ms": 11298
+    },
+    {
+      "step": "segment",
+      "target": "two wheeler wheel 1",
+      "model": "sam-2.1-hiera-small",
+      "input": "box [1245,901,1472,1170] px + points [1354,922], [1270,1048] - points [1401,985], [1245,880]",
+      "output": "mask 30440 px, bbox [1247,904,1498,1134] px, score 0.74",
+      "decision": "verify",
+      "latency_ms": 892
+    },
+    {
+      "step": "verify",
+      "target": "two wheeler wheel 1",
+      "model": "muse-spark-open",
+      "input": "crop [1022,686,1721,1385] px with the outline drawn",
+      "output": "is_target=false, outline partial, view side, edge visible 0.75, waterline visible; Magenta follows tyre but also encloses exhaust pipe and swingarm/chain area giving wrong depth measurement.",
+      "decision": "give up",
+      "latency_ms": 9601
+    },
+    {
+      "step": "segment",
+      "target": "two wheeler wheel 2",
+      "model": "sam-2.1-hiera-small",
+      "input": "box [1698,1001,1916,1230] px + point [1806,1091]",
+      "output": "mask 56803 px, bbox [1681,996,1937,1255] px, score 0.824",
+      "decision": "verify",
+      "latency_ms": 3806
+    },
+    {
+      "step": "verify",
+      "target": "two wheeler wheel 2",
+      "model": "muse-spark-open",
+      "input": "crop [1162,478,2048,1536] px with the outline drawn",
+      "output": "is_target=false, outline wrong, view side, edge visible 0.60, waterline visible; Magenta outline encloses flooded water/pavement beside front wheel and does not follow the tyre's round outer edge.",
+      "decision": "refine with box [1698,804,1951,1055] px + points [1826,832], [1720,944] - points [1782,1113], [1773,1166]",
+      "latency_ms": 21263
+    },
+    {
+      "step": "segment",
+      "target": "two wheeler wheel 2",
+      "model": "sam-2.1-hiera-small",
+      "input": "box [1698,804,1951,1055] px + points [1826,832], [1720,944] - points [1782,1113], [1773,1166]",
+      "output": "mask 30852 px, bbox [1706,821,1960,1004] px, score 0.675",
+      "decision": "verify",
+      "latency_ms": 5127
+    },
+    {
+      "step": "verify",
+      "target": "two wheeler wheel 2",
+      "model": "muse-spark-open",
+      "input": "crop [1488,589,2048,1270] px with the outline drawn",
+      "output": "is_target=false, outline partial, view side, edge visible 0.75, waterline visible; Magenta outline follows the front fender/mudguard on top instead of the black tyre's outer edge, adding bodywork to the tyre.",
+      "decision": "refine with box [1723,834,1953,1035] px + points [1836,837], [1939,933] - points [1836,822], [1761,856]",
+      "latency_ms": 8293
+    },
+    {
+      "step": "segment",
+      "target": "two wheeler wheel 2",
+      "model": "sam-2.1-hiera-small",
+      "input": "box [1723,834,1953,1035] px + points [1836,837], [1939,933] - points [1836,822], [1761,856]",
+      "output": "mask 21863 px, bbox [1753,823,1960,1001] px, score 0.729",
+      "decision": "verify",
+      "latency_ms": 1029
+    },
+    {
+      "step": "verify",
+      "target": "two wheeler wheel 2",
+      "model": "muse-spark-open",
+      "input": "crop [1533,621,2048,1237] px with the outline drawn",
+      "output": "is_target=false, outline wrong, view side, edge visible 0.60, waterline visible; Magenta outline includes front mudguard, fork and brake disc so it does not follow tyre rubber alone.",
+      "decision": "give up",
+      "latency_ms": 6849
+    },
+    {
+      "step": "estimate",
+      "target": "photo",
+      "model": "muse-spark-open",
+      "input": "no measurable wheel",
+      "output": "23 cm, sigma 20 cm",
+      "decision": "report model estimate",
+      "latency_ms": 0
+    }
+  ],
+  "captured_at": "2008-10-22T09:17:24"
+}

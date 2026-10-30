@@ -86,6 +86,7 @@ func TestTraceStepClassification(t *testing.T) {
 		{"geometry", "report measurement", "geometry", "neutral", "Geometry", ""},
 		{"estimate", "report model estimate", "estimate", "neutral", "Estimate", ""},
 		{"mystery", "", "other", "neutral", "Mystery", ""},
+		{"budget", "answer with what was verified in time", "budget", "neutral", "Time budget", ""},
 	}
 	for _, c := range cases {
 		v := NewTraceStep("en", 0, upstream.AgentStep{Step: c.step, Decision: c.decision, LatencyMs: 11377})

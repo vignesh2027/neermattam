@@ -242,3 +242,73 @@ func TestLongAgesReadNaturally(t *testing.T) {
 		}
 	}
 }
+
+// Each method gets its own confidence floor and source weight: a wheel
+// counts fully, a person less, a visual estimate less again, and a method
+// this gateway does not know is read as an estimate, never a measurement.
+func TestMethodWeights(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		method     string
+		confidence float64
+		accepted   bool
+		confOut    Outcome
+		confKey    string
+		srcFactor  float64
+		srcKey     string
+		trust      float64
+	}{
+		{"wheel", "wheel_geometry", 0.8, true, Pass, "conf_ok", 1, "src_photo_geo", 1},
+		{"wheel, low confidence", "wheel_geometry", 0.23, false, Reject, "conf_low", 1, "src_photo_geo", 1},
+		{"person", "person_reference", 0.23, true, Pass, "conf_person", 0.85, "src_person", 0.85},
+		{"person at the floor", "person_reference", 0.1, true, Pass, "conf_person", 0.85, "src_person", 0.85},
+		{"person below the floor", "person_reference", 0.08, false, Reject, "conf_person_low", 0.85, "src_person", 0.85},
+		{"estimate", "model_estimate", 0.22, true, Pass, "conf_estimate", 0.7, "src_estimate", 0.7},
+		{"estimate below the floor", "model_estimate", 0.1, false, Reject, "conf_estimate_low", 0.7, "src_estimate", 0.7},
+		{"unknown method", "stereo_depth", 0.9, true, Pass, "conf_estimate", 0.7, "src_unknown", 0.7},
+		{"unknown method, low confidence", "stereo_depth", 0.12, false, Reject, "conf_estimate_low", 0.7, "src_unknown", 0.7},
+		{"no method (older perception)", "", 0.8, true, Pass, "conf_ok", 1, "src_photo", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := baseInput()
+			in.Method, in.Confidence = tc.method, tc.confidence
+			r := verifier(nil, nil).Verify(context.Background(), in)
+			c := rule(t, r, "confidence_floor")
+			if r.Accepted != tc.accepted || c.Outcome != tc.confOut || c.Key != tc.confKey {
+				t.Fatalf("accepted %v, confidence %s %s; want %v, %s %s", r.Accepted, c.Outcome, c.Key, tc.accepted, tc.confOut, tc.confKey)
+			}
+			s := rule(t, r, "source")
+			if s.Factor != tc.srcFactor || s.Key != tc.srcKey || s.Reason == "" {
+				t.Fatalf("source %+v; want factor %v, key %s", s, tc.srcFactor, tc.srcKey)
+			}
+			if tc.accepted && r.Trust != tc.trust {
+				t.Fatalf("trust %v, want %v", r.Trust, tc.trust)
+			}
+			if tc.srcKey == "src_unknown" && (len(s.Args) != 1 || s.Args[0] != tc.method || !strings.Contains(s.Reason, tc.method)) {
+				t.Fatalf("the reason must name the unknown method: %+v", s)
+			}
+		})
+	}
+}
+
+// A person measurement sits between a wheel and an estimate.
+func TestPersonWeightIsBetweenWheelAndEstimate(t *testing.T) {
+	trust := func(method string, c float64) float64 {
+		in := baseInput()
+		in.Method, in.Confidence = method, c
+		return verifier(nil, nil).Verify(context.Background(), in).Trust
+	}
+	wheel, person, est := trust("wheel_geometry", 0.8), trust("person_reference", 0.2), trust("model_estimate", 0.2)
+	if !(wheel > person && person > est) {
+		t.Fatalf("wheel %v, person %v, estimate %v", wheel, person, est)
+	}
+}
+
+func TestUnknownMethodNameIsCapped(t *testing.T) {
+	in := baseInput()
+	in.Method = strings.Repeat("x", 500)
+	s := rule(t, verifier(nil, nil).Verify(context.Background(), in), "source")
+	if s.Key != "src_unknown" || len(s.Args[0].(string)) > 40 {
+		t.Fatalf("%+v", s)
+	}
+}

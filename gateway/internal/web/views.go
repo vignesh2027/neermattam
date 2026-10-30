@@ -76,11 +76,21 @@ type ResultView struct {
 	Transcript string
 	ModelsLine string
 
-	// Method badge: "geometry", "estimate" or "" (older perception).
+	// Method badge: "geometry", "person", "estimate" or "" (older
+	// perception). A method the gateway does not know shows as "estimate".
 	Method      string
 	MethodLabel string
 	// EstimateNote explains a model estimate in plain words.
 	EstimateNote string
+	// PersonNote explains a measurement against a person: the stature it
+	// assumes and why the band is wider. PersonFaces says faces are blurred.
+	PersonNote  string
+	PersonFaces string
+	// Notes are perception's own reasons for a usable measurement, such as
+	// a wheel and a person in the same photo disagreeing.
+	Notes []string
+	// OverlayAlt and OverlayCaption describe the overlay image.
+	OverlayAlt, OverlayCaption string
 	// Readings lists the measured and the estimated depth when both exist.
 	Readings []ReadingRow
 	Voice    *VoiceView
@@ -121,6 +131,14 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 		v.Gauge = newGauge(lang, *o.DepthCm, *o.DepthSigmaCm)
 	}
 	describeMethod(v, o, lang)
+	switch v.Method {
+	case "estimate":
+		v.OverlayAlt, v.OverlayCaption = tr("result.overlay_alt"), tr("result.overlay_estimate")
+	case "person":
+		v.OverlayAlt, v.OverlayCaption = tr("result.overlay_alt_person"), tr("result.overlay_person")
+	default:
+		v.OverlayAlt, v.OverlayCaption = tr("result.overlay_alt"), tr("result.overlay_measured")
+	}
 	switch o.Status {
 	case report.StatusFused:
 		v.Title = tr("result.title_fused")
@@ -141,6 +159,9 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 		}
 	}
 	if m != nil {
+		if m.Usable && o.Status != report.StatusUnusable && len(m.Reasons) > 0 {
+			v.Notes = m.Reasons // perception's own words
+		}
 		if r := m.Reference; r != nil {
 			val := tr("ref." + r.Kind)
 			if r.DiameterCm != nil {
@@ -149,12 +170,25 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 					val += fmt.Sprintf(" ± %.1f", *r.DiameterSigmaCm)
 				}
 			}
+			if r.IsPerson() && r.HeightCm != nil {
+				sigma := "?"
+				if r.HeightSigmaCm != nil {
+					sigma = fmt.Sprintf("%.0f", *r.HeightSigmaCm)
+				}
+				// Keep "159 cm ± 9" on one line.
+				val += ", " + strings.ReplaceAll(tr("fact.assumed_height", fmt.Sprintf("%.0f", *r.HeightCm), sigma), " ± ", "\u00a0±\u00a0")
+				val = strings.ReplaceAll(val, " cm", "\u00a0cm")
+			}
 			v.Facts = append(v.Facts, Fact{Label: tr("fact.ruler"), Value: val, Note: r.Source})
 		}
 		if w := m.Waterline; w != nil {
 			note := ""
 			if w.AgreementCm != nil {
-				note = tr("fact.waterline_agree", fmt.Sprintf("%.1f", *w.AgreementCm))
+				if w.Method == "person_mask_bottom" {
+					note = tr("fact.landmark_apart", fmt.Sprintf("%.0f", *w.AgreementCm))
+				} else {
+					note = tr("fact.waterline_agree", fmt.Sprintf("%.1f", *w.AgreementCm))
+				}
 			}
 			v.Facts = append(v.Facts, Fact{Label: tr("fact.waterline"), Value: methodName(lang, w.Method), Note: note})
 		}
@@ -224,8 +258,8 @@ func describeMethod(v *ResultView, o *report.Outcome, lang string) {
 	if est != nil && est.Model != "" {
 		estModel = est.Model
 	}
-	switch *m.Method {
-	case upstream.MethodModelEstimate:
+	switch m.Kind() {
+	case upstream.MethodModelEstimate: // also a method this gateway does not know
 		v.Method = "estimate"
 		v.MethodLabel = tr("result.model_estimate")
 		note := tr("result.estimate_note", estModel)
@@ -237,21 +271,39 @@ func describeMethod(v *ResultView, o *report.Outcome, lang string) {
 	case upstream.MethodWheelGeometry:
 		v.Method = "geometry"
 		kind := "wheel"
-		if m.Reference != nil {
+		if m.Reference != nil && !m.Reference.IsPerson() {
 			kind = m.Reference.Kind
 		}
 		v.MethodLabel = tr("result.measured_from", strings.ToLower(tr("ref."+kind)))
-		if est != nil && m.DepthCm != nil && m.DepthSigmaCm != nil {
-			v.Readings = []ReadingRow{
-				{Label: tr("result.reading_measured", strings.ToLower(tr("ref."+kind))), Value: fmt.Sprintf("%.0f ± %.1f cm", *m.DepthCm, *m.DepthSigmaCm), Note: tr("result.reading_used"), Primary: true},
-				{Label: tr("result.reading_estimate", estModel), Value: fmt.Sprintf("%.0f ± %.0f cm", est.DepthCm, est.DepthSigmaCm), Note: capitalise(strings.TrimSuffix(est.Basis, "."))},
-			}
-			if math.Abs(*m.DepthCm-est.DepthCm) > 2*math.Hypot(*m.DepthSigmaCm, est.DepthSigmaCm) {
-				v.Readings[1].Note += ". " + tr("result.readings_disagree")
-			}
-			addEstimateBand(&v.Gauge, est.DepthCm, est.DepthSigmaCm)
+		twoReadings(v, m, est, estModel, kind, lang)
+	case upstream.MethodPersonReference:
+		v.Method = "person"
+		v.MethodLabel = tr("result.person_chip")
+		if r := m.Reference; r != nil && r.HeightCm != nil && r.HeightSigmaCm != nil {
+			v.PersonNote = tr("result.person_note", fmt.Sprintf("%.0f", *r.HeightCm), fmt.Sprintf("%.0f", *r.HeightSigmaCm))
+		} else {
+			v.PersonNote = tr("result.person_note_plain")
 		}
+		v.PersonFaces = tr("result.person_faces")
+		twoReadings(v, m, est, estModel, "person", lang)
 	}
+}
+
+// twoReadings lists the measurement and the scene model's own estimate
+// side by side, and draws the estimate on the gauge, when both exist.
+func twoReadings(v *ResultView, m *upstream.Measurement, est *upstream.ModelEstimate, estModel, kind, lang string) {
+	tr := func(key string, args ...any) string { return i18n.T(lang, key, args...) }
+	if est == nil || m.DepthCm == nil || m.DepthSigmaCm == nil {
+		return
+	}
+	v.Readings = []ReadingRow{
+		{Label: tr("result.reading_measured", strings.ToLower(tr("ref."+kind))), Value: fmt.Sprintf("%.0f ± %.1f cm", *m.DepthCm, *m.DepthSigmaCm), Note: tr("result.reading_used"), Primary: true},
+		{Label: tr("result.reading_estimate", estModel), Value: fmt.Sprintf("%.0f ± %.0f cm", est.DepthCm, est.DepthSigmaCm), Note: capitalise(strings.TrimSuffix(est.Basis, "."))},
+	}
+	if math.Abs(*m.DepthCm-est.DepthCm) > 2*math.Hypot(*m.DepthSigmaCm, est.DepthSigmaCm) {
+		v.Readings[1].Note += ". " + tr("result.readings_disagree")
+	}
+	addEstimateBand(&v.Gauge, est.DepthCm, est.DepthSigmaCm)
 }
 
 func addEstimateBand(g *Gauge, depth, sigma float64) {
@@ -278,6 +330,8 @@ func methodName(lang, m string) string {
 	switch m {
 	case "sam_mask_intersection":
 		return i18n.T(lang, "fact.waterline_masks")
+	case "person_mask_bottom":
+		return i18n.T(lang, "fact.waterline_person")
 	case "":
 		return i18n.T(lang, "fact.not_reported")
 	}

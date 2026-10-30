@@ -532,6 +532,14 @@ tr:last-child td { border-bottom: 0; }
   padding: 10px 12px; border-radius: 12px; background: var(--violet-soft); color: #3B1676; border: 1px solid #DCD0F5;
 }
 .estimate-note svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; color: var(--violet); }
+.person-note {
+  margin-top: 12px; display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; line-height: 1.5;
+  padding: 10px 12px; border-radius: 12px; background: var(--soft-2); color: var(--primary-deep); border: 1px solid var(--line-strong);
+}
+.person-note svg { width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px; color: var(--primary); }
+.person-note p + p { margin-top: 6px; }
+.person-faces { color: var(--muted); font-size: 12.5px; }
+.reasons.notes { font-size: 13px; color: var(--muted); gap: 2px; }
 .gauge.is-est .gauge-band { background: repeating-linear-gradient(135deg, rgba(76, 29, 149, .32) 0 6px, rgba(76, 29, 149, .16) 6px 12px); }
 .gauge.is-est .gauge-mark { background: var(--violet); }
 .gauge-est { position: absolute; top: 18px; height: 6px; border-radius: 99px; background: repeating-linear-gradient(135deg, rgba(76, 29, 149, .5) 0 4px, rgba(76, 29, 149, .18) 4px 8px); }
@@ -542,6 +550,8 @@ tr:last-child td { border-bottom: 0; }
 .gauge.has-est .gauge-tick.row2::before { top: -52px; height: 48px; }
 .gauge.has-est .gauge-axis { margin-top: 62px; }
 .gauge-key { display: inline-flex; align-items: center; gap: 6px; }
+.gauge-axis > span:first-child, .gauge-axis > span:last-child { white-space: nowrap; }
+.gauge-axis .gauge-key { flex-wrap: wrap; justify-content: center; padding: 0 8px; }
 .gauge-key i { display: inline-block; width: 16px; height: 6px; border-radius: 99px; margin-left: 6px; }
 .gauge-key .k-band { background: rgba(37, 99, 235, .45); }
 .gauge.is-est .gauge-key .k-band { background: rgba(76, 29, 149, .4); }
@@ -610,6 +620,8 @@ tr:last-child td { border-bottom: 0; }
 .k-refine .tnode { border-color: var(--violet); color: var(--violet); background: var(--violet-soft); }
 .k-giveup .tnode { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
 .k-geometry .tnode { background: var(--primary-deep); border-color: var(--primary-deep); color: #fff; }
+.k-budget .tnode { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); }
+.k-budget .tcard { background: #FFFBF2; border-color: #F1DDB0; }
 .k-estimate .tnode { background: var(--violet); border-color: var(--violet); color: #fff; }
 .tcard { min-width: 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); transition: border-color .2s; }
 .t-refine .tcard { border-color: #DCD0F5; background: #FAF7FF; }

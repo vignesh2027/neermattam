@@ -4,7 +4,10 @@
 //   - routing time from docs/ENGINE.md (the criterion benchmark table),
 //   - synthetic depth accuracy from docs/GEOMETRY.md (the synth-eval block),
 //   - real-photo status from eval/RESULTS_REAL.md (the real-eval block),
-//   - an agent trace excerpt from a recorded run, eval/out/x2.json.
+//     counted by method: wheel, person or model estimate,
+//   - an agent trace excerpt from a recorded run, kept in git as
+//     gateway/internal/facts/testdata/x2.json (a copy of eval/out/x2.json,
+//     which is not in git).
 //
 // `go generate ./internal/facts` (or `go run ./cmd/factgen`) extracts them
 // into facts.json, which is embedded, because the deployed image carries no
@@ -48,14 +51,20 @@ type Depth struct {
 	Source   string `json:"source"`
 }
 
-// Real is the status of the real-photo evaluation.
+// Real is the status of the real-photo evaluation: how many photos were
+// measured from a wheel, from a person, or got a model estimate. A method
+// this gateway does not know counts as an estimate.
 type Real struct {
 	Photos    int    `json:"photos"`
 	Geometry  int    `json:"wheel_geometry"`
+	Person    int    `json:"person_reference"`
 	Estimates int    `json:"model_estimate"`
 	Date      string `json:"date"`
 	Source    string `json:"source"`
 }
+
+// Measured is the number of photos measured against a wheel or a person.
+func (r Real) Measured() int { return r.Geometry + r.Person }
 
 // Trace is a recorded agent run.
 type Trace struct {
@@ -158,10 +167,12 @@ func Extract(root string) (Facts, error) {
 	}
 	for _, r := range realResult.FindAllStringSubmatch(rb, -1) {
 		f.Real.Photos++
-		switch r[1] {
-		case "wheel_geometry":
+		switch upstream.NormalizeMethod(r[1]) {
+		case upstream.MethodWheelGeometry:
 			f.Real.Geometry++
-		case "model_estimate":
+		case upstream.MethodPersonReference:
+			f.Real.Person++
+		case upstream.MethodModelEstimate:
 			f.Real.Estimates++
 		}
 	}
@@ -174,19 +185,22 @@ func Extract(root string) (Facts, error) {
 	f.Real.Source = "eval/RESULTS_REAL.md"
 
 	f.Trace, err = extractTrace(root)
-	f.Trace.Date = f.Real.Date
 	return f, err
 }
+
+// TracePath is the recorded run, relative to the repository root.
+const TracePath = "gateway/internal/facts/testdata/x2.json"
 
 // traceSteps picks a short, representative excerpt of the recorded run:
 // the scene reading, the water mask and its refinement and acceptance, a
 // wheel being refined and given up, and the final estimate.
 func extractTrace(root string) (Trace, error) {
-	raw, err := os.ReadFile(filepath.Join(root, "eval", "out", "x2.json"))
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(TracePath)))
 	if err != nil {
 		return Trace{}, err
 	}
 	var rec struct {
+		RecordedOn string               `json:"recorded_on"`
 		AgentTrace []upstream.AgentStep `json:"agent_trace"`
 	}
 	if err := json.Unmarshal(raw, &rec); err != nil {
@@ -195,8 +209,9 @@ func extractTrace(root string) (Trace, error) {
 	t := Trace{
 		Photo:  "India - Chennai - Monsoon - 02",
 		Credit: "McKay Savage, CC BY 2.0, via Wikimedia Commons",
+		Date:   rec.RecordedOn,
 		Total:  len(rec.AgentTrace),
-		Source: "eval/out/x2.json",
+		Source: TracePath,
 	}
 	pick := func(match func(upstream.AgentStep) bool) {
 		for _, s := range rec.AgentTrace {
@@ -221,7 +236,6 @@ func extractTrace(root string) (Trace, error) {
 	if len(t.Steps) < 3 {
 		return t, errors.New("x2.json: too few steps for an excerpt")
 	}
-	// The run date is recorded in RESULTS_REAL.md, next to the photos.
 	return t, nil
 }
 

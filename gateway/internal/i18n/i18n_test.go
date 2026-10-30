@@ -118,7 +118,7 @@ func TestEveryUsedKeyExists(t *testing.T) {
 		"js.real_photo", "js.real_video", "js.real_voice",
 		"rule.confidence_floor", "rule.photo_freshness", "rule.source", "rule.neighbour_agreement", "rule.rainfall_plausibility",
 		"outcome.pass", "outcome.lower", "outcome.reject", "outcome.skip",
-		"step.scene", "step.segment", "step.verify", "step.confirm", "step.refine", "step.giveup", "step.geometry", "step.estimate",
+		"step.scene", "step.segment", "step.verify", "step.confirm", "step.refine", "step.giveup", "step.geometry", "step.estimate", "step.budget",
 		"vehicle.pedestrian", "vehicle.two_wheeler", "vehicle.auto", "vehicle.car", "vehicle.bus",
 		"timing.scene", "timing.masks", "timing.geometry",
 		"title.home", "title.map", "title.report", "title.route", "title.about",
