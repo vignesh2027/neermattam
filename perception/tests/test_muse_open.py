@@ -137,6 +137,31 @@ def test_parse_scene_tolerates_bad_fields() -> None:
     assert ref.point == (500, 400)  # box centre when the point is missing
     assert r.quality.score == 0.5
     assert r.overall_depth_cm is None
+    assert r.faces == ()
+
+
+def test_parse_scene_people_and_faces() -> None:
+    data = {
+        "water_visible": True,
+        "water": {"point": [500, 900]},
+        "references": [
+            {
+                "kind": "person",
+                "box": [100, 200, 200, 800],
+                "point": [150, 500],
+                "head_top": [150, 205],
+                "posture": "Wading",
+                "adult": False,
+                "landmark": "mid_thigh",
+            }
+        ],
+        "faces": [[130, 200, 170, 260], "junk", [5, 5, 5, 5], {"box": [300, 200, 340, 260]}],
+    }
+    r = parse_open_scene(data, 1000, 500)
+    p = r.references[0]
+    assert p.head_top == (150, 102) and p.posture == "wading" and p.adult is False
+    assert p.landmark == "mid_thigh"
+    assert r.faces == ((130, 100, 171, 131), (300, 100, 341, 131))
 
 
 # --------------------------------------------------------------------------- repair and retries

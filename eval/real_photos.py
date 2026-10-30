@@ -144,6 +144,10 @@ def process_memory() -> dict[str, float]:
     return {"peak_rss_mb": round(peak / 1e6 if sys.platform == "darwin" else peak / 1e3, 1)}
 
 
+def is_person(step: dict[str, Any]) -> bool:
+    return str(step["target"]).startswith("person")
+
+
 def photo_stats(body: dict[str, Any], wall_s: float) -> dict[str, Any]:
     """Counts from one response: wheels checked and accepted, depths measured, calls."""
     trace = body.get("agent_trace", [])
@@ -156,7 +160,9 @@ def photo_stats(body: dict[str, Any], wall_s: float) -> dict[str, Any]:
     # A confirm can overrule a quick accept.
     overruled = {t["target"] for t in trace if t["step"] == "confirm" and t["decision"] != "accept"}
     accepted -= overruled
-    depths = [t for t in trace if t["step"] == "geometry" and t["decision"] == "candidate"]
+    geo = [t for t in trace if t["step"] == "geometry"]
+    depths = [t for t in geo if t["decision"] == "candidate" and not is_person(t)]
+    people = [t for t in geo if is_person(t)]
     checks = [t for t in trace if t["step"] in ("verify", "confirm")]
     return {
         "wheels_checked": len(wheels),
@@ -164,6 +170,9 @@ def photo_stats(body: dict[str, Any], wall_s: float) -> dict[str, Any]:
         "wheel_depths": len(depths),
         "geometry_outputs": [t["output"] for t in depths],
         "verifier_calls": len(checks),
+        "persons_seen": len(people),
+        "person_depths": sum(1 for t in people if t["decision"] == "candidate"),
+        "person_outputs": [f"{t['target']}: {t['output']}" for t in people],
         "method": body.get("method"),
         "depth_cm": body.get("depth_cm"),
         "depth_sigma_cm": body.get("depth_sigma_cm"),
@@ -232,7 +241,8 @@ async def run(args: argparse.Namespace) -> int:
             f"{m['id']}: method={body['method']} depth={body['depth_cm']} "
             f"sigma={body['depth_sigma_cm']} wall={wall:.1f}s cost={body['cost_usd']} "
             f"wheels {stats[m['id']]['wheels_accepted']}/{stats[m['id']]['wheels_checked']} "
-            f"depths {stats[m['id']]['wheel_depths']}\n"
+            f"depths {stats[m['id']]['wheel_depths']} "
+            f"persons {stats[m['id']]['person_depths']}/{stats[m['id']]['persons_seen']}\n"
         )
     summary = {
         "sam": sam.mask_model_name,

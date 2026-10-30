@@ -217,6 +217,10 @@ Return one JSON object, nothing else:
       "rim_point": [..] for a wheel, a point on the metal rim or hub, else null,
       "tyre_points": for a wheel, 3 or 4 points on the black tyre rubber above the water, spread around the visible arc (for example left, top and right), else [],
       "exclude_points": for a wheel, 1 to 3 points just next to the tyre that are not tyre: the hub, the exhaust, the mudguard, a wall or another vehicle touching it, else [],
+      "head_top": for a person, the top of the head (hair, not a hat or anything carried), else null,
+      "posture": for a person, "standing", "walking", "bending", "sitting", "swimming" or "carrying_on_head", else null,
+      "adult": for a person, true if an adult, false if a child,
+      "landmark": for a person, the body part at the waterline: "ankle", "shin", "knee", "mid_thigh", "hip", "waist", "chest", "shoulder" or "neck", else null,
       "waterline": [[x, y], [x, y]] where the water surface meets the object's left and right edges, or [] if unsure,
       "visible_fraction": share of the object's full height that is above water, 0 to 1,
       "vehicle": exact model if the bodywork shows it, one of {", ".join(sorted(vehicles()))}, else "unknown",
@@ -230,6 +234,7 @@ Return one JSON object, nothing else:
       "vehicle": exact model if the bodywork shows it, one of {", ".join(sorted(vehicles()))}, else "unknown",
       "wheels_visible": true if part of any wheel's tyre shows above the water}},
   "overall": {{"depth_cm": water depth on the street where most of it is visible, "low_cm": .., "high_cm": .., "reason": one short sentence}},
+  "faces": boxes [..] around every human head or face visible anywhere in the photo (anyone, in the water or not, however small), [] if none,
   "floating_debris": a short noun phrase for things floating on the water, or "",
   "image_quality": {{"score": 0 to 1, "blurred": bool, "too_dark": bool, "issues": [short phrases]}}
 }}
@@ -410,6 +415,14 @@ def parse_open_scene(data: dict[str, Any], width: int, height: int) -> SceneRead
                     for p in (grid_point(q) for q in (r.get("tyre_points") or [])[:4])
                     if p is not None
                 ),
+                head_top=(
+                    to_px(ht, width, height)
+                    if (ht := grid_point(r.get("head_top"))) is not None
+                    else None
+                ),
+                posture=str(r.get("posture")).strip().lower() if r.get("posture") else None,
+                adult=bool(r.get("adult", True)),
+                landmark=str(r.get("landmark")).strip().lower() if r.get("landmark") else None,
                 exclude_points=tuple(
                     to_px(p, width, height)
                     for p in (grid_point(q) for q in (r.get("exclude_points") or [])[:3])
@@ -458,6 +471,14 @@ def parse_open_scene(data: dict[str, Any], width: int, height: int) -> SceneRead
                 wheels_visible=bool(v.get("wheels_visible", True)),
             )
         )
+    faces: list[tuple[int, int, int, int]] = []
+    raw_faces = data.get("faces")
+    for fb in raw_faces if isinstance(raw_faces, list) else []:
+        if isinstance(fb, dict) and "box" in fb:  # the model sometimes wraps each box
+            fb = fb["box"]
+        g = grid_box(fb)
+        if g is not None and len(faces) < 32:
+            faces.append(box_to_px(g, width, height))
     return SceneReading(
         water_visible=bool(data.get("water_visible", False)),
         water_points=tuple(water_points[:3]),
@@ -476,6 +497,7 @@ def parse_open_scene(data: dict[str, Any], width: int, height: int) -> SceneRead
         overall_high_cm=_num(overall.get("high_cm")),
         overall_reason=str(overall.get("reason") or "").strip()[:200] or None,
         vehicles=tuple(found_vehicles),
+        faces=tuple(faces),
     )
 
 

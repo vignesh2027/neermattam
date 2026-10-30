@@ -88,7 +88,7 @@ def test_no_reference(easy_case) -> None:  # type: ignore[no-untyped-def]
     p, scene, _ = make_pipeline(easy_case)
     scene.reading = replace(scene.reading, references=())
     r = run(p, image=case_image(easy_case))
-    assert not r.usable and "no wheel found to measure against" in r.reasons
+    assert not r.usable and "no wheel or person found to measure against" in r.reasons
 
 
 def test_kerb_hint_is_declined_honestly(easy_case) -> None:  # type: ignore[no-untyped-def]

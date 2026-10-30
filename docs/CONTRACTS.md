@@ -19,7 +19,7 @@ Response 200:
   "reasons": ["standing water visible", "two-wheeler wheel found"],
   "depth_cm": 23.4,
   "depth_sigma_cm": 3.1,
-  "reference": {"kind": "two_wheeler_wheel", "diameter_cm": 43.4, "diameter_sigma_cm": 2.0, "source": "catalogue:90/100-10"},
+  "reference": {"kind": "two_wheeler_wheel", "diameter_cm": 43.4, "diameter_sigma_cm": 2.0, "source": "catalogue:90/100-10", "height_cm": null, "height_sigma_cm": null},
   "waterline": {"method": "sam_mask_intersection", "y_px": 812.5, "agreement_cm": 1.2},
   "velocity_mps": null,
   "velocity_sigma_mps": null,
@@ -39,7 +39,15 @@ Response 200:
 ```
 When `usable` is false, `depth_cm` is null and `reasons` explains why (no water, no reference object, blurred, ambiguous waterline).
 
-- `method`: how `depth_cm` was obtained. `wheel_geometry` is a measurement from a wheel of known size (docs/GEOMETRY.md). `model_estimate` means no wheel could be measured and `depth_cm` is the scene model's own visual estimate, with `depth_sigma_cm` at least 20 cm or 30 percent of the estimate, whichever is larger; the UI must label it as an estimate. Null when `usable` is false.
+- `method`: how `depth_cm` was obtained, in order of preference:
+  - `wheel_geometry`: a measurement from a wheel of known size (docs/GEOMETRY.md).
+  - `person_reference`: a measurement from an adult standing in the water, scaled by an adult stature prior (docs/GEOMETRY.md, section 9). Its sigma is typically 10 to 15 cm; the UI must say it is measured against a person.
+  - `model_estimate`: neither could be measured and `depth_cm` is the scene model's own visual estimate, with `depth_sigma_cm` at least 20 cm or 30 percent of the estimate, whichever is larger; the UI must label it as an estimate.
+
+  Null when `usable` is false. When a wheel and a person are both measured, the wheel is used; if they differ by more than twice their combined sigma, `confidence` is lowered and `reasons` says so.
+- `reference`: for `wheel_geometry`, the wheel (`diameter_cm`, `diameter_sigma_cm`). For `person_reference`, `kind` is `person`, `diameter_cm` and `diameter_sigma_cm` are null, and `height_cm` and `height_sigma_cm` give the stature prior used. Null for `model_estimate`.
+- `waterline.method`: `sam_mask_intersection` for a wheel; `person_mask_bottom` for a person (where the person's mask meets the water). `agreement_cm` compares it with the scene model's own waterline; for a person, with the depth at the body landmark (knee, waist, chest and so on) the scene model named at the waterline.
+- Faces: every image the service returns (`overlay_png_b64`) or stores has the head of every person it found blurred (people the scene model or SAM found; a face neither finds is not covered, see docs/GEOMETRY.md section 9.6). The photo itself is still sent to the scene model and to SAM, which run inside the service.
 - `model_estimate`: the scene model's own estimate whenever it gave one (null otherwise), reported alongside a geometry measurement too. When both exist the map uses the geometry; if they differ by more than twice their combined sigma, `confidence` is lowered and `reasons` says so.
 - `waterline.agreement_cm`: when the scene model's waterline and the mask waterline disagree, the difference is added in quadrature to `depth_sigma_cm`, so disagreement widens the uncertainty as well as lowering `confidence`.
 - `agent_trace`: every model step that led to the answer, in the order the steps happened (checks of different objects run in parallel and interleave): the scene reading, each mask proposal (`segment`), each check of a mask by the scene model (`verify`, with decision `accept`, `refine with box ...` or `give up`), each geometry attempt and the estimate. `latency_ms` is the wall time of that step. On the single-request hosted path there is one `segment` step for all objects and no `verify` steps.

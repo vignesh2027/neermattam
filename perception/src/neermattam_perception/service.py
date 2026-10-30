@@ -43,11 +43,13 @@ from .media import (
     ImageInput,
     MediaRejected,
     VideoInput,
+    image_from_rgb,
     load_image,
     load_video,
 )
 from .models import MeasureResponse, TranscribeResponse
 from .muse_open import MODEL_LABEL, MuseSparkOpenAdapter
+from .person import blur_heads
 from .pipeline import Pipeline
 from .references import RefKind
 from .sam_local import mask_model_from_config
@@ -90,7 +92,9 @@ async def _read_limited(upload: UploadFile, limit: int, what: str) -> bytes:
 
 def _store(store: Path, resp: MeasureResponse, image: ImageInput) -> None:
     store.mkdir(parents=True, exist_ok=True)
-    (store / f"{resp.measurement_id}.jpg").write_bytes(image.jpeg)  # metadata-free copy
+    # Metadata-free copy, with the head of every person found blurred: no face is stored.
+    jpeg = image_from_rgb(blur_heads(image.rgb, resp._faces)).jpeg if resp._faces else image.jpeg
+    (store / f"{resp.measurement_id}.jpg").write_bytes(jpeg)
     body = resp.model_dump(exclude={"overlay_png_b64"})
     (store / f"{resp.measurement_id}.json").write_text(json.dumps(body), encoding="utf-8")
 

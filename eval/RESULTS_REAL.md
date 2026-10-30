@@ -14,6 +14,48 @@ Rerun from `perception/` with `uv run --extra local python ../eval/real_photos.p
 * Muse Spark Open runs the scene read at reasoning effort `low` (Baseten's lowest for this model; the default is `xhigh`), images go compressed (1024 px at JPEG quality 75; check crops at 512 px), and scene readings are cached by photo, prompt and settings.
 * `POST /v1/measure/stream` sends each step as server-sent events, then the result.
 
+## People as the reference (30 October)
+
+The service now also measures against an adult standing in the water (`method: person_reference`, `perception/src/neermattam_perception/person.py`, method and sources in `docs/GEOMETRY.md` section 9). SAM outlines the person from the scene model's box, body point and head top; the depth is `H (1 - 0.182 L / s)`, with `L` the visible length, `s` the head-to-shoulder length, and `H` the NCD-RisC adult stature prior for India (158.75 cm, sigma 9.0 cm, sex unknown). The scene model's body landmark at the waterline (knee, waist and so on) is a cross-check. A wheel is preferred when both are measured. Every head the scene model or SAM finds is blurred before an image leaves the service.
+
+Run on all eleven photos with SAM 2.1 hiera-small locally and fresh scene readings (the scene prompt changed: it now asks for posture, head top, landmark and every face), from `perception/`:
+
+    uv run --extra local python ../eval/real_photos.py --sets close commons --sam-size small \
+        --scene-cache ../eval/out/scene-cache --out ../eval/out/person --no-write-results
+
+c1 and the Creta were run a second time with `--only` after one last change to the order of the decline checks; their rows are from that run. Overlays and response JSON are in `eval/out/person/`.
+
+| Photo | People the scene model boxed | Person measurements | Final answer | Scene model's own estimate | Landmark cross-check |
+|---|---|---|---|---|---|
+| Creta, Kolkata (u_aby-GGLtD-A) | 1 | 0 of 1: no shoulder line (he leans over the car he is pushing; the scene model called him standing) | model_estimate 60 cm, sigma 20 | 60 cm | mid-thigh |
+| utility truck (u_0WlJgFHTHE8) | 0 | none | model_estimate 40 cm, sigma 20 | 40 cm | |
+| pickup in a bow wave (u_5T7dG1MRA3U) | 0 (driver inside) | none | model_estimate 35 cm, sigma 20 | 35 cm | |
+| car under water (u_ple6thPMX3c) | 0 | none | model_estimate 75 cm, sigma 22.5 | 75 cm | |
+| no wheels (u_Zo6hsIyy75o) | 0 | none | model_estimate 90 cm, sigma 27 | 90 cm | |
+| c1 | 3 | 2 of 3: 49.0 cm (sigma 12.7) and 32.2 cm (sigma 15.2); the third is riding a scooter (posture sitting), declined | **person_reference 49.0 cm, sigma 12.7**, confidence 0.23 | 38 cm | knee, 45 cm (4 cm from the measurement) |
+| c2 | 0 | none | model_estimate 28 cm, sigma 20 | 28 cm | |
+| c3 | 4 (3 measured at most) | 1 of 3: 72.4 cm (sigma 14.2); one outline was a fragment between two men (box check), one had no shoulder line | **person_reference 72.4 cm, sigma 14.2**, confidence 0.16 | 110 cm | waist, 95 cm (23 cm apart) |
+| c4 | 0 (people on a distant rooftop) | none | model_estimate 180 cm, sigma 54 | 180 cm | |
+| x1 | 0 | none | wheel_geometry 0.7 cm, sigma 2.5 (see below: wrong) | 20 cm | |
+| x2 | 0 | none | model_estimate 22 cm, sigma 20 | 22 cm | |
+
+What I saw in the overlays:
+
+* **c1, left man (49 cm).** The outline follows him from head to where his legs enter the water; the shoulder band sits at his shoulders. His legs show to about the knee, and the scene model independently says knee (45 cm). This is the most believable person measurement in the set. The man in the blue shirt gave 32 cm in this run; in the run before, his outline was declined because it stopped short of his box (the verified water mask differs from run to run). By eye the water is between his shin and knee, so 32 cm, sigma 15, is plausible.
+* **c3, man in the black jacket (72 cm).** His outline ends where his jacket meets the water, and the shoulder band is on his shoulders. The scene model says waist (95 cm) and its own street estimate is 110 cm. The difference to the landmark is under two sigma, so the sigma was not widened, but the confidence is low (0.16). By eye the water is at his hips; 72 cm is low if he is of average height. I would read this as "about hip deep" and not trust the centimetres.
+* **A wrong person measurement was caught and blocked.** In the run before the box check, c3 gave 101.8 cm from an outline that was only a fragment between two men (a head-sized blob), with "water" segmented below it that was really a striped shirt. The outline now has to span at least 60 percent of the scene model's box and end near its bottom, and it was declined in the final run. In a debug run on c3, another outline joined two neighbours' heads into one; two heads above the shoulders are now declined as well.
+* **The Creta.** The man pushing the car is the obvious reference, but he leans forward over the bonnet, his outline includes his reflection, and there is no clear shoulder line; he is declined, which is right. The scene model called his posture "standing", so the posture flag alone would not have stopped him.
+* **Faces.** In every overlay I looked at (all eleven), the heads of the people in the water, the Creta's driver behind the windscreen, the pickup's driver, the people on c2's pavement and the crowd on c4's rooftop are pixelated. Very small, distant figures that the scene model did not box (a few pixels tall, behind the utility truck and far down c2's street) are not blurred. The service never stores or returns an unblurred overlay; the photo itself still goes to Muse Spark Open and SAM.
+
+Caveats:
+
+* There is no ground truth. Nothing here says the person method is accurate on real photos; it says it produces plausible numbers on two of eleven photos and declines the rest for stated reasons.
+* The synthetic check (`docs/GEOMETRY.md` section 9.7: 400 figures, mean absolute error 6.5 cm, 4.4 cm low on average) uses the proportions the method assumes; real bodies, clothes, posture and camera angle add error that only field photos with measured depths can show. Expect plus or minus 10 to 15 cm.
+* Where the shoulder is taken is the largest single assumption. Loose clothes, raised arms and hair move it, and the band between the first wide row and full shoulder width is carried in the sigma rather than resolved.
+* Results move between runs, mostly because the verified water mask changes (it decides whether a person's legs reach water and how the outline is trimmed): the c1 blue-shirt man was measured in one run and declined in the next.
+* **x1 regressed on the wheel path.** The accepted outline of the rear wheel of the moped follows the spoked rim inside the tyre (`eval/out/person/x1_agent/two_wheeler_2_wheel_try0.jpg`, panel A), the brightness check passed it (ratio 0.85, the threshold is 0.8), and the geometry returned 0.7 cm, sigma 2.5, which is wrong (the scene model says 20 cm). This is the same failure as the 0.6 cm in an earlier run; the brightness check does not stop it reliably. It is unrelated to the person work and is not fixed here. x2 changed from a wheel measurement to the estimate in this run because its accepted outline did not meet the water.
+* c1 took 462 s in the full run and 41 s in the rerun; the Creta 75 s and 107 s; the submerged car 262 s. The slow ones were waiting on Baseten during the verification calls.
+
 ## Close-up photos and the vehicle-box wheel search (29 October)
 
 The scene model now boxes each vehicle, and its wheels are searched for inside the lower part of the box without relying on the scene model's points: SAM is prompted from a 6 by 4 grid of points and from boxes around dark, roughly elliptical blobs (OpenCV threshold and ellipse fit), every proposal is ranked by wheel shape times tyre darkness times a size plausible for the vehicle (`wheel_finder.py`), and the best two go to the verifier with the same three-way accept rule. A fourth check was added after the x1 result below: an outline that is darker just outside than just inside (the brightness ratio below 0.8) follows the rim, inside the dark tyre, and is not measured.

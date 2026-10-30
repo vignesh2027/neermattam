@@ -317,7 +317,7 @@ def test_rejected_wheels_fall_back_to_the_model_estimate(easy_case) -> None:  # 
     assert r.overlay_png_b64
 
 
-def test_people_only_returns_a_labelled_estimate(easy_case) -> None:  # type: ignore[no-untyped-def]
+def test_people_only_falls_back_to_a_labelled_estimate(easy_case) -> None:  # type: ignore[no-untyped-def]
     base = open_reading(easy_case)
     person = SceneObject(
         RefKind.PERSON, (50, 50), (40, 20, 80, 120), depth_cm=100.0, depth_reason="chest deep"
@@ -329,12 +329,15 @@ def test_people_only_returns_a_labelled_estimate(easy_case) -> None:  # type: ig
         overall_low_cm=None,
         overall_high_cm=None,
     )
-    p, sam, ver = agent_pipeline(easy_case, reading)
+    p, sam, _ = agent_pipeline(easy_case, reading)
     r = run(p, image=case_image(easy_case))
     assert r.usable and r.method == "model_estimate"
     assert r.depth_cm == 100.0 and r.depth_sigma_cm == 30.0  # 30 percent beats 20 cm here
-    assert not sam.prompts and not ver.calls  # nothing to segment
-    assert r.agent_trace[0].decision == "no wheel: report own estimate"
+    # The person is segmented (the fake SAM gives a box, which has no shoulders),
+    # the measurement declines, and the scene model's estimate is reported.
+    assert any(o.object_id == 30 for o in sam.prompts)
+    assert any("person 1" in x for x in r.reasons)
+    assert r.agent_trace[0].decision.startswith("no wheel: measure 1 person")
 
 
 def test_no_estimate_and_no_wheel_is_unusable(easy_case) -> None:  # type: ignore[no-untyped-def]

@@ -61,6 +61,12 @@ class SceneObject:
     waterline_points: tuple[tuple[int, int], ...] = ()  # where water meets this object
     tyre_points: tuple[tuple[int, int], ...] = ()  # points on a wheel's rubber, around its arc
     exclude_points: tuple[tuple[int, int], ...] = ()  # hub, exhaust, mudguard, wall next to it
+    # People only: the top of the head, how they stand, and the body landmark at
+    # the waterline (person.LANDMARK_SHARE keys).
+    head_top: tuple[int, int] | None = None
+    posture: str | None = None
+    adult: bool = True
+    landmark: str | None = None
     visible_fraction: float | None = None  # share of the object's height above water
     depth_cm: float | None = None  # the scene model's own depth estimate at this object
     depth_reason: str | None = None
@@ -102,6 +108,9 @@ class SceneReading:
     overall_reason: str | None = None
     cached: bool = False  # answered from the scene cache (no model call, no cost)
     vehicles: tuple[VehicleObject, ...] = ()
+    # Every human head or face the scene model saw (open-weights path), blurred
+    # in any image that leaves the service.
+    faces: tuple[tuple[int, int, int, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

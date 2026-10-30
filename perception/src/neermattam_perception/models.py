@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
@@ -30,9 +30,11 @@ class _Strict(BaseModel):
 
 class ReferenceOut(_Strict):
     kind: str
-    diameter_cm: float
-    diameter_sigma_cm: float
+    diameter_cm: float | None = None
+    diameter_sigma_cm: float | None = None
     source: str
+    height_cm: float | None = None  # a person's stature prior (person_reference)
+    height_sigma_cm: float | None = None
 
 
 class WaterlineOut(_Strict):
@@ -101,3 +103,6 @@ class MeasureResponse(_Strict):
     model_estimate: ModelEstimateOut | None = None
     agent_trace: list[AgentStepOut] = Field(default_factory=list)
     captured_at: str | None = None
+    # Head regions of the people found, in image pixels: the service blurs them in
+    # any image it stores. Not part of the response body.
+    _faces: list[tuple[int, int, int, int]] = PrivateAttr(default_factory=list)

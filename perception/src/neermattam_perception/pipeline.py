@@ -26,9 +26,11 @@ import math
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
+from typing import cast
 
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 
 from .adapters import (
     MaskModel,
@@ -48,7 +50,7 @@ from .geometry import (
     depth_from_line,
     measure_wheel_depth,
 )
-from .media import ImageInput, VideoInput
+from .media import ImageInput, VideoInput, image_from_rgb
 from .models import (
     AgentStepOut,
     MeasureResponse,
@@ -58,6 +60,19 @@ from .models import (
     WaterlineOut,
 )
 from .overlay import png_b64, render_overlay
+from .person import (
+    PersonDecline,
+    PersonFailure,
+    PersonMeasurement,
+    below_band,
+    blur_heads,
+    box_head_region,
+    face_box_region,
+    fits_box,
+    head_region,
+    measure_person_depth,
+    water_below,
+)
 from .references import WHEEL_KINDS, ReferenceChoice, RefKind, resolve_reference
 from .sam import MAX_PROMPTED_OBJECTS, ObjectMask, ObjectPrompt, PointPrompt
 from .velocity import VelocityEstimate, surface_velocity
@@ -91,6 +106,7 @@ class PipelineConfig:
     perspective: str = "off"
     max_wheels: int = 4
     max_vehicles: int = 2
+    max_persons: int = 3
     min_quality: float = 0.25
 
 
@@ -187,7 +203,66 @@ def _scene_decision(reading: SceneReading, has_estimate: bool) -> str:
         )
     if n:
         return f"segment and verify {n} wheel{'s' if n > 1 else ''} and the water"
+    npers = sum(1 for r in reading.references if r.kind == RefKind.PERSON)
+    if npers:
+        return (
+            f"no wheel: measure {npers} person{'s' if npers > 1 else ''} against the stature "
+            "prior and segment the water"
+        )
     return "no wheel: report own estimate" if has_estimate else "stop: no wheel"
+
+
+# Mask ids of the people (the wheels use 1 to 2*n, the water bands 40 and up).
+PERSON_ID_BASE = 30
+WATER_BELOW_ID_BASE = 50
+PERSON_SOURCE = "prior:adult stature, NCD-RisC 2016 India (sex unknown mixture)"
+
+
+def _clean_person_mask(
+    mask: NDArray[np.bool_],
+    water: NDArray[np.bool_],
+    box: tuple[int, int, int, int] | None,
+) -> NDArray[np.bool_] | None:
+    """The visible person: cut to the box (wider by 10%, higher by 15% for hair),
+    water removed, the largest connected piece kept."""
+    m = mask & ~water
+    if box is not None:
+        h, w = m.shape
+        x0, y0, x1, y1 = box
+        bw, bh = x1 - x0, y1 - y0
+        keep = np.zeros_like(m)
+        keep[
+            max(0, round(y0 - 0.15 * bh)) : min(h, round(y1 + 0.05 * bh)),
+            max(0, round(x0 - 0.1 * bw)) : min(w, round(x1 + 0.1 * bw)),
+        ] = True
+        m &= keep
+    if not m.any():
+        return None
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), connectivity=8)
+    if n <= 1:
+        return None
+    big = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    return np.asarray(labels == big)
+
+
+def draw_person_axis(rgb: NDArray[np.uint8], pm: PersonMeasurement) -> NDArray[np.uint8]:
+    """The body axis from head top to the waterline, with the shoulder row marked."""
+    out = rgb.copy()
+    t = max(2, out.shape[1] // 400)
+    x = round(pm.x_centre)
+    half = max(8, round(0.6 * (pm.shoulder_y - pm.top_y)))
+    cv2.line(out, (x, round(pm.top_y)), (x, round(pm.waterline_y)), (255, 210, 0), t)
+    cv2.line(
+        out, (x - half, round(pm.shoulder_y)), (x + half, round(pm.shoulder_y)), (255, 210, 0), t
+    )
+    cv2.line(
+        out,
+        (x - 2 * half, round(pm.waterline_y)),
+        (x + 2 * half, round(pm.waterline_y)),
+        (0, 220, 255),
+        t,
+    )
+    return out
 
 
 class LiveTrace(list[TraceStep]):
@@ -257,6 +332,19 @@ class Pipeline:
         cost: float,
         **kw: object,
     ) -> MeasureResponse:
+        faces = cast(Sequence[tuple[int, int, int, int]], kw.pop("faces", ()))
+        resp = self._build(key, trace, timings, cost, **kw)
+        resp._faces = [(int(a), int(b), int(c), int(d)) for a, b, c, d in faces]
+        return resp
+
+    def _build(
+        self,
+        key: ImageInput,
+        trace: list[TraceStep],
+        timings: dict[str, int],
+        cost: float,
+        **kw: object,
+    ) -> MeasureResponse:
         return MeasureResponse(
             models=self.model_names,
             timings_ms=timings,
@@ -296,6 +384,7 @@ class Pipeline:
         quality: float,
         water: ObjectMask | None = None,
         wheels: Sequence[ObjectMask] = (),
+        faces: Sequence[tuple[int, int, int, int]] = (),
     ) -> MeasureResponse:
         """No wheel could be measured: the scene model's estimate, clearly labelled."""
         reasons = [
@@ -318,7 +407,7 @@ class Pipeline:
         label = f"estimate {est.depth_cm:.0f} cm, sigma {est.sigma_cm:.0f} cm (not measured)"
         overlay = png_b64(
             render_overlay(
-                key.rgb,
+                blur_heads(key.rgb, faces),
                 None,
                 label=label,
                 water_mask=None if water is None else water.mask,
@@ -330,6 +419,7 @@ class Pipeline:
             trace,
             timings,
             cost,
+            faces=faces,
             usable=True,
             reasons=list(dict.fromkeys(reasons)),
             depth_cm=round(est.depth_cm, 1),
@@ -397,9 +487,20 @@ class Pipeline:
         if not reading.water_visible:
             return self._unusable(key, ["no standing water visible"], trace, timings, cost)
         reasons.append("standing water visible")
-        if hint_kind in (RefKind.KERB, RefKind.PERSON):
+        persons = [r for r in reading.references if r.kind == RefKind.PERSON][: cfg.max_persons]
+        # Faces of everyone the scene model boxed, blurred in every image that
+        # leaves the service; refined to the head of each person's mask later.
+        faces: list[tuple[int, int, int, int]] = [face_box_region(b) for b in reading.faces]
+        faces += [
+            box_head_region(r.box)
+            for r in reading.references
+            if r.kind == RefKind.PERSON and r.box is not None  # all, not only those measured
+        ]
+        if hint_kind == RefKind.KERB or (hint_kind == RefKind.PERSON and not persons):
             if est is not None:
-                return self._estimate_only(key, reasons, trace, timings, cost, est, q.score)
+                return self._estimate_only(
+                    key, reasons, trace, timings, cost, est, q.score, faces=faces
+                )
             return self._unusable(
                 key,
                 [
@@ -441,19 +542,26 @@ class Pipeline:
             boxes = [v.box for v, _ in vehicle_jobs]
             wheels = [w for w in wheels if not any(_inside(w.point, b) for b in boxes)]
         wheels = wheels[: max(0, cfg.max_wheels - len(vehicle_jobs))]
-        if not wheels and not vehicle_jobs:
+        if hint_kind == RefKind.PERSON:
+            wheels, vehicle_jobs = [], []
+        if not wheels and not vehicle_jobs and not persons:
             if est is not None:
                 return self._estimate_only(
                     key,
-                    [*reasons, "no wheel found to measure against"],
+                    [*reasons, "no wheel or person found to measure against"],
                     trace,
                     timings,
                     cost,
                     est,
                     q.score,
+                    faces=faces,
                 )
             return self._unusable(
-                key, [*reasons, "no wheel found to measure against"], trace, timings, cost
+                key,
+                [*reasons, "no wheel or person found to measure against"],
+                trace,
+                timings,
+                cost,
             )
         if not reading.water_points and reading.water_box is None:
             return self._unusable(
@@ -476,8 +584,10 @@ class Pipeline:
 
         t0 = time.perf_counter()
         if self.agent is not None:
+            # The verifier is shown crops of this photo: faces blurred first.
+            agent_key = image_from_rgb(blur_heads(key.rgb, faces)) if faces else key
             water, failures, extra_cost = await self._agent_masks(
-                key, reading, cands, water_id, trace
+                agent_key, reading, cands, water_id, trace
             )
             timings["agent"] = _ms(t0)
         else:
@@ -486,6 +596,27 @@ class Pipeline:
             )
             timings["masks"] = _ms(t0)
         cost += extra_cost
+        if (water is None or water.area == 0) and persons:
+            # No verified water: people can still be measured against water
+            # segmented just below them.
+            empty = ObjectMask(
+                "water", 0, np.zeros((key.height, key.width), bool), (0, 0, 0, 0), None
+            )
+            found = await self._measure_persons(key, persons, empty, trace, failures, faces)
+            if found is not None:
+                return self._person_result(
+                    key,
+                    [*reasons, "the water surface as a whole could not be verified"],
+                    failures,
+                    trace,
+                    timings,
+                    cost,
+                    est,
+                    q.score,
+                    found,
+                    None,
+                    faces,
+                )
         if water is None or water.area == 0:
             if est is not None:
                 return self._estimate_only(
@@ -496,10 +627,15 @@ class Pipeline:
                     cost,
                     est,
                     q.score,
+                    faces=faces,
                 )
             return self._unusable(
                 key, [*reasons, *failures, "water could not be segmented"], trace, timings, cost
             )
+
+        person_best: tuple[PersonMeasurement, SceneObject, NDArray[np.bool_]] | None = None
+        if persons:
+            person_best = await self._measure_persons(key, persons, water, trace, failures, faces)
 
         camera = None
         if cfg.perspective == "exif" and key.focal_35mm:
@@ -577,6 +713,20 @@ class Pipeline:
             if best is None or res.depth_sigma_cm < best[0].depth_sigma_cm:
                 best = (res, cand, ref)
         timings["geometry"] = _ms(t0)
+        if best is None and person_best is not None:
+            return self._person_result(
+                key,
+                reasons,
+                failures,
+                trace,
+                timings,
+                cost,
+                est,
+                q.score,
+                person_best,
+                water,
+                faces,
+            )
         if best is None:
             if est is not None:
                 return self._estimate_only(
@@ -589,6 +739,7 @@ class Pipeline:
                     q.score,
                     water,
                     [c.wheel for c in cands if c.wheel is not None],
+                    faces=faces,
                 )
             return self._unusable(key, [*reasons, *failures], trace, timings, cost)
 
@@ -643,6 +794,35 @@ class Pipeline:
                 )
             )
 
+        if person_best is not None:
+            pm = person_best[0]
+            combined = math.hypot(sigma, pm.depth_sigma_cm)
+            differ = abs(depth_cm - pm.depth_cm) > 2.0 * combined
+            if differ:
+                confidence = round(confidence * 0.5, 2)
+                reasons.append(
+                    f"a person in the water gives {pm.depth_cm:.0f} cm (sigma "
+                    f"{pm.depth_sigma_cm:.0f} cm), more than two sigma from the wheel; "
+                    "confidence lowered"
+                )
+            else:
+                reasons.append(
+                    f"a person in the water gives {pm.depth_cm:.0f} cm (sigma "
+                    f"{pm.depth_sigma_cm:.0f} cm), consistent with the wheel"
+                )
+            trace.append(
+                TraceStep(
+                    "estimate",
+                    "photo",
+                    "geometry",
+                    f"wheel {depth_cm:.1f} cm and person {pm.depth_cm:.1f} cm",
+                    f"difference {abs(depth_cm - pm.depth_cm):.0f} cm, two combined sigma "
+                    f"{2.0 * combined:.0f} cm",
+                    "use the wheel",
+                    0,
+                )
+            )
+
         velocity: VelocityEstimate | None = None
         if video is not None:
             t0 = time.perf_counter()
@@ -656,7 +836,7 @@ class Pipeline:
         overlay = png_b64(
             await asyncio.to_thread(
                 render_overlay,
-                key.rgb,
+                blur_heads(key.rgb, faces),
                 m,
                 label=label,
                 second_line=line2,
@@ -690,6 +870,7 @@ class Pipeline:
             overlay_png_b64=overlay,
             method="wheel_geometry",
             model_estimate=self._estimate_out(est),
+            faces=faces,
         )
 
     async def _single_request(
@@ -858,6 +1039,296 @@ class Pipeline:
             )
         )
         return ObjectMask(water.object_id, 0, out, water.box, water.confidence)
+
+    # ------------------------------------------------------------------ people
+
+    async def _measure_persons(
+        self,
+        key: ImageInput,
+        persons: Sequence[SceneObject],
+        water: ObjectMask,
+        trace: list[TraceStep],
+        failures: list[str],
+        faces: list[tuple[int, int, int, int]],
+    ) -> tuple[PersonMeasurement, SceneObject, NDArray[np.bool_]] | None:
+        """Segment every person the scene model boxed and measure the depth at each.
+
+        SAM is prompted with the person's box, a point on the body and the head
+        top, with the water points outside the box as negatives. The mask is cut
+        to the box (a little wider, and higher for the hair), water pixels are
+        removed and the largest piece kept. Each person's head region from the
+        mask joins ``faces`` so that it is blurred in every returned image. The
+        measurement with the smallest sigma wins.
+        """
+        prompts: list[tuple[SceneObject, ObjectPrompt]] = []
+        for i, p in enumerate(persons):
+            pts = [PointPrompt(*p.point)]
+            if p.head_top is not None:
+                pts.append(PointPrompt(*p.head_top))
+            if p.box is not None:
+                for wx, wy in self._water_points_outside(p.box, water.mask)[:2]:
+                    pts.append(PointPrompt(wx, wy, positive=False))
+            prompts.append((p, ObjectPrompt(PERSON_ID_BASE + i, tuple(pts), p.box)))
+        t0 = time.perf_counter()
+        seg = await self.masks.segment(key, [op for _, op in prompts])
+        trace.append(
+            TraceStep(
+                "segment",
+                "people",
+                self.model_names.masks,
+                f"{len(prompts)} person box{'es' if len(prompts) > 1 else ''} with head and body "
+                "points",
+                f"{sum(1 for _, op in prompts if op.object_id in seg.masks)} masks",
+                "measure each against the stature prior",
+                _ms(t0),
+            )
+        )
+        masks: list[NDArray[np.bool_] | None] = []
+        for p, op in prompts:
+            om = seg.masks.get(op.object_id)
+            mask = None if om is None else _clean_person_mask(om.mask, water.mask, p.box)
+            if mask is not None:
+                faces.append(head_region(mask, None))
+            masks.append(mask)
+        local_water = await self._water_below_people(key, water.mask, masks, trace)
+        best: tuple[PersonMeasurement, SceneObject, NDArray[np.bool_]] | None = None
+        for i, (p, _op) in enumerate(prompts):
+            target = f"person {i + 1}"
+            mask = masks[i]
+            lw = local_water[i]
+            here = water.mask if lw is None else lw
+            tg = time.perf_counter()
+            if mask is None:
+                res: PersonMeasurement | PersonDecline = PersonDecline(PersonFailure.MASK_EMPTY)
+            else:
+                res = await asyncio.to_thread(
+                    measure_person_depth,
+                    mask,
+                    here,
+                    posture=p.posture or "standing",
+                    adult=p.adult,
+                    landmark=p.landmark,
+                )
+            # The box check comes after posture and the rest: those reasons are clearer.
+            if (
+                isinstance(res, PersonMeasurement)
+                and p.box is not None
+                and mask is not None
+                and not fits_box(mask, p.box)
+            ):
+                res = PersonDecline(PersonFailure.BOX_MISMATCH)
+            ms = _ms(tg)
+            if isinstance(res, PersonDecline):
+                failures.append(f"{target}: {res.text}")
+                trace.append(
+                    TraceStep(
+                        "geometry", target, "geometry", "person mask", res.text, "declined", ms
+                    )
+                )
+                continue
+            assert mask is not None
+            if lw is not None:
+                failures.append(
+                    f"{target}: the water just below was segmented locally, not checked by "
+                    "the scene model"
+                )
+            # The head region from the measured shoulders is tighter and sure.
+            faces.append(head_region(mask, res.shoulder_y))
+            lm = (
+                f"; scene model says the water is at the {res.landmark.replace('_', ' ')} "
+                f"({res.landmark_depth_cm:.0f} cm)"
+                if res.landmark is not None and res.landmark_depth_cm is not None
+                else ""
+            )
+            trace.append(
+                TraceStep(
+                    "geometry",
+                    target,
+                    "geometry",
+                    "person and water masks",
+                    f"depth {res.depth_cm:.1f} cm, sigma {res.depth_sigma_cm:.1f} cm, "
+                    f"{100 * res.visible_share:.0f}% of stature above water{lm}",
+                    "candidate",
+                    ms,
+                )
+            )
+            if best is None or res.depth_sigma_cm < best[0].depth_sigma_cm:
+                best = (res, p, mask)
+        return best
+
+    async def _water_below_people(
+        self,
+        key: ImageInput,
+        water: NDArray[np.bool_],
+        masks: Sequence[NDArray[np.bool_] | None],
+        trace: list[TraceStep],
+    ) -> list[NDArray[np.bool_] | None]:
+        """Water segmented just below each person whose outline does not end on the
+        verified water (SAM leaves out churned water at legs, and the verified mask
+        may be missing altogether). Like the water at wheels: a band below the
+        person, positive points in it, a negative point on the legs, the result
+        kept inside the band. Returns, per person, the verified water joined with
+        that band, or None when the verified water already reaches them."""
+        h, w = water.shape
+        jobs: list[tuple[int, tuple[int, int, int, int], ObjectPrompt]] = []
+        for i, mask in enumerate(masks):
+            if mask is None or water_below(mask, water) >= 0.5:
+                continue
+            band = below_band(mask)
+            if band is None:
+                continue
+            x0, y0, x1, _ = band
+            bw = x1 - x0
+            ys = np.nonzero(mask.any(axis=1))[0]
+            tall = int(ys.max() - ys.min() + 1)
+            box = (
+                max(0, x0 - bw // 2),
+                max(0, y0 - 2),
+                min(w, x1 + bw // 2),
+                min(h, y0 + max(8, tall // 6)),
+            )
+            ym = min(h - 1, (box[1] + box[3]) // 2)
+            legs = np.nonzero(mask[max(0, y0 - 6) : y0])
+            pts = [PointPrompt(max(0, box[0] + 2), ym), PointPrompt(min(w - 1, box[2] - 3), ym)]
+            pts.append(PointPrompt((x0 + x1) // 2, min(h - 1, box[3] - 2)))
+            if legs[0].size:
+                pts.append(PointPrompt(int(np.median(legs[1])), max(0, y0 - 4), positive=False))
+            jobs.append((i, box, ObjectPrompt(WATER_BELOW_ID_BASE + i, tuple(pts), box)))
+        out: list[NDArray[np.bool_] | None] = [None] * len(masks)
+        if not jobs:
+            return out
+        t0 = time.perf_counter()
+        seg = await self.masks.segment(key, [p for _, _, p in jobs])
+        found = 0
+        for i, box, p in jobs:
+            m = seg.masks.get(p.object_id)
+            if m is None:
+                continue
+            inside = np.zeros_like(water)
+            inside[box[1] : box[3], box[0] : box[2]] = True
+            pm = masks[i]
+            assert pm is not None
+            out[i] = water | (m.mask & inside & ~pm)
+            found += 1
+        trace.append(
+            TraceStep(
+                "segment",
+                "water below people",
+                self.model_names.masks,
+                f"{len(jobs)} band{'s' if len(jobs) > 1 else ''} just below people the "
+                "verified water does not reach",
+                f"{found} water mask{'s' if found != 1 else ''}",
+                "check that each outline ends at water",
+                _ms(t0),
+            )
+        )
+        return out
+
+    @staticmethod
+    def _water_points_outside(
+        box: tuple[int, int, int, int], water: NDArray[np.bool_]
+    ) -> list[tuple[int, int]]:
+        """Water pixels just left and right of a person box, as negative prompts."""
+        h, w = water.shape
+        x0, y0, x1, y1 = box
+        y = min(h - 1, max(0, y1 - max(2, (y1 - y0) // 20)))
+        gap = max(4, (x1 - x0) // 4)
+        out = []
+        for x in (x0 - gap, x1 + gap):
+            if 0 <= x < w and water[y, x]:
+                out.append((int(x), int(y)))
+        return out
+
+    def _person_result(
+        self,
+        key: ImageInput,
+        reasons: list[str],
+        failures: list[str],
+        trace: list[TraceStep],
+        timings: dict[str, int],
+        cost: float,
+        est: ModelEstimate | None,
+        quality: float,
+        person: tuple[PersonMeasurement, SceneObject, NDArray[np.bool_]],
+        water: ObjectMask | None,
+        faces: Sequence[tuple[int, int, int, int]],
+    ) -> MeasureResponse:
+        """No wheel measured, a person was: depth against the adult stature prior."""
+        pm, _p, mask = person
+        depth_cm, sigma = pm.depth_cm, pm.depth_sigma_cm
+        reasons = [
+            *reasons,
+            *failures,
+            "a person standing in the water was measured against the adult stature prior "
+            f"({pm.height_cm:.0f} cm, sigma {pm.height_sigma_cm:.0f} cm)",
+            "a person reference is coarse: expect about 10 to 15 cm of error",
+        ]
+        agreement = None
+        if pm.landmark_depth_cm is not None and pm.landmark is not None:
+            agreement = abs(pm.landmark_depth_cm - depth_cm)
+            reasons.append(
+                f"the scene model puts the water at the {pm.landmark.replace('_', ' ')}, "
+                f"about {pm.landmark_depth_cm:.0f} cm ({agreement:.0f} cm apart)"
+            )
+            if agreement > 2.0 * sigma:
+                sigma = math.hypot(sigma, agreement)
+        confidence = _confidence(quality, sigma, pm.height_cm, agreement)
+        if est is not None:
+            combined = math.hypot(sigma, est.sigma_cm)
+            if abs(depth_cm - est.depth_cm) > 2.0 * combined:
+                confidence = round(confidence * 0.5, 2)
+                reasons.append(
+                    f"the scene model's own estimate ({est.depth_cm:.0f} cm) disagrees with the "
+                    "measurement by more than two sigma; confidence lowered"
+                )
+        trace.append(
+            TraceStep(
+                "estimate",
+                "photo",
+                "geometry",
+                "no measurable wheel; a measured person",
+                f"depth {depth_cm:.1f} cm, sigma {sigma:.1f} cm",
+                "use the person",
+                0,
+            )
+        )
+        label = f"depth {depth_cm:.0f} cm, sigma {sigma:.0f} cm (person)"
+        shown = draw_person_axis(blur_heads(key.rgb, faces), pm)
+        overlay = png_b64(
+            render_overlay(
+                shown,
+                None,
+                label=label,
+                water_mask=None if water is None else water.mask,
+                object_masks=[mask],
+            )
+        )
+        return self._response(
+            key,
+            trace,
+            timings,
+            cost,
+            faces=faces,
+            usable=True,
+            reasons=list(dict.fromkeys(reasons)),
+            depth_cm=round(depth_cm, 1),
+            depth_sigma_cm=round(sigma, 1),
+            reference=ReferenceOut(
+                kind="person",
+                source=PERSON_SOURCE,
+                height_cm=round(pm.height_cm, 1),
+                height_sigma_cm=round(pm.height_sigma_cm, 1),
+            ),
+            waterline=WaterlineOut(
+                method="person_mask_bottom",
+                y_px=round(pm.waterline_y, 1),
+                agreement_cm=None if agreement is None else round(agreement, 1),
+            ),
+            confidence=confidence,
+            overlay_png_b64=overlay,
+            method="person_reference",
+            model_estimate=self._estimate_out(est),
+        )
 
     async def _velocity(
         self, video: VideoInput, reading: SceneReading, m: DepthMeasurement, ref: ReferenceChoice
