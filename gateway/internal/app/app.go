@@ -50,6 +50,8 @@ type App struct {
 	// Certs keeps each report's certificate.
 	CertKeys *certs.KeySet
 	Certs    *certs.Store
+	// Sites is the Critical sites watcher (sites.go).
+	Sites sitesState
 
 	reportLimit *ratelimit.Limiter
 	apiLimit    *ratelimit.Limiter
@@ -158,6 +160,7 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 	if err := a.setupAlerts(); err != nil {
 		return nil, err
 	}
+	a.setupSites() // Critical sites (sites.go)
 	if cfg.WhatsApp.Enabled() {
 		limits := map[string]int64{"image": cfg.MaxImageBytes, "video": cfg.MaxVideoBytes, "audio": cfg.MaxAudioBytes}
 		a.WhatsApp = whatsapp.New(base, cfg.WhatsApp, cfg.PublicURL, limits, a.Pipeline, log, m)
@@ -224,6 +227,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/route", a.devRoute)
 	mux.HandleFunc("GET /api/v1/cells", a.devCells)
 	mux.HandleFunc("GET /api/v1/usage", a.devUsage)
+
+	a.registerSites(mux) // Critical sites (sites.go)
 
 	mux.HandleFunc("POST /api/report", a.apiReport)
 	mux.HandleFunc("GET /api/cells", a.apiCells)
@@ -307,6 +312,7 @@ func (a *App) Run(ctx context.Context) {
 	if a.Alerts != nil {
 		go a.Alerts.Run(ctx)
 	}
+	a.runSites(ctx) // Critical sites (sites.go)
 	a.bg.Add(1)
 	go func() {
 		defer a.bg.Done()
@@ -320,6 +326,7 @@ func (a *App) Run(ctx context.Context) {
 			case <-t.C:
 				a.SaveProvenance()
 				a.saveAlerts()
+				a.saveSiteAlerts()
 				if n++; n%10 == 0 {
 					a.saveKeyUsage()
 				}
@@ -350,6 +357,7 @@ func (a *App) Shutdown() {
 	}
 	a.SaveProvenance()
 	a.saveAlerts()
+	a.saveSiteAlerts()
 	a.saveKeyUsage()
 }
 

@@ -1,0 +1,187 @@
+{{define "content"}}
+<link rel="stylesheet" href="{{asset "sites.css"}}">
+<div class="page sites-page">
+  <header class="page-head">
+    <p class="eyebrow">{{t "sites.eyebrow"}}</p>
+    <div class="title-row"><h1>{{t "sites.title" (t (printf "city.%s" .City.ID))}}</h1>{{template "city_switcher" .}}</div>
+    <p class="sites-lead">{{t "sites.lead"}}</p>
+    <ul class="sites-qs" role="list">
+      <li><b>{{t "sites.q1"}}</b><span>{{t "sites.q1_p"}}</span></li>
+      <li><b>{{t "sites.q2"}}</b><span>{{t "sites.q2_p"}}</span></li>
+      <li><b>{{t "sites.q3"}}</b><span>{{t "sites.q3_p"}}</span></li>
+    </ul>
+  </header>
+
+  {{if .City.Simulated}}<div class="sim-banner" role="note">{{template "icon-flask"}}<span><strong>{{t "sites.sim_title"}}</strong> {{t "sites.sim_body"}}</span></div>{{end}}
+  {{with .Sites}}
+  {{if .Error}}<p class="note-warn" role="alert">{{template "icon-alert"}}<span>{{t .Error}}</span></p>{{end}}
+
+  <nav class="sites-tabs" aria-label="{{t "sites.kinds_aria"}}">
+    {{range .Tabs}}<a href="{{.Href}}" {{if .Current}}aria-current="page"{{end}}>{{t (printf "sites.kind.%s" .Kind)}} <b class="num">{{.N}}</b></a>{{end}}
+  </nav>
+  <p class="small muted sites-source">{{t "sites.source" .OSMCount (t (printf "sites.kind.%s" .Kind)) .DataUntil}} {{t "sites.source_add"}}</p>
+
+  <div class="sites-grid">
+    <section class="sites-list" aria-label="{{t "sites.list_aria"}}">
+      {{if not .Cards}}<div class="card panel"><p>{{t "sites.none" (t (printf "sites.kind.%s" .Kind))}}</p><p class="small muted">{{t "sites.none_p"}}</p></div>{{end}}
+      {{range .Cards}}
+      <article class="card site-card{{if .Selected}} is-selected{{end}} st-{{.Status}}">
+        <div class="site-head">
+          <div>
+            <h2><a href="{{.Href}}">{{.Name}}</a></h2>
+            {{if .Operator}}<p class="small muted">{{.Operator}}</p>{{end}}
+          </div>
+          <span class="chip {{.Chip}}">{{.Label}}</span>
+        </div>
+        <ul class="zone-lines" role="list">
+          {{range .Zones}}<li><span class="zone-r">{{.Radius}}</span><span class="chip {{.Chip}}">{{.Label}}</span><span class="zone-facts">{{if .Depth}}<b>{{.Depth}}</b> {{end}}<span>{{.Coverage}}</span>{{if .Fresh}} <span>{{.Fresh}}</span>{{end}}{{if .Trend}} <span>{{.Trend}}</span>{{end}}</span>{{if .OldDeep}}<span class="zone-old">{{.OldDeep}}</span>{{end}}</li>
+          {{end}}
+        </ul>
+        <p class="site-links small"><a href="{{.Href}}">{{t "sites.details"}}</a>{{if .OSMHref}} <a href="{{.OSMHref}}" rel="noopener" target="_blank">{{t "sites.osm_link"}}</a>{{end}}</p>
+      </article>
+      {{end}}
+      {{if gt .Total .Shown}}<p class="small muted">{{t "sites.more" .Shown .Total}}</p>{{end}}
+    </section>
+
+    <div class="sites-side">
+      <div class="card sites-map-card">
+        <div id="sites-map" class="sites-map" role="region" aria-label="{{t "sites.map_aria"}}"></div>
+        <p class="sites-legend small"><span><i class="lg lg-over"></i>{{t "sites.legend_over"}}</span><span><i class="lg lg-nearby"></i>{{t "sites.legend_nearby"}}</span><span><i class="lg lg-under"></i>{{t "sites.legend_under"}}</span><span><i class="lg lg-unknown"></i>{{t "sites.legend_unknown"}}</span></p>
+      </div>
+
+      {{with .Selected}}
+      <section class="card panel site-detail" id="site" aria-labelledby="site-h">
+        <p class="eyebrow">{{t (printf "sites.kind_one.%s" .Card.Kind)}}</p>
+        <h2 id="site-h">{{.Card.Name}}</h2>
+        <p class="small muted">{{if .Card.Operator}}{{.Card.Operator}} · {{end}}<span class="mono">{{.Coords}}</span>{{if .Card.OSMHref}} · <a href="{{.Card.OSMHref}}" rel="noopener" target="_blank">{{t "sites.osm_link"}}</a>{{end}}</p>
+
+        <h3>{{t "sites.h_zone"}}</h3>
+        <p class="chip {{.Card.Chip}} site-status">{{.Card.Label}}</p>
+        <table class="zone-table">
+          <thead><tr><th scope="col">{{t "sites.col_ring"}}</th><th scope="col">{{t "sites.col_water"}}</th><th scope="col">{{t "sites.col_evidence"}}</th></tr></thead>
+          <tbody>
+          {{range .Card.Zones}}<tr><th scope="row">{{.Radius}}</th><td><span class="chip {{.Chip}}">{{.Label}}</span>{{if .Depth}}<br><b>{{.Depth}}</b>{{end}}{{if .Trend}}<br><span class="small">{{.Trend}}</span>{{end}}</td><td class="small">{{.Coverage}}{{if .Fresh}}<br>{{.Fresh}}{{end}}{{if .OldDeep}}<br><span class="zone-old">{{.OldDeep}}</span>{{end}}</td></tr>
+          {{end}}
+          </tbody>
+        </table>
+
+        <h3>{{t "sites.h_access"}}</h3>
+        {{if .Routes}}
+        <div class="route-grid" role="table" aria-label="{{t "sites.h_access"}}">
+          <div class="rg-row rg-head" role="row"><span role="columnheader"></span>{{range (index .Routes 0).Cells}}<span role="columnheader">{{t (printf "sites.vehicle.%s" .Vehicle)}}</span>{{end}}</div>
+          {{range .Routes}}
+          <div class="rg-row" role="row">
+            <span class="rg-target" role="rowheader"><b>{{.Label}}</b>{{if .Dest}}<small>{{.Dest}}</small>{{end}}</span>
+            {{range .Cells}}<span class="rg-cell" role="cell"><span class="rg-veh">{{t (printf "sites.vehicle.%s" .Vehicle)}}</span><span class="chip {{.Chip}}">{{.Label}}</span>{{if .Detail}}<small>{{.Detail}}</small>{{end}}{{if .Explain}}<details><summary>{{t "sites.why"}}</summary><p class="small">{{.Explain}}</p></details>{{end}}</span>{{end}}
+          </div>
+          {{end}}
+        </div>
+        <p class="small muted">{{.RoutesNote}} {{t "sites.truck_limit"}}</p>
+        {{else}}<p class="small muted">{{t "sites.routes_none"}}</p>{{end}}
+
+        {{if $.Sites.Push}}
+        <div class="site-watch">
+          <button class="btn btn-primary" type="button" id="site-watch">{{template "icon-bell"}}{{t "sites.watch"}}</button>
+          <p class="small muted">{{t "sites.watch_p"}}</p>
+          <p class="form-error" id="site-watch-error" role="alert"></p>
+          <p class="watch-ok" id="site-watch-ok" role="status" hidden></p>
+        </div>
+        {{end}}
+
+        <h3>{{t "sites.h_record"}}</h3>
+        {{if .Risk}}{{template "area_table" .Risk}}{{else}}<p class="small">{{t "sites.record_none"}}</p>{{end}}
+        <p class="small muted">{{.RiskNote}}</p>
+      </section>
+      {{end}}
+
+      <section class="card panel sites-siting" aria-labelledby="siting-h">
+        <h2 id="siting-h">{{t "sites.h_siting"}}</h2>
+        <p class="small">{{t "sites.siting_p"}}</p>
+        {{with .Siting}}
+          {{if .Areas}}{{template "area_table" .Areas}}{{else}}<p class="small"><b>{{t "sites.siting_empty"}}</b></p>{{end}}
+          <p class="small muted">{{.Note}} {{t "sites.siting_days" .Days}}</p>
+        {{end}}
+        {{with .SimSiting}}
+          <div class="sim-banner sites-sim" role="note">{{template "icon-flask"}}<span><strong>{{t "sites.sim_record_title"}}</strong> {{t "sites.sim_record_body"}}</span></div>
+          {{template "area_table" .Areas}}
+        {{end}}
+        <p class="small muted">{{t "sites.history_2015"}}</p>
+      </section>
+    </div>
+  </div>
+  <p class="advisory-pill" role="note">{{template "icon-alert"}}{{t "sites.advisory"}}</p>
+  <script type="application/json" id="sites-data">{{.MapJSON}}</script>
+  <script type="application/json" id="sites-cfg">{{.ConfigJSON}}</script>
+  {{end}}
+</div>
+{{end}}
+
+{{define "area_table"}}<table class="area-table">
+  <thead><tr><th scope="col">{{t "sites.col_days"}}</th><th scope="col">{{t "sites.col_peak"}}</th><th scope="col">{{t "sites.col_recession"}}</th><th scope="col">{{t "sites.col_reports"}}</th></tr></thead>
+  <tbody>
+  {{range .}}<tr><td><b class="num">{{.Days}}</b><span class="days-bar" aria-hidden="true"><i style="width:{{.Bar}}"></i></span></td><td>{{.Peak}}</td><td>{{.Recession}}{{if .Open}}<br><small>{{t "sites.open_now" .Open}}</small>{{end}}{{if .Unresolved}}<br><small>{{t "sites.unresolved" .Unresolved}}</small>{{end}}</td><td><a href="{{.MapHref}}">{{t "sites.readings" .Readings .Wet}}</a></td></tr>
+  {{end}}
+  </tbody>
+</table>{{end}}
+
+{{define "scripts"}}<script nonce="{{.Nonce}}">
+document.addEventListener("DOMContentLoaded", function () {
+  "use strict";
+  var data = { sites: { type: "FeatureCollection", features: [] } }, cfg = {};
+  try { data = JSON.parse(document.getElementById("sites-data").textContent); } catch (e) {}
+  try { cfg = JSON.parse(document.getElementById("sites-cfg").textContent); } catch (e) {}
+  var COLOR = ["match", ["get", "status"], "over", "#9F1239", "nearby", "#4C1D95", "under", "#2563EB", "#8A99B2"];
+  var opts = data.focus ? { center: data.focus, zoom: 14 } : NM.cityView();
+  var map = NM.create("sites-map", opts);
+  map.once("style.load", function () {
+    NM.addCells(map, { showReal: NM.city.simulated, opacity: 0.65 });
+    NM.live(map, {});
+    NM.popups(map);
+    map.addSource("rings", { type: "geojson", data: data.rings });
+    map.addLayer({ id: "rings-line", type: "line", source: "rings", paint: { "line-color": COLOR, "line-width": 2, "line-dasharray": [2, 2] } });
+    map.addSource("routes", { type: "geojson", data: data.routes });
+    map.addLayer({ id: "routes-line", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": ["match", ["get", "status"], "open", "#2563EB", "#9F1239"], "line-width": 4, "line-opacity": 0.85 } });
+    map.addSource("sites", { type: "geojson", data: data.sites });
+    map.addLayer({ id: "sites-dot", type: "circle", source: "sites",
+      paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 5, 15, 9], "circle-color": COLOR, "circle-stroke-color": "#FFFFFF", "circle-stroke-width": 2 } });
+    map.on("click", "sites-dot", function (e) {
+      var f = e.features && e.features[0];
+      if (!f) return;
+      var u = new URL(location.href);
+      u.searchParams.set("site", f.properties.id);
+      u.hash = "site";
+      location.href = u.toString();
+    });
+    map.on("mouseenter", "sites-dot", function () { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", "sites-dot", function () { map.getCanvas().style.cursor = ""; });
+  });
+
+  var btn = document.getElementById("site-watch");
+  if (!btn) return;
+  var err = document.getElementById("site-watch-error"), ok = document.getElementById("site-watch-ok");
+  function key(b64) {
+    var pad = "=".repeat((4 - b64.length % 4) % 4), raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, function (c) { return c.charCodeAt(0); });
+  }
+  btn.addEventListener("click", function () {
+    err.textContent = ""; ok.hidden = true;
+    if (!("serviceWorker" in navigator) || !window.PushManager) { err.textContent = NM.tr("js.watch_unsupported"); return; }
+    btn.disabled = true;
+    navigator.serviceWorker.register("/sw.js", { scope: "/" })
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function (reg) { return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(cfg.key) }); })
+      .then(function (sub) {
+        return fetch("/api/sites/alerts", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subscription: sub.toJSON(), site: cfg.site, city: cfg.city, lang: cfg.lang, threshold_cm: 15 }) });
+      })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return j; }); })
+      .then(function (j) {
+        try { var w = JSON.parse(localStorage.getItem("nm_site_watches") || "[]"); w.push({ id: j.id, token: j.token, site: cfg.site }); localStorage.setItem("nm_site_watches", JSON.stringify(w)); } catch (e) {}
+        ok.hidden = false; ok.textContent = j.message;
+      })
+      .catch(function (e) { err.textContent = e && e.name === "NotAllowedError" ? NM.tr("js.watch_denied") : (e && e.message) || NM.tr("js.upload_failed"); })
+      .then(function () { btn.disabled = false; });
+  });
+});
+</script>{{end}}

@@ -65,6 +65,7 @@ type keysFile struct {
 type Counts struct {
 	Routes int64 `json:"routes"`
 	Cells  int64 `json:"cells"`
+	Sites  int64 `json:"sites"` // critical-site and siting reads
 }
 
 // Usage is one key's record.
@@ -291,7 +292,7 @@ func (s *Store) Allow(k Key) (ok bool, remaining int, retry time.Duration) {
 	return true, int(b.tokens), 0
 }
 
-// Record counts one request of a kind ("routes" or "cells").
+// Record counts one request of a kind ("routes", "cells" or "sites").
 func (s *Store) Record(id, kind string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -310,6 +311,9 @@ func (s *Store) Record(id, kind string) {
 	case "cells":
 		u.Total.Cells++
 		d.Cells++
+	case "sites":
+		u.Total.Sites++
+		d.Sites++
 	}
 	u.Days[day] = d
 	u.LastUsed = now

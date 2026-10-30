@@ -156,7 +156,7 @@ At least one of `bbox` and `city`; with both, a cell must be in both. `bbox` sel
 - `hazard_rating`, `hazard_class` (`low`, `danger_some`, `danger_most`, `danger_all`, `unknown`)
 - `n_readings`, `updated_at`
 
-### GET /v1/route?from=lat,lon&to=lat,lon&vehicle=pedestrian|two_wheeler|auto|car|bus
+### GET /v1/route?from=lat,lon&to=lat,lon&vehicle=pedestrian|two_wheeler|auto|car|bus|truck
 Planned on the graph of a city whose box holds both ends. A request with an end outside every city, or with ends in two different cities, is a 400 saying so. Returns a GeoJSON LineString Feature with these properties:
 - `city`, `distance_m`, `eta_min`
 - `max_depth_cm_on_route`, `cells_avoided`, `unknown_cells_crossed`
@@ -182,6 +182,46 @@ A cell's depth history: `history` (its latest direct readings, oldest first, eac
 ### GET /v1/export?city=<id>&format=geojson|csv
 `city` required, `format` default `geojson`. GeoJSON is the `/v1/cells` collection for the city; CSV has one row per cell with the columns `cell,city,lat,lon,depth_cm,depth_sigma_cm,depth_upper_cm,depth_sigma_meas_cm,conflict_high_mean_cm,velocity_mps,velocity_sigma_mps,velocity_assumed,hazard_rating,hazard_class,hazard_class_upper,debris_factor,unknown,expired,n_readings,n_neighbour,conflicts,updated_at,last_depth_cm,last_reading_age_h` (empty for null). Sent as an attachment; the `X-Neermattam-Truncated` header says whether the cell cap cut it short and `X-Neermattam-Total-Cells` gives the city's cell count. When the cap applies, the cells kept are the highest by hotspot score, in that order. The GeoJSON also carries top-level `truncated` and `total_cells`.
 
+### Critical sites (docs/SITES.md)
+
+A critical site is a place whose people and supplies must keep moving in a flood. `kind` is one of `data_centre`, `hospital`, `telephone_exchange`, `substation` or `cable_landing_station`. Sites come from two places and never from typing:
+
+- OpenStreetMap, extracted by `scripts/extract_sites.py` into `engine/assets/sites-osm.json` (embedded in the binary): `source` is `osm`, the id is `osm:<node|way|relation>:<osm id>` and `osm` is the OSM object (`way/1536001837`).
+- An operator, through the gateway's developer API: `source` is `operator`, the id is `op_` plus 16 hex characters, and `owner` is the API key id that added it. The engine only ever shows an operator site to its owner.
+
+Fuel stations (`amenity=fuel`, from the same extract) are supply points for access routes, not sites. The `truck` vehicle (a diesel tanker or heavy goods vehicle) exists for access routes and is accepted by `/v1/route` too; its limit is in docs/ENGINE.md.
+
+A site's **watch zone** is the set of map cells whose centre lies within `radius_m` of the site. Each zone has:
+- `radius_m`, `cells` (cells in the zone), `cells_reported` (with evidence in force), `cells_known` (not unknown), `coverage` (`cells_known / cells`, 0 to 1);
+- `status`: `over` when any cell with evidence in force has a blocking depth (the depth routing judges a cell at, docs/ENGINE.md rule 2) over `threshold_cm`; else `under` when `coverage` is at least `min_coverage`; else `unknown`. `under` is never called safe: it means the cells with recent reports are below the threshold;
+- `deepest`: the cell with the deepest blocking depth among cells with evidence in force (`cell`, `depth_block_cm`, `depth_cm`, `depth_sigma_cm`, `unknown`, `age_h`), or null;
+- `old_deep_cells`, `old_deep_max_cm`, `old_deep_age_h`: cells whose evidence has expired but whose last level was over the threshold (treat as flooded until someone reports);
+- `newest_evidence_age_h` (null when no cell has evidence in force);
+- `trend`: `rising` when any zone cell's drain fit (as `/v1/recession`) is rising, else `falling` when at least one is falling and none is steady, else `steady`, or null when no cell has enough readings; `trend_cells` counts `rising`, `falling` and `steady`.
+
+A site's `status` combines its zones (smallest first): `over` when the smallest zone is over; `nearby` when only a larger zone is over; `under` when the smallest zone is under and no zone is over; else `unknown`.
+
+Query parameters shared by the site endpoints: `rings` (radii in metres, comma-separated, 1 to 3 values from 100 to 3000, default `300,1000`), `threshold_cm` (1 to 200, default 15, the lowest vehicle limit) and `min_coverage` (0 to 1, default 0.5).
+
+#### GET /v1/sites?city=<id>&kind=&owner=&limit=&offset=
+`city` required. Lists OpenStreetMap sites in the city and, with `owner`, that owner's sites too, each with `zones` and `status`. Order: `over`, `nearby`, `under`, `unknown`, then deepest first, then name. `limit` 1 to 500 (default 100). Returns `{"city", "kind", "threshold_cm", "rings_m", "min_coverage", "total", "count", "offset", "counts": {"<kind>": {"osm", "operator"}}, "osm": {"attribution", "data_until"}, "advisory": true, "sites": [...]}`. Each site has `id`, `kind`, `name`, `operator`, `lat`, `lon`, `city`, `cell`, `source`, `osm` (OSM sites), `owner` and `added_at` (operator sites), `status` and `zones`.
+
+#### GET /v1/sites/{id}?owner=&access=true|false
+One site, as in the list, plus:
+- `access` (unless `access=false`): `{"advisory": true, "computed_at", "routes": [...]}` with one route per pair of target (`main_road`, then `fuel`) and vehicle (`truck`, `two_wheeler`, `car`). Each route has `target`, `vehicle`, `status` (`open`: a water-aware route exists; `no_safe_route`: every route crosses water too deep for the vehicle, the least-bad one is given; `unavailable`, with `reason`: `routing_loading`, `routing_failed`, `no_road_near_site`, `no_target_in_range` or `no_path`), `destination` (`name`, `lat`, `lon`, and `id` for a fuel station), `distance_m`, `baseline_distance_m`, `detour_m` (route minus the shortest route to the same destination, ignoring water), `eta_min`, `cells_on_route`, `unknown_cells_crossed`, `impassable_cells_crossed`, `max_known_depth_cm`, `explanation` (the engine's route text) and `coordinates` (`[lon, lat]` pairs). A main road is a node on a `motorway`, `trunk`, `primary` or `secondary` way (or their links) that the vehicle may use; a fuel station with `fuel:diesel=no` is skipped. Up to three of the nearest destinations (main road within 3 km, fuel within 8 km, at least 300 m apart) are tried and the best open route is kept.
+- `risk`: the risk ledger (below) for the H3 area holding the site and the six around it: `{"area_resolution", "since", "wet_threshold_cm", "note", "areas": [...]}`.
+
+404 for an unknown id, or an operator site asked for without its `owner`.
+
+#### POST /v1/sites
+`{"owner": "<api key id>", "kind", "name", "lat", "lon", "operator": null}`. `owner` is 1 to 64 characters of `A-Z a-z 0-9 _ -`; `name` 1 to 120 printable characters; the point must be inside a covered city. At most 100 sites per owner (`ENGINE_SITES_PER_OWNER`) and 10,000 in all. Returns 201 with the site. Operator sites are kept beside the cell snapshot, in `<snapshot>.sites.json` (`cells.sites.json` by default).
+
+#### DELETE /v1/sites/{id}?owner=
+204. 404 when the id is unknown or not the owner's; 400 for an OpenStreetMap site.
+
+#### GET /v1/siting?city=<id>&bucket=reported|unattributed&limit=
+The risk ledger for siting: per H3 area (resolution 8 by default, about 0.7 square kilometres), what direct readings have shown since the ledger began. Each area has `area`, `lat`, `lon`, `boundary` (`[lon, lat]` ring), `readings`, `wet_readings` (fused level at or over `wet_threshold_cm`, 15), `days_with_water` (distinct India Standard Time dates with a wet reading), `peak_cm`, `peak_sigma_cm`, `peak_at`, `episodes` (wet spells seen to end: the first wet reading to the first reading below the threshold in the same cell), `median_recession_h`, `max_recession_h`, `open_episodes` (wet now), `unresolved_episodes` (reports stopped while still wet, so the end was never seen), `first_at` and `last_at`. Areas are ordered by `days_with_water`, then `peak_cm`, then `wet_readings`; `limit` 1 to 500 (default 100). Top level: `city`, `bucket`, `since`, `history_days`, `area_resolution`, `wet_threshold_cm`, `total`, `advisory: true` and a `note` that the ledger only holds what has been reported since `since` and that an area with no reports is unknown, not dry. `bucket=reported` (the default) counts readings that carry a `source`; `unattributed` counts readings with none (the gateway's simulated scenario and tests), which are never mixed into `reported`. The ledger is kept beside the cell snapshot in `<snapshot>.ledger.json` (`cells.ledger.json`) and is not trimmed by the 48-hour forget window.
+
 ### GET /readyz (engine)
 200 once the primary city's road graph (`ENGINE_PRIMARY_CITY`, default chennai) is loaded, with `status` `ready`, or `degraded` when another city's graph is loading or has failed (named in `reason`). 503 with a reason while the primary graph is loading or has failed. The body lists every city's graph status under `cities`.
 
@@ -199,6 +239,9 @@ Every page takes `?lang=` (one of `en`, `ta`, `hi`, `te`, `kn`, `ml`, `bn`, `mr`
 - `GET /control/demo?cell=`: the public read-only control room over the simulated Chennai scenario, labelled as such. Only with `DEMO=1`.
 - `GET /control/panel?city=&cell=` (and `/control/demo/panel?cell=`): JSON `{"html": "..."}` with the live parts of the control room re-rendered, for the page's refresh glue. Same access rules as the page.
 - `GET /control/export?city=&format=geojson|csv` (and `/control/demo/export?format=`): the engine's `/v1/export` passed through as an attachment, with `X-Neermattam-Truncated` and `X-Neermattam-Total-Cells`.
+- `GET /sites?city=&kind=&site=`: "Critical sites": OpenStreetMap data centres (and, with `kind=hospital`, hospitals) in the city, each with its watch-zone status card, on a map with the live cells; with `site=<id>`, that site's zones, access routes for a tanker, a two-wheeler and a car, and its area's flood record. Operator sites never appear here. Linked from the control room.
+- `GET /api/sites/{id}?city=`: JSON for one OpenStreetMap site (the engine's detail), rate limited like the public API.
+- `POST /api/sites/alerts`: JSON `{"subscription": <PushSubscription.toJSON()>, "site": "<id>", "city", "lang", "threshold_cm"}` (threshold 5 to 100, default 15). Watches one OpenStreetMap site: a message when its 300 m zone goes over the threshold, when water over it appears within 1 km, when an access route for the tanker, the two-wheeler or the car closes or opens again, and when it is back under. Same endpoint rules, token and errors as `/api/alerts`. `GET` and `DELETE /api/sites/alerts/{id}` with `X-Alert-Token`.
 - `GET /developers`: the developer API documentation and terms.
 - `GET /verify/{measurement_id}`: "Verify this measurement": whether the stored certificate's Ed25519 signature checks out against the published key, whether its input hash matches the file the gateway received, and the certificate in readable form. 404 when the gateway holds no certificate for that id (an older perception, an unusable voice note, or an id it never saw).
 - `GET /about`.
@@ -221,6 +264,12 @@ Every page takes `?lang=` (one of `en`, `ta`, `hi`, `te`, `kn`, `ml`, `bn`, `mr`
 `Authorization: Bearer <key>` (or `X-API-Key`). Keys are created with `go run ./cmd/neermattam-keys create`; only their SHA-256 is stored. Every answer carries `X-RateLimit-Limit` and `X-RateLimit-Remaining` (requests per minute for that key). 401 `missing_key` or `invalid_key`, 403 `key_disabled`, 429 `rate_limited`.
 - `GET /api/v1/route?from=lat,lon&to=lat,lon&vehicle=`: as `/api/route`, plus top-level `advisory: true` and `terms`. Counted as one route for billing.
 - `GET /api/v1/cells?city=<id>` (or `bbox`): as `/api/cells`, plus `advisory` and `terms`; `ETag` and 304.
+- `GET /api/v1/sites?city=<id>&kind=&rings=&threshold_cm=&min_coverage=&limit=&offset=`: the engine's `/v1/sites` with `owner` set to the key, so the answer holds the OpenStreetMap sites and this key's own sites, plus `advisory` and `terms`.
+- `GET /api/v1/sites/{id}`: one site with its watch zones, access routes and area risk (the engine's `/v1/sites/{id}` for this key).
+- `POST /api/v1/sites`: JSON `{"kind", "name", "lat", "lon", "operator"}`; adds a site owned by this key. 201 with the site; 400 `bad_site` with the engine's reason; 409 `too_many_sites`.
+- `DELETE /api/v1/sites/{id}`: removes one of this key's sites. 204; 404 `no_site`.
+- `GET /api/v1/siting?city=<id>&limit=`: the engine's `/v1/siting` (reported readings only), plus `advisory` and `terms`.
+- Site reads are counted as `sites` in usage.
 - `GET /api/v1/usage`: this key's own counts: `{"key": "<prefix>", "name", "rate_per_min", "total": {"routes", "cells"}, "days": [{"date", "routes", "cells"}]}` (last 90 UTC days).
 
 ### WhatsApp
