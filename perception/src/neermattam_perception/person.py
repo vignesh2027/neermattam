@@ -137,6 +137,60 @@ class PersonMeasurement:
     height_sigma_cm: float
     landmark: str | None = None  # the scene model's landmark at the waterline
     landmark_depth_cm: float | None = None
+    # The rows the depth comes from: the first wide row below the head and the
+    # end of the shoulder widening (``shoulder_y`` is their middle).
+    shoulder_first_y: float = 0.0
+    shoulder_full_y: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class PersonNumbers:
+    """Depth and sigma at a person, from the four rows of their outline."""
+
+    depth_cm: float
+    depth_sigma_cm: float
+    visible_share: float
+    height_cm: float
+    height_sigma_cm: float
+    shoulder_y: float
+    landmark_depth_cm: float | None
+
+
+def person_depth_from_rows(
+    top: float, first: float, full: float, bottom: float, landmark: str | None = None
+) -> PersonNumbers:
+    """The depth and its sigma from the outline's top row, the first wide row below
+    the head, the end of the shoulder widening and the bottom row (see the module
+    notes). :func:`measure_person_depth` and the certificate replay both call it.
+    """
+    # The shoulder joint lies between the first wide row and the end of the
+    # widening: take the middle, and the spread of a uniform guess between them.
+    shoulder = (first + full) / 2.0
+    sd_band = (full - first) / math.sqrt(12.0)
+    s_px = float(shoulder - top)
+    L = float(bottom - top + 1)
+    k = HEAD_TO_SHOULDER
+    vis_share = k * L / s_px
+    H, sd_H = stature_prior()
+    depth = H * (1.0 - vis_share)
+    # Propagate: stature prior, shoulder share, shoulder row (+-2 px plus 3 percent
+    # of s for a ragged mask, plus the shoulder band), waterline row (+-2 px plus
+    # 1.5 percent of L, for ripples and the soft mask edge), and posture/perspective.
+    sd_s = math.hypot(2.0 + 0.03 * s_px, sd_band)
+    sd_L = 2.0 + 0.015 * L
+    d_H = 1.0 - vis_share
+    d_k = -H * L / s_px
+    d_L = -H * k / s_px
+    d_s = H * k * L / s_px**2
+    var = (
+        (d_H * sd_H) ** 2
+        + (d_k * HEAD_TO_SHOULDER_SD) ** 2
+        + (d_L * sd_L) ** 2
+        + (d_s * sd_s) ** 2
+        + (POSTURE_REL_SD * H) ** 2
+    )
+    lm_depth = LANDMARK_SHARE[landmark] * H if landmark in LANDMARK_SHARE else None
+    return PersonNumbers(depth, math.sqrt(var), vis_share, H, sd_H, shoulder, lm_depth)
 
 
 def _row_widths(mask: NDArray[np.bool_]) -> tuple[NDArray[np.int_], int, int]:
@@ -284,11 +338,7 @@ def measure_person_depth(
         return PersonDecline(PersonFailure.NO_SHOULDERS)
     if merged_heads(mask, first):
         return PersonDecline(PersonFailure.MERGED)
-    # The shoulder joint lies between the first wide row and the end of the
-    # widening: take the middle, and the spread of a uniform guess between them.
     full = shoulder_band(mask, first)
-    shoulder = (first + full) / 2.0
-    sd_band = (full - first) / math.sqrt(12.0)
     cols = np.nonzero(mask[bottom - max(2, visible // 20) : bottom + 1].any(axis=0))[0]
     x_centre = float(cols.mean()) if cols.size else float(np.nonzero(mask.any(axis=0))[0].mean())
     if water is not None:
@@ -296,45 +346,23 @@ def measure_person_depth(
         share = water_below(mask, water)
         if share < 0.5:
             return PersonDecline(PersonFailure.NO_WATER_BELOW, f"{100 * share:.0f}% water")
-    s_px = float(shoulder - top)
-    L = float(visible)
-    k = HEAD_TO_SHOULDER
-    vis_share = k * L / s_px
-    H, sd_H = stature_prior()
-    depth = H * (1.0 - vis_share)
-    if not 0.0 <= depth <= 0.9 * H:
-        return PersonDecline(PersonFailure.IMPLAUSIBLE, f"{depth:.0f} cm")
-    # Propagate: stature prior, shoulder share, shoulder row (+-2 px plus 3 percent
-    # of s for a ragged mask, plus the shoulder band), waterline row (+-2 px plus
-    # 1.5 percent of L, for ripples and the soft mask edge), and posture/perspective.
-    sd_s = math.hypot(2.0 + 0.03 * s_px, sd_band)
-    sd_L = 2.0 + 0.015 * L
-    d_H = 1.0 - vis_share
-    d_k = -H * L / s_px
-    d_L = -H * k / s_px
-    d_s = H * k * L / s_px**2
-    var = (
-        (d_H * sd_H) ** 2
-        + (d_k * HEAD_TO_SHOULDER_SD) ** 2
-        + (d_L * sd_L) ** 2
-        + (d_s * sd_s) ** 2
-        + (POSTURE_REL_SD * H) ** 2
-    )
-    lm_depth = None
-    if landmark in LANDMARK_SHARE:
-        lm_depth = LANDMARK_SHARE[landmark] * H
+    n = person_depth_from_rows(top, first, full, bottom, landmark)
+    if not 0.0 <= n.depth_cm <= 0.9 * n.height_cm:
+        return PersonDecline(PersonFailure.IMPLAUSIBLE, f"{n.depth_cm:.0f} cm")
     return PersonMeasurement(
-        depth_cm=depth,
-        depth_sigma_cm=math.sqrt(var),
-        visible_share=vis_share,
+        depth_cm=n.depth_cm,
+        depth_sigma_cm=n.depth_sigma_cm,
+        visible_share=n.visible_share,
         top_y=float(top),
-        shoulder_y=float(shoulder),
+        shoulder_y=float(n.shoulder_y),
         waterline_y=float(bottom),
         x_centre=x_centre,
-        height_cm=H,
-        height_sigma_cm=sd_H,
-        landmark=landmark if lm_depth is not None else None,
-        landmark_depth_cm=lm_depth,
+        height_cm=n.height_cm,
+        height_sigma_cm=n.height_sigma_cm,
+        landmark=landmark if n.landmark_depth_cm is not None else None,
+        landmark_depth_cm=n.landmark_depth_cm,
+        shoulder_first_y=float(first),
+        shoulder_full_y=float(full),
     )
 
 

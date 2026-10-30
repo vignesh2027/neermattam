@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"neermattam/gateway/internal/certs"
 	"neermattam/gateway/internal/config"
 	"neermattam/gateway/internal/live"
 	"neermattam/gateway/internal/media"
@@ -132,6 +133,9 @@ type Outcome struct {
 	Cell         *upstream.ReadingResult `json:"cell,omitempty"`
 	// OverlayURL serves perception's overlay as a small JPEG for an hour.
 	OverlayURL string `json:"overlay_url,omitempty"`
+	// CertificateURL is the page that checks perception's signed
+	// certificate of this measurement; empty when perception sent none.
+	CertificateURL string `json:"certificate_url,omitempty"`
 	// CellHasSimulated is true when the fused cell also holds readings from
 	// the simulated demo scenario.
 	CellHasSimulated bool      `json:"cell_has_simulated,omitempty"`
@@ -153,9 +157,11 @@ type Pipeline struct {
 	Dedupe     *Dedupe
 	Origins    *live.Origins
 	Overlays   *overlay.Store
-	Hub        *live.Hub
-	Log        *slog.Logger
-	Metrics    *metrics.Set
+	// Certificates keeps each measurement's signed certificate (nil: none kept).
+	Certificates *certs.Store
+	Hub          *live.Hub
+	Log          *slog.Logger
+	Metrics      *metrics.Set
 
 	sem chan struct{}
 	now func() time.Time
@@ -385,6 +391,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 		}
 		out.Measurement = m
 		p.attachOverlay(out, m)
+		p.attachCertificate(out, m, c.info.SHA256, start)
 		if !m.Usable {
 			out.Status = StatusUnusable
 			out.Summary = "The photo could not be measured."
@@ -514,6 +521,27 @@ func (p *Pipeline) attachOverlay(out *Outcome, m *upstream.Measurement) {
 	}
 	p.Overlays.Put(id, jpg)
 	out.OverlayURL = "/api/overlay/" + id
+}
+
+// attachCertificate keeps perception's certificate with the report, with
+// the hash of the file this gateway received, and links its page. The
+// certificate itself is left out of the reply: it is served on its own.
+func (p *Pipeline) attachCertificate(out *Outcome, m *upstream.Measurement, uploadSHA string, at time.Time) {
+	if !m.HasCertificate() {
+		m.Certificate = nil
+		return
+	}
+	raw := m.Certificate
+	m.Certificate = nil
+	if p.Certificates == nil || !certs.ValidID(m.MeasurementID) {
+		return
+	}
+	err := p.Certificates.Put(m.MeasurementID, certs.Stored{Certificate: raw, UploadSHA256: uploadSHA, ReceivedAt: at.UTC()})
+	if err != nil {
+		p.Log.Warn("certificate not kept", "error", err.Error())
+		return
+	}
+	out.CertificateURL = "/verify/" + m.MeasurementID
 }
 
 func (p *Pipeline) finish(out *Outcome, start time.Time) {

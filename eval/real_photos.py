@@ -10,6 +10,7 @@ Photos are downloaded from Commons into eval/photos/ (gitignored); the URL,
 author and licence of each are in eval/commons_photos.json and (the Unsplash
 close-ups) eval/unsplash_photos.json. Outputs go to
 eval/out/ (gitignored): the overlay PNG, the response JSON with its agent trace,
+the signed measurement certificate (``<id>.certificate.json``, docs/VERIFY.md)
 and every image the verifier was shown. The generated section of
 eval/RESULTS_REAL.md is rewritten between its markers.
 
@@ -40,6 +41,7 @@ import httpx
 
 from neermattam_perception.adapters import ModelError
 from neermattam_perception.agent import VerifyRefineAgent
+from neermattam_perception.certificate import Signer
 from neermattam_perception.media import load_image
 from neermattam_perception.modal_sam import ModalSamAdapter
 from neermattam_perception.muse_open import MuseSparkOpenAdapter
@@ -208,6 +210,10 @@ async def run(args: argparse.Namespace) -> int:
         t0 = time.perf_counter()
         sam.load()
     load_s = time.perf_counter() - t0
+    # Each response carries a certificate signed with NEERMATTAM_SIGNING_KEY
+    # (docs/VERIFY.md); replay one with
+    #   uv run python -m neermattam_perception.replay ../eval/out/<id>.certificate.json
+    signer = Signer.from_env()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     sections = []
@@ -218,7 +224,7 @@ async def run(args: argparse.Namespace) -> int:
         agent = VerifyRefineAgent(
             muse, sam, debug_dir=out / f"{m['id']}_agent", confirm=args.confirm
         )
-        pipe = Pipeline(muse, sam, agent=agent)
+        pipe = Pipeline(muse, sam, agent=agent, signer=signer)
         for attempt in range(3):  # a network outage should not end a long run
             t1 = time.perf_counter()
             try:
@@ -235,6 +241,10 @@ async def run(args: argparse.Namespace) -> int:
         if png:
             (out / f"{m['id']}_overlay.png").write_bytes(base64.b64decode(png))
         (out / f"{m['id']}.json").write_text(json.dumps(body, indent=1), encoding="utf-8")
+        if body.get("certificate"):
+            (out / f"{m['id']}.certificate.json").write_text(
+                json.dumps(body["certificate"], indent=1), encoding="utf-8"
+            )
         sections.append(summarise(m["id"], m, body, wall, out))
         stats[m["id"]] = photo_stats(body, wall)
         sys.stdout.write(

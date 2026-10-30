@@ -114,6 +114,11 @@ type Config struct {
 	// ControlRoomKey unlocks /control. Empty leaves only the public demo.
 	ControlRoomKey string
 
+	// CertificatePublicKeys pins Ed25519 keys (base64url) that measurement
+	// certificates are checked against. Keys fetched from perception's
+	// /v1/keys are trusted as well.
+	CertificatePublicKeys []string
+
 	// Alerts ("Watch my street").
 	Alerts          bool
 	AlertsMax       int
@@ -225,6 +230,11 @@ func fromLookup(lookup func(string) (string, bool)) (Config, error) {
 			r.err = fmt.Errorf("GATEWAY_BBOX: %w", err)
 		}
 		c.ServiceArea = b
+	}
+	for _, k := range strings.Split(r.str("CERTIFICATE_PUBLIC_KEYS", ""), ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			c.CertificatePublicKeys = append(c.CertificatePublicKeys, k)
+		}
 	}
 	if hosts := r.str("PUSH_HOSTS", ""); hosts != "" {
 		for _, h := range strings.Split(hosts, ",") {

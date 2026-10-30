@@ -32,6 +32,7 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -40,9 +41,11 @@ import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
 
-from .adapters import MaskModel, ModelError, SceneObject, VehicleObject
+from .adapters import AnswerRejected, MaskModel, ModelError, SceneObject, VehicleObject
 from .media import ImageInput
 from .muse_open import (
+    VERIFY_WATER_VERSION,
+    VERIFY_WHEEL_VERSION,
     JsonReply,
     grid_box,
     grid_point,
@@ -52,6 +55,7 @@ from .muse_open import (
 from .references import RefKind
 from .sam import ObjectMask, ObjectPrompt, PointPrompt
 from .sam_local import box_iou
+from .validate import Checked, check_water_answer, check_wheel_answer
 from .wheel_finder import (
     INSIDE_TYRE_RATIO,
     WheelScore,
@@ -97,6 +101,9 @@ class TraceStep:
     output: str
     decision: str
     latency_ms: int
+    # The version of the prompt sent (muse_open.prompt_version) on steps that
+    # called the language model; None otherwise.
+    prompt_version: str | None = None
 
 
 Box = tuple[int, int, int, int]
@@ -429,7 +436,13 @@ class BudgetSpent(ModelError):
 
 
 def _failed(exc: Exception, otherwise: str) -> str:
+    if isinstance(exc, AnswerRejected):
+        return "the scene model's answers failed their checks"
     return "time budget reached" if isinstance(exc, BudgetSpent) else otherwise
+
+
+class _Costed(Protocol):
+    cost_usd: float
 
 
 # --------------------------------------------------------------------------- agent
@@ -491,6 +504,75 @@ class VerifyRefineAgent:
             return await asyncio.wait_for(fn(images, prompt, what=what), left)
         except TimeoutError as exc:
             raise BudgetSpent("the time budget ran out during this check") from exc
+
+    async def _ask_checked(
+        self,
+        images: bytes | Sequence[bytes],
+        prompt: str,
+        *,
+        what: str,
+        target: str,
+        check: Callable[[Any], Checked],
+        trace: list[TraceStep],
+        emit: Emit | None,
+        bill: _Costed,
+        confirm: bool = False,
+    ) -> JsonReply:
+        """One verifier call whose answer has passed the checks (``validate.py``).
+
+        When a field the decision rests on fails, a ``validate`` step says so and
+        the same question is asked once more; failing again is logged as ``give
+        up`` and raises :class:`AnswerRejected`. Other fields that fail are left
+        out of the answer returned and named in a ``validate`` step. The cost of
+        every answer is added to ``bill``."""
+        reply = await self._ask(images, prompt, what=what, confirm=confirm)
+        bill.cost_usd += reply.usage.cost_usd
+        checked = check(reply.data)
+        latency = reply.latency_ms
+        if checked.fatal is not None:
+            first = checked.fatal
+            self._log(
+                trace,
+                TraceStep("validate", target, "validator", f"answer to {what}", first, "retry", 0),
+                emit,
+            )
+            reply = await self._ask(images, prompt, what=what, confirm=confirm)
+            bill.cost_usd += reply.usage.cost_usd
+            latency += reply.latency_ms
+            checked = check(reply.data)
+            if checked.fatal is not None:
+                self._log(
+                    trace,
+                    TraceStep(
+                        "validate",
+                        target,
+                        "validator",
+                        f"second answer to {what}",
+                        checked.fatal,
+                        "give up",
+                        0,
+                    ),
+                    emit,
+                )
+                raise AnswerRejected(what, [first, checked.fatal], 0.0)
+        if checked.problems:
+            n = len(checked.problems)
+            self._log(
+                trace,
+                TraceStep(
+                    "validate",
+                    target,
+                    "validator",
+                    f"answer to {what}",
+                    "; ".join(checked.problems),
+                    f"drop {n} field{'s' if n > 1 else ''} that failed, use the rest",
+                    0,
+                ),
+                emit,
+            )
+        return JsonReply(
+            checked.data, reply.usage, latency, reply.reasoning, reply.repaired, reply.cached
+        )
 
     async def _segment(
         self, image: ImageInput, prompt: ObjectPrompt
@@ -624,26 +706,37 @@ class VerifyRefineAgent:
                 both = render_crop(image.rgb, None, box, rect, self.crop_side)
                 images = [both]
             self._keep(both, f"{target.replace(' ', '_')}_try{attempt}.jpg")
-            prompt = verify_prompt(kind_text, panels=max(1, len(shown)))
+            panels = max(1, len(shown))
+            prompt = verify_prompt(kind_text, panels=panels)
             try:
-                reply = await self._ask(images, prompt, what=f"verify {target}")
-            except ModelError as exc:
-                self._log(
-                    out.trace,
-                    TraceStep(
-                        "verify",
-                        target,
-                        self.scene_name,
-                        f"crop {_fmt_box(rect)}",
-                        f"error: {exc}",
-                        "give up",
-                        0,
-                    ),
-                    emit,
+                reply = await self._ask_checked(
+                    images,
+                    prompt,
+                    what=f"verify {target}",
+                    target=target,
+                    check=partial(check_wheel_answer, panels=panels),
+                    trace=out.trace,
+                    emit=emit,
+                    bill=out,
                 )
+            except ModelError as exc:
+                if not isinstance(exc, AnswerRejected):
+                    self._log(
+                        out.trace,
+                        TraceStep(
+                            "verify",
+                            target,
+                            self.scene_name,
+                            f"crop {_fmt_box(rect)}",
+                            f"error: {exc}",
+                            "give up",
+                            0,
+                            VERIFY_WHEEL_VERSION,
+                        ),
+                        emit,
+                    )
                 out.verdict = _failed(exc, "verification failed")
                 return out
-            out.cost_usd += reply.usage.cost_usd
             chosen = _chosen(reply.data, shown)
             j = self._judge(reply.data, view, box, chosen, attempt)
             self._log(
@@ -657,6 +750,7 @@ class VerifyRefineAgent:
                     j.summary,
                     j.decision,
                     reply.latency_ms,
+                    VERIFY_WHEEL_VERSION,
                 ),
                 emit,
             )
@@ -668,26 +762,34 @@ class VerifyRefineAgent:
                 jpeg = render_crop(image.rgb, chosen.mask, box, rect, self.crop_side)
                 self._keep(jpeg, f"{target.replace(' ', '_')}_try{attempt}_close.jpg")
                 try:
-                    reply = await self._ask(
-                        jpeg, verify_prompt(kind_text, 1), what=f"look closer {target}"
+                    reply = await self._ask_checked(
+                        jpeg,
+                        verify_prompt(kind_text, 1),
+                        what=f"look closer {target}",
+                        target=target,
+                        check=partial(check_wheel_answer, panels=1),
+                        trace=out.trace,
+                        emit=emit,
+                        bill=out,
                     )
                 except ModelError as exc:
-                    self._log(
-                        out.trace,
-                        TraceStep(
-                            "verify",
-                            target,
-                            self.scene_name,
-                            f"close crop {_fmt_box(rect)}",
-                            f"error: {exc}",
-                            "give up",
-                            0,
-                        ),
-                        emit,
-                    )
+                    if not isinstance(exc, AnswerRejected):
+                        self._log(
+                            out.trace,
+                            TraceStep(
+                                "verify",
+                                target,
+                                self.scene_name,
+                                f"close crop {_fmt_box(rect)}",
+                                f"error: {exc}",
+                                "give up",
+                                0,
+                                VERIFY_WHEEL_VERSION,
+                            ),
+                            emit,
+                        )
                     out.verdict = _failed(exc, "verification failed")
                     return out
-                out.cost_usd += reply.usage.cost_usd
                 j = self._judge(reply.data, View(rect), box, chosen, attempt)
                 self._log(
                     out.trace,
@@ -699,6 +801,7 @@ class VerifyRefineAgent:
                         j.summary,
                         j.decision,
                         reply.latency_ms,
+                        VERIFY_WHEEL_VERSION,
                     ),
                     emit,
                 )
@@ -709,26 +812,35 @@ class VerifyRefineAgent:
                 assert chosen is not None
                 one = render_crop(image.rgb, chosen.mask, box, rect, self.crop_side)
                 try:
-                    reply2 = await self._ask(
-                        one, verify_prompt(kind_text, 1), what=f"confirm {target}", confirm=True
+                    reply2 = await self._ask_checked(
+                        one,
+                        verify_prompt(kind_text, 1),
+                        what=f"confirm {target}",
+                        target=target,
+                        check=partial(check_wheel_answer, panels=1),
+                        trace=out.trace,
+                        emit=emit,
+                        bill=out,
+                        confirm=True,
                     )
                 except ModelError as exc:
-                    self._log(
-                        out.trace,
-                        TraceStep(
-                            "confirm",
-                            target,
-                            self.scene_name,
-                            "chosen outline, full reasoning",
-                            f"error: {exc}",
-                            "give up",
-                            0,
-                        ),
-                        emit,
-                    )
+                    if not isinstance(exc, AnswerRejected):
+                        self._log(
+                            out.trace,
+                            TraceStep(
+                                "confirm",
+                                target,
+                                self.scene_name,
+                                "chosen outline, full reasoning",
+                                f"error: {exc}",
+                                "give up",
+                                0,
+                                VERIFY_WHEEL_VERSION,
+                            ),
+                            emit,
+                        )
                     out.verdict = _failed(exc, "confirmation failed")
                     return out
-                out.cost_usd += reply2.usage.cost_usd
                 j2 = self._judge(reply2.data, View(rect), box, chosen, attempt)
                 if not j2.waterline and j.waterline:
                     j2.waterline = j.waterline
@@ -742,6 +854,7 @@ class VerifyRefineAgent:
                         j2.summary,
                         j2.decision,
                         reply2.latency_ms,
+                        VERIFY_WHEEL_VERSION,
                     ),
                     emit,
                 )
@@ -946,21 +1059,32 @@ class VerifyRefineAgent:
             jpeg = render_water(image.rgb, mask.mask if mask else None, box, max_side=768)
             self._keep(jpeg, f"water_try{attempt}.jpg")
             try:
-                reply = await self._ask(jpeg, water_verify_prompt(), what="verify water")
-            except ModelError as exc:
-                self._log(
-                    out.trace,
-                    TraceStep(
-                        "verify",
-                        "water",
-                        self.scene_name,
-                        "photo with the region tinted",
-                        f"error: {exc}",
-                        "give up",
-                        0,
-                    ),
-                    emit,
+                reply = await self._ask_checked(
+                    jpeg,
+                    water_verify_prompt(),
+                    what="verify water",
+                    target="water",
+                    check=check_water_answer,
+                    trace=out.trace,
+                    emit=emit,
+                    bill=out,
                 )
+            except ModelError as exc:
+                if not isinstance(exc, AnswerRejected):
+                    self._log(
+                        out.trace,
+                        TraceStep(
+                            "verify",
+                            "water",
+                            self.scene_name,
+                            "photo with the region tinted",
+                            f"error: {exc}",
+                            "give up",
+                            0,
+                            VERIFY_WATER_VERSION,
+                        ),
+                        emit,
+                    )
                 out.verdict = _failed(exc, "verification failed")
                 if isinstance(exc, BudgetSpent) and confirmed:
                     # Out of time: the water already confirmed (partial) is used.
@@ -974,7 +1098,6 @@ class VerifyRefineAgent:
                     )
                     out.verdict = "partial (time budget reached)"
                 return out
-            out.cost_usd += reply.usage.cost_usd
             d = reply.data
             ok = _truthy(d.get("is_water"))
             coverage = str(d.get("coverage") or ("good" if ok else "wrong")).lower()
@@ -1012,6 +1135,7 @@ class VerifyRefineAgent:
                     + (f"; {reason}" if reason else ""),
                     decision,
                     reply.latency_ms,
+                    VERIFY_WATER_VERSION,
                 ),
                 emit,
             )

@@ -91,6 +91,22 @@ type Measurement struct {
 	// CapturedAtSent is true when the response had a captured_at member,
 	// even null. Null then means the photo has no capture time.
 	CapturedAtSent bool `json:"-"`
+	// InputSHA256 is the SHA-256 of the file perception measured, as it
+	// received it; null from an older perception.
+	InputSHA256 *string `json:"input_sha256,omitempty"`
+	// Certificate is the signed measurement certificate exactly as
+	// perception sent it (CONTRACTS.md 1.2), kept raw so its bytes are
+	// stored and served unchanged. Empty or "null" when there is none.
+	Certificate json.RawMessage `json:"certificate,omitempty"`
+}
+
+// HasCertificate reports whether perception sent a certificate.
+func (m *Measurement) HasCertificate() bool {
+	if m == nil {
+		return false
+	}
+	t := bytes.TrimSpace(m.Certificate)
+	return len(t) > 0 && !bytes.Equal(t, []byte("null"))
 }
 
 // Methods perception reports.
@@ -152,6 +168,10 @@ type AgentStep struct {
 	Output    string `json:"output"`
 	Decision  string `json:"decision"`
 	LatencyMs int    `json:"latency_ms"`
+	// PromptVersion names the prompt a language-model step was sent, such
+	// as "verify-wheel@1d51d73f5037"; empty for other steps and from an
+	// older perception.
+	PromptVersion string `json:"prompt_version,omitempty"`
 }
 
 // Upload is one file part.
@@ -233,6 +253,12 @@ type Transcript struct {
 	DepthSigmaCm *float64 `json:"depth_sigma_cm"`
 	Model        string   `json:"model"`
 	CostUSD      float64  `json:"cost_usd"`
+	// InputSHA256, PromptVersion and Validation are absent from an older
+	// perception: the audio's hash, the prompt version, and what the checks
+	// of the model's answer dropped.
+	InputSHA256   string   `json:"input_sha256,omitempty"`
+	PromptVersion string   `json:"prompt_version,omitempty"`
+	Validation    []string `json:"validation,omitempty"`
 }
 
 // Transcribe sends a voice note.
@@ -255,6 +281,27 @@ func (p *Perception) Transcribe(ctx context.Context, audio Upload) (*Transcript,
 		return nil, fmt.Errorf("perception transcribe response: %w", err)
 	}
 	return &t, nil
+}
+
+// Keys fetches perception's certificate public keys (GET /v1/keys), as
+// the raw JSON document.
+func (p *Perception) Keys(ctx context.Context) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.base+"/v1/keys", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("perception: %w: %v", ErrUnavailable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, readError("perception", resp)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 }
 
 // Ready checks perception's /readyz.

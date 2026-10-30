@@ -1,0 +1,112 @@
+{{define "content"}}
+<div class="page vfy">
+  <header class="page-head">
+    <p class="eyebrow">{{t "vfy.eyebrow"}}</p>
+    <h1>{{t "vfy.title"}}</h1>
+    <p>{{t "vfy.lead"}}</p>
+  </header>
+  {{with .Verify}}
+  {{if .Missing}}
+  <section class="card panel vfy-verdict v-missing" aria-labelledby="vfy-v">
+    <h2 id="vfy-v">{{t "vfy.missing_title"}}</h2>
+    <p>{{t "vfy.missing_body"}}</p>
+    <p class="small muted"><code>{{.ID}}</code></p>
+  </section>
+  {{else}}
+  <section class="card panel vfy-verdict v-{{.Status}}" aria-labelledby="vfy-v">
+    <span class="vfy-ic" aria-hidden="true">{{if eq .Status "verified"}}{{template "icon-shield"}}{{else}}{{template "icon-alert"}}{{end}}</span>
+    <div>
+      {{if eq .Status "verified"}}
+      <h2 id="vfy-v">{{t "vfy.ok_title"}}</h2>
+      <p>{{t "vfy.ok_body" .KeyID}}</p>
+      {{else if eq .Status "unknown_key"}}
+      <h2 id="vfy-v">{{t "vfy.unknown_title"}}</h2>
+      <p>{{t "vfy.unknown_body" .KeyID}}</p>
+      {{else}}
+      <h2 id="vfy-v">{{t "vfy.bad_title"}}</h2>
+      <p>{{t "vfy.bad_body"}}</p>
+      {{end}}
+      <ul class="vfy-checks">
+        <li class="c-{{if eq .Status "verified"}}ok{{else}}bad{{end}}">{{if eq .Status "verified"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>Ed25519 · <code>{{.KeyID}}</code>{{if ne .Status "verified"}} · {{.Reason}}{{end}}</span></li>
+        <li class="c-{{if eq .Upload "match"}}ok{{else if eq .Upload "mismatch"}}bad{{else}}none{{end}}">{{if eq .Upload "match"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>{{if eq .Upload "match"}}{{t "vfy.upload_match"}}{{else if eq .Upload "mismatch"}}{{t "vfy.upload_mismatch"}}{{else}}{{t "vfy.upload_unknown"}}{{end}}</span></li>
+      </ul>
+      {{if and (ne .Status "verified") .HasRecord}}<p class="vfy-claims">{{t "vfy.unverified_note"}}</p>{{end}}
+    </div>
+  </section>
+
+  {{if .HasRecord}}
+  <div class="vfy-grid{{if ne .Status "verified"}} is-unverified{{end}}">
+    <section class="card panel" aria-labelledby="vfy-result">
+      <h2 id="vfy-result">{{t "vfy.result"}}</h2>
+      {{if .Depth}}
+      <p class="vfy-depth"><b>{{.Depth}}<small>cm</small></b><span>± {{.Sigma}} cm</span></p>
+      {{else}}
+      <p class="vfy-depth"><span>{{t "vfy.not_usable"}}</span></p>
+      {{end}}
+      <dl class="facts">
+        {{if .MethodText}}<div class="fact"><dt>{{t "vfy.method"}}</dt><dd>{{.MethodText}}</dd></div>{{end}}
+        <div class="fact"><dt>{{t "vfy.confidence"}}</dt><dd>{{.Confidence}}</dd></div>
+        <div class="fact"><dt>{{t "vfy.issued"}}</dt><dd>{{.IssuedAt}}</dd></div>
+        <div class="fact"><dt>{{t "vfy.received"}}</dt><dd>{{.ReceivedAt}}</dd></div>
+      </dl>
+      {{if .Reasons}}<p class="section-title">{{t "vfy.reasons"}}</p>
+      <ul class="reasons notes">{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    </section>
+
+    <section class="card panel" aria-labelledby="vfy-input">
+      <h2 id="vfy-input">{{t "vfy.input"}}</h2>
+      <dl class="vfy-kv">
+        <dt>{{t "vfy.sha"}}</dt><dd><code class="hash">{{.InputSHA}}</code></dd>
+        {{if .UploadSHA}}<dt>{{t "vfy.sha_received"}}</dt><dd><code class="hash">{{.UploadSHA}}</code></dd>{{end}}
+        {{if .InputSize}}<dt>{{t "vfy.size"}}</dt><dd>{{.InputKind}}, {{.InputSize}}</dd>{{end}}
+      </dl>
+      <h3>{{t "vfy.models"}}</h3>
+      <ul class="vfy-models">{{range .Models}}<li><b>{{.Name}}</b> <span class="muted">{{.Role}}</span><br><code>{{.Version}}</code></li>{{end}}</ul>
+      {{if .Prompts}}<h3>{{t "vfy.prompts"}}</h3>
+      <ul class="vfy-prompts">{{range .Prompts}}<li><code>{{.ID}}</code> <code class="hash muted">{{.SHA}}</code></li>{{end}}</ul>{{end}}
+    </section>
+  </div>
+
+  {{if .Numbers}}
+  <section class="card panel vfy-sec" aria-labelledby="vfy-numbers">
+    <h2 id="vfy-numbers">{{t "vfy.numbers"}}</h2>
+    <p class="lead">{{t "vfy.numbers_lead"}}</p>
+    <table class="dev-table vfy-table">
+      <tbody>{{range .Numbers}}<tr><th scope="row">{{.Label}}</th><td><code>{{.Value}}</code></td></tr>{{end}}</tbody>
+    </table>
+  </section>
+  {{end}}
+
+  <section class="card panel vfy-sec" aria-labelledby="vfy-steps">
+    <h2 id="vfy-steps">{{t "vfy.steps"}}</h2>
+    <ol class="vfy-steplist">
+      {{range .Steps}}<li class="t-{{.Tone}}">
+        <span class="vfy-n">{{.Index}}</span>
+        <div><b>{{.Label}}</b> <span class="muted">{{.Target}}</span>
+          <p class="vfy-dec">{{.Decision}}</p>
+          <p class="vfy-meta"><span>{{.Model}}</span>{{if .Prompt}}<code>{{.Prompt}}</code>{{end}}<span>{{.Latency}}</span></p>
+        </div>
+      </li>{{end}}
+    </ol>
+  </section>
+
+  <section class="card panel vfy-sec" aria-labelledby="vfy-checks">
+    <h2 id="vfy-checks">{{t "vfy.checks"}}</h2>
+    <p class="vfy-rules">{{range .Rules}}<span class="chip">{{.}}</span>{{end}}</p>
+    {{if .Failures}}<p>{{t "vfy.checks_failed"}}</p>
+    <ul class="reasons notes">{{range .Failures}}<li>{{.}}</li>{{end}}</ul>
+    {{else}}<p class="muted">{{t "vfy.checks_none"}}</p>{{end}}
+  </section>
+  {{end}}
+
+  <section class="card panel vfy-sec" aria-labelledby="vfy-replay">
+    <h2 id="vfy-replay">{{t "vfy.replay_title"}}</h2>
+    <p>{{t "vfy.replay_body"}}</p>
+    <div class="row vfy-actions"><a class="btn btn-primary btn-sm" href="{{.RawURL}}" download>{{template "icon-save"}}{{t "vfy.download"}}</a><a class="btn btn-ghost btn-sm" href="{{.KeysURL}}">{{t "vfy.keys_link"}}</a></div>
+    <pre class="code"><code>{{.ReplayCmd}}</code></pre>
+    {{if .Pretty}}<details class="vfy-raw"><summary>{{t "vfy.raw"}}</summary><pre class="code"><code>{{.Pretty}}</code></pre></details>{{end}}
+  </section>
+  {{end}}
+  {{end}}
+</div>
+{{end}}

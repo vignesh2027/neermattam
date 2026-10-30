@@ -19,10 +19,11 @@ and ``sam_local.py`` (SAM 2.1 locally, and the SAM 3.1 slots).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol, TypeVar
 
 import httpx
@@ -43,6 +44,18 @@ MUSE_SPARK_OUTPUT_USD_PER_M = 4.25
 
 class ModelError(RuntimeError):
     """A model call failed; the message is safe to show (it never contains the key)."""
+
+
+class AnswerRejected(ModelError):
+    """A model answered, but a field the decision rests on failed its checks
+    (``validate.py``) on the first answer and again on the second.
+
+    ``attempts`` holds why each answer failed; ``cost_usd`` is what they cost."""
+
+    def __init__(self, what: str, attempts: list[str], cost_usd: float = 0.0) -> None:
+        super().__init__(f"{what} failed its checks twice ({attempts[-1]})")
+        self.attempts = attempts
+        self.cost_usd = cost_usd
 
 
 # --------------------------------------------------------------------------- data
@@ -111,6 +124,12 @@ class SceneReading:
     # Every human head or face the scene model saw (open-weights path), blurred
     # in any image that leaves the service.
     faces: tuple[tuple[int, int, int, int], ...] = ()
+    # The version of the prompt the reading answered (muse_open.prompt_version).
+    prompt_version: str | None = None
+    # What the checks of the answer did (validate.py): why the first answer was
+    # asked again (empty when it was not), and what was dropped from the answer used.
+    retried_because: str | None = None
+    dropped: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,6 +311,13 @@ def parse_scene_json(
 # --------------------------------------------------------------------------- Meta Model API
 
 
+def hosted_scene_prompt_sha256() -> str:
+    """SHA-256 of the hosted scene prompt: the instructions and the JSON schema,
+    joined with a NUL byte as ``muse_open.prompt_sha256`` joins template parts."""
+    schema = json.dumps(scene_schema(), sort_keys=True)
+    return hashlib.sha256(f"{SCENE_INSTRUCTIONS}\x00{schema}".encode()).hexdigest()
+
+
 class MetaApiAdapter:
     """Muse Spark 1.3 (Chat Completions, JSON schema output) and SAM 3.1 (Responses, SSE).
 
@@ -317,6 +343,19 @@ class MetaApiAdapter:
     @property
     def scene_model_name(self) -> str:
         return SCENE_MODEL
+
+    @property
+    def scene_prompt_version(self) -> str:
+        """Version of the hosted scene prompt (instructions and schema together)."""
+        return f"scene-hosted@{hosted_scene_prompt_sha256()[:12]}"
+
+    @property
+    def scene_model_version(self) -> str:
+        return f"{SCENE_MODEL} on the Meta Model API"
+
+    @property
+    def mask_model_version(self) -> str:
+        return f"{sam.MODEL} on the Meta Model API"
 
     @property
     def mask_model_name(self) -> str:
@@ -388,7 +427,8 @@ class MetaApiAdapter:
             + float(usage.get("completion_tokens", 0)) * MUSE_SPARK_OUTPUT_USD_PER_M
         ) / 1e6
         try:
-            return parse_scene_json(data, image.width, image.height, cost)
+            reading = parse_scene_json(data, image.width, image.height, cost)
+            return replace(reading, prompt_version=self.scene_prompt_version)
         except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
             # Strict schemas should prevent this; a malformed answer is a model
             # fault (503), not an unhandled 500.

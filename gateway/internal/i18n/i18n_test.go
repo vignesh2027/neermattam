@@ -118,10 +118,10 @@ func TestEveryUsedKeyExists(t *testing.T) {
 		"js.real_photo", "js.real_video", "js.real_voice",
 		"rule.confidence_floor", "rule.photo_freshness", "rule.source", "rule.neighbour_agreement", "rule.rainfall_plausibility",
 		"outcome.pass", "outcome.lower", "outcome.reject", "outcome.skip",
-		"step.scene", "step.segment", "step.verify", "step.confirm", "step.refine", "step.giveup", "step.geometry", "step.estimate", "step.budget",
+		"step.scene", "step.segment", "step.verify", "step.confirm", "step.refine", "step.giveup", "step.geometry", "step.estimate", "step.budget", "step.validate",
 		"vehicle.pedestrian", "vehicle.two_wheeler", "vehicle.auto", "vehicle.car", "vehicle.bus",
 		"timing.scene", "timing.masks", "timing.geometry",
-		"title.home", "title.map", "title.report", "title.route", "title.about",
+		"title.home", "title.map", "title.report", "title.route", "title.about", "title.verify",
 		"ref.two_wheeler_wheel", "ref.car_wheel", "ref.auto_wheel", "ref.bus_wheel", "ref.kerb", "ref.person", "ref.wheel",
 	}
 	for i := 1; i <= 12; i++ {

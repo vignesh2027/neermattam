@@ -112,6 +112,7 @@
     {{end}}
 
     {{if .ModelsLine}}<p class="small muted">{{t "result.models" .ModelsLine}}</p>{{end}}
+    {{if .CertificateURL}}<a class="vfy-link" href="{{.CertificateURL}}">{{template "icon-shield"}}<span><b>{{t "result.verify_link"}}</b><small>{{t "result.verify_sub"}}</small></span></a>{{end}}
     <p class="res-advisory">{{template "icon-alert"}}<span>{{t "advisory.long"}} {{t "result.uncertainty_note"}}</span></p>
   </div>
 </article>

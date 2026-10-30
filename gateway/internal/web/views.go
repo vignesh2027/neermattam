@@ -75,6 +75,9 @@ type ResultView struct {
 	Advisory   string
 	Transcript string
 	ModelsLine string
+	// CertificateURL links "Verify this measurement" (perception's signed
+	// certificate); empty when there is none.
+	CertificateURL string
 
 	// Method badge: "geometry", "person", "estimate" or "" (older
 	// perception). A method the gateway does not know shows as "estimate".
@@ -122,6 +125,9 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 	m := o.Measurement
 	if strings.HasPrefix(o.OverlayURL, "/api/overlay/") {
 		v.Overlay = template.URL(o.OverlayURL)
+	}
+	if strings.HasPrefix(o.CertificateURL, "/verify/") {
+		v.CertificateURL = o.CertificateURL
 	}
 	if o.DepthCm != nil && o.DepthSigmaCm != nil {
 		v.HasDepth = true

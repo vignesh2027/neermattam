@@ -10,6 +10,7 @@ length (for the optional perspective correction).
 
 from __future__ import annotations
 
+import hashlib
 import io
 import math
 import os
@@ -49,6 +50,9 @@ class ImageInput:
     height: int
     captured_at: str | None = None  # RFC 3339; UTC when the camera recorded an offset
     focal_35mm: float | None = None
+    # SHA-256 (hex) of the uploaded file exactly as received; None for an image
+    # made in memory (a video's key frame, a test fixture).
+    source_sha256: str | None = None
 
     @property
     def media_type(self) -> str:
@@ -114,10 +118,12 @@ def load_image(data: bytes) -> ImageInput:
         upright: Image.Image = ImageOps.exif_transpose(im).convert("RGB")
     except Exception as exc:  # see above: any decoding failure is a bad upload
         raise MediaRejected("image could not be decoded") from exc
-    return _from_pil(upright, captured, focal_35)
+    return _from_pil(upright, captured, focal_35, hashlib.sha256(data).hexdigest())
 
 
-def _from_pil(im: Image.Image, captured: str | None, focal_35: float | None) -> ImageInput:
+def _from_pil(
+    im: Image.Image, captured: str | None, focal_35: float | None, sha: str | None = None
+) -> ImageInput:
     w, h = im.size
     scale = min(1.0, WORKING_MAX_SIDE / max(w, h))
     if scale < 1.0:
@@ -127,7 +133,7 @@ def _from_pil(im: Image.Image, captured: str | None, focal_35: float | None) -> 
     buf = io.BytesIO()
     im.save(buf, format="JPEG", quality=92)  # no exif= argument: all metadata dropped
     rgb = np.asarray(im, dtype=np.uint8)
-    return ImageInput(rgb, buf.getvalue(), im.size[0], im.size[1], captured, focal_35)
+    return ImageInput(rgb, buf.getvalue(), im.size[0], im.size[1], captured, focal_35, sha)
 
 
 def image_from_rgb(rgb: NDArray[np.uint8]) -> ImageInput:
@@ -163,6 +169,7 @@ class VideoInput:
     height: int
     key_index: int
     key_frame: ImageInput
+    source_sha256: str | None = None  # of the uploaded file exactly as received
 
     @property
     def seconds(self) -> float:
@@ -205,7 +212,17 @@ def load_video(data: bytes, media_type: str = "video/mp4", scan_frames: int = 30
     if max(w, h) > MAX_SIDE_PX or min(w, h) < MIN_SIDE_PX:
         raise MediaRejected("video frame size is out of range")
     key = image_from_rgb(best)
-    return VideoInput(strip_video_metadata(data), media_type, fps, n, w, h, best_idx, key)
+    return VideoInput(
+        strip_video_metadata(data),
+        media_type,
+        fps,
+        n,
+        w,
+        h,
+        best_idx,
+        key,
+        hashlib.sha256(data).hexdigest(),
+    )
 
 
 # Boxes that can hold location or other personal metadata in MP4 and QuickTime

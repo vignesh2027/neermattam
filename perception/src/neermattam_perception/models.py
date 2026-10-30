@@ -65,6 +65,20 @@ class AgentStepOut(_Strict):
     output: str
     decision: str
     latency_ms: int
+    prompt_version: str | None = None  # on steps that called the language model
+
+
+class CertificateOut(_Strict):
+    """A signed measurement certificate (docs/CONTRACTS.md, section 1.2).
+
+    ``payload`` is the record's canonical JSON text; ``signature`` is the
+    base64url Ed25519 signature of its UTF-8 bytes."""
+
+    format: str
+    alg: str
+    key_id: str
+    payload: str
+    signature: str
 
 
 class TranscribeResponse(_Strict):
@@ -82,6 +96,9 @@ class TranscribeResponse(_Strict):
     depth_basis: str = ""
     model: str
     cost_usd: float = 0.0
+    input_sha256: str | None = None
+    prompt_version: str | None = None
+    validation: list[str] = Field(default_factory=list)
 
 
 class MeasureResponse(_Strict):
@@ -99,10 +116,12 @@ class MeasureResponse(_Strict):
     models: ModelsOut
     timings_ms: dict[str, int] = Field(default_factory=dict)
     cost_usd: float = 0.0
-    method: str | None = None  # "wheel_geometry" or "model_estimate"
+    method: str | None = None  # "wheel_geometry", "person_reference" or "model_estimate"
     model_estimate: ModelEstimateOut | None = None
     agent_trace: list[AgentStepOut] = Field(default_factory=list)
     captured_at: str | None = None
+    input_sha256: str | None = None
+    certificate: CertificateOut | None = None
     # Head regions of the people found, in image pixels: the service blurs them in
     # any image it stores. Not part of the response body.
     _faces: list[tuple[int, int, int, int]] = PrivateAttr(default_factory=list)

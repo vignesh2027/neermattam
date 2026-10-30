@@ -33,9 +33,17 @@ from typing import Any
 import httpx
 from PIL import Image
 
-from .adapters import ImageQuality, ModelError, SceneObject, SceneReading, VehicleObject
+from .adapters import (
+    AnswerRejected,
+    ImageQuality,
+    ModelError,
+    SceneObject,
+    SceneReading,
+    VehicleObject,
+)
 from .media import ImageInput
 from .references import RefKind, vehicles
+from .validate import check_scene, check_transcript
 from .voice import depth_from_words, normalise_languages
 
 MODEL_LABEL = "muse-spark-open"
@@ -241,25 +249,30 @@ Return one JSON object, nothing else:
 Boxes must be tight and must not include neighbouring objects. Omit what you cannot see; never invent hidden objects. If no floodwater is visible, return water_visible false with empty references."""
 
 
-def verify_prompt(kind_text: str, panels: int = 1) -> str:
-    """The check of proposed outlines for a wheel, shown as one panel (A) or two (A and B)."""
-    if panels == 2:
-        intro = (
-            f"The two images above, A (first) and B (second), show the same crop of a flood "
-            f"photo. In each, a segmentation model's proposed outline of the {kind_text} is drawn "
-            "in bright magenta, and the box it was given in yellow. Choose the outline that best "
-            "follows the tyre, then judge that one."
-        )
-        choice = '  "choice": "A" or "B" (the better outline), or "none" if neither is the tyre,\n'
-        grid = "over image A (B shows the same crop, so its grid is the same)"
-    else:
-        intro = (
-            f"This is a crop of a flood photo (panel A). A segmentation model's proposed outline "
-            f"of the {kind_text} is drawn in bright magenta, and the box it was given in yellow."
-        )
-        choice = '  "choice": "A", or "none" if the outline is not the tyre,\n'
-        grid = "over the crop"
-    return f"""{intro} Judge strictly: the outline will be used to measure the water depth from the wheel's shape, so an outline that strays onto other parts gives a wrong depth. A straight lower edge of an outline is where it meets the water; that is expected.
+# The wheel check is one template with a few parts chosen per call: one panel
+# (A) or two (A and B), and the kind of wheel. Its version (see prompt_version)
+# covers every fixed part, so it names the template, not one filled-in copy.
+_VERIFY_INTRO = {
+    2: (
+        "The two images above, A (first) and B (second), show the same crop of a flood "
+        "photo. In each, a segmentation model's proposed outline of the {kind_text} is drawn "
+        "in bright magenta, and the box it was given in yellow. Choose the outline that best "
+        "follows the tyre, then judge that one."
+    ),
+    1: (
+        "This is a crop of a flood photo (panel A). A segmentation model's proposed outline "
+        "of the {kind_text} is drawn in bright magenta, and the box it was given in yellow."
+    ),
+}
+_VERIFY_CHOICE = {
+    2: '  "choice": "A" or "B" (the better outline), or "none" if neither is the tyre,\n',
+    1: '  "choice": "A", or "none" if the outline is not the tyre,\n',
+}
+_VERIFY_GRID = {
+    2: "over image A (B shows the same crop, so its grid is the same)",
+    1: "over the crop",
+}
+_VERIFY_BODY = """{intro} Judge strictly: the outline will be used to measure the water depth from the wheel's shape, so an outline that strays onto other parts gives a wrong depth. A straight lower edge of an outline is where it meets the water; that is expected.
 
 Coordinates: integers on a 0-1000 grid {grid}, x from the left, y from the top. A box is [x_min, y_min, x_max, y_max].
 
@@ -280,8 +293,18 @@ Answer with one JSON object, nothing else:
 }}"""
 
 
-def water_verify_prompt() -> str:
-    return """This is a flood photo. A segmentation model was asked for the floodwater surface. Its proposed region is tinted magenta and outlined, and the box it was given is drawn in yellow.
+def verify_prompt(kind_text: str, panels: int = 1) -> str:
+    """The check of proposed outlines for a wheel, shown as one panel (A) or two (A and B)."""
+    n = 2 if panels == 2 else 1
+    return _VERIFY_BODY.format(
+        intro=_VERIFY_INTRO[n].format(kind_text=kind_text),
+        grid=_VERIFY_GRID[n],
+        choice=_VERIFY_CHOICE[n],
+        kind_text=kind_text,
+    )
+
+
+_WATER_VERIFY_PROMPT = """This is a flood photo. A segmentation model was asked for the floodwater surface. Its proposed region is tinted magenta and outlined, and the box it was given is drawn in yellow.
 
 Coordinates: integers on a 0-1000 grid over this image, x from the left, y from the top. A box is [x_min, y_min, x_max, y_max]. A point is [x, y].
 
@@ -293,6 +316,10 @@ Answer with one JSON object, nothing else:
   "corrected_point": if not good, one point on open water, else null,
   "reason": one short sentence
 }"""
+
+
+def water_verify_prompt() -> str:
+    return _WATER_VERIFY_PROMPT
 
 
 TRANSCRIBE_PROMPT = """The audio clip in this message is a voice note from someone in India reporting street flooding. Listen to it. It may be in Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Marathi, Gujarati, Punjabi, Odia, Urdu or English, and people often mix two of them (for example Tamil with English words).
@@ -309,6 +336,54 @@ Return one JSON object, nothing else:
   "depth_low_cm": a low bound, or null,
   "depth_high_cm": a high bound, or null
 }"""
+
+
+# --------------------------------------------------------------------------- prompt versions
+
+
+def prompt_sha256(*parts: str) -> str:
+    """SHA-256 (hex) of a prompt's text, or of every fixed part of a template.
+
+    Parts are joined with a NUL byte, which no prompt contains, so a change to
+    any part, or a part moving from one to another, changes the hash."""
+    return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
+
+
+def prompt_version(name: str, *parts: str) -> str:
+    """A stable version id: the prompt's short name, ``@``, 12 hex digits of its hash."""
+    return f"{name}@{prompt_sha256(*parts)[:12]}"
+
+
+def _verify_wheel_parts() -> tuple[str, ...]:
+    return (
+        _VERIFY_BODY,
+        *(_VERIFY_INTRO[n] for n in (1, 2)),
+        *(_VERIFY_CHOICE[n] for n in (1, 2)),
+        *(_VERIFY_GRID[n] for n in (1, 2)),
+    )
+
+
+# The fixed text of every Muse Spark Open prompt, by name.
+PROMPT_PARTS: dict[str, tuple[str, ...]] = {
+    "scene": (SCENE_PROMPT,),
+    "verify-wheel": _verify_wheel_parts(),
+    "verify-water": (_WATER_VERIFY_PROMPT,),
+    "transcribe": (TRANSCRIBE_PROMPT,),
+}
+PROMPT_VERSIONS: dict[str, str] = {n: prompt_version(n, *p) for n, p in PROMPT_PARTS.items()}
+SCENE_PROMPT_VERSION = PROMPT_VERSIONS["scene"]
+VERIFY_WHEEL_VERSION = PROMPT_VERSIONS["verify-wheel"]
+VERIFY_WATER_VERSION = PROMPT_VERSIONS["verify-water"]
+TRANSCRIBE_VERSION = PROMPT_VERSIONS["transcribe"]
+
+
+def prompt_digest(version: str) -> str | None:
+    """The full SHA-256 behind a version id this module issued, or None."""
+    name = version.split("@", 1)[0]
+    parts = PROMPT_PARTS.get(name)
+    if parts is None or PROMPT_VERSIONS.get(name) != version:
+        return None
+    return prompt_sha256(*parts)
 
 
 # --------------------------------------------------------------------------- parsing helpers
@@ -543,6 +618,8 @@ class TranscriptResult:
     depth_low_cm: float | None = None
     depth_high_cm: float | None = None
     depth_basis: str = ""
+    prompt_version: str = ""
+    validation: tuple[str, ...] = ()  # what the checks of the answer dropped (validate.py)
 
 
 def env_from_dotenv(names: Sequence[str], start: Path | None = None) -> dict[str, str]:
@@ -630,6 +707,18 @@ class MuseSparkOpenAdapter:
     @property
     def scene_model_name(self) -> str:
         return MODEL_LABEL
+
+    @property
+    def scene_model_version(self) -> str:
+        """The exact model and settings: the Baseten model id and reasoning efforts."""
+        return (
+            f"{self.model} on Baseten, reasoning effort {self.scene_effort or 'default'} "
+            f"(scene), {self.verify_effort or 'default'} (checks)"
+        )
+
+    @property
+    def scene_prompt_version(self) -> str:
+        return SCENE_PROMPT_VERSION
 
     def _client(self) -> httpx.AsyncClient:
         if not self.api_key:
@@ -817,16 +906,18 @@ class MuseSparkOpenAdapter:
         h.update(f"{self.scene_effort}:{self.max_image_side}".encode())
         return h.hexdigest()[:32]
 
-    async def read_scene_json(self, image: ImageInput) -> JsonReply:
+    async def read_scene_json(self, image: ImageInput, *, fresh: bool = False) -> JsonReply:
         """The scene model's answer for this photo, from the cache when it was read before.
 
         The key covers the photo's bytes, the prompt, the model and its settings,
         so a changed prompt is never answered from an old reading. A cached
-        answer costs nothing and is marked ``cached``.
+        answer costs nothing and is marked ``cached``. ``fresh`` skips the cache
+        (the answer there failed its checks). Only an answer whose decision
+        fields pass the checks (``validate.check_scene``) is cached.
         """
         key = self._scene_key(image)
-        hit = self._scene_cache.get(key)
-        if hit is None and self.scene_cache_dir is not None:
+        hit = None if fresh else self._scene_cache.get(key)
+        if hit is None and not fresh and self.scene_cache_dir is not None:
             f = self.scene_cache_dir / f"{key}.json"
             if f.is_file():
                 hit = JsonReply(json.loads(f.read_text(encoding="utf-8")), Usage(), 0, "")
@@ -843,6 +934,9 @@ class MuseSparkOpenAdapter:
             attempt_timeout_s=self.scene_attempt_timeout_s,
             retries=self.critical_retries,
         )
+        if check_scene(reply.data, image.width, image.height).fatal is not None:
+            self._scene_cache.pop(key, None)
+            return reply
         self._scene_cache[key] = reply
         while len(self._scene_cache) > self.scene_cache_size:
             self._scene_cache.popitem(last=False)
@@ -852,12 +946,37 @@ class MuseSparkOpenAdapter:
         return reply
 
     async def read_scene(self, image: ImageInput) -> SceneReading:
+        """The scene reading, after the checks of ``validate.check_scene``.
+
+        An answer whose ``water_visible`` fails is asked once more, bypassing the
+        cache; failing again raises :class:`AnswerRejected`. Any other field or
+        element that fails is left out and listed in ``dropped``.
+        """
         reply = await self.read_scene_json(image)
+        checked = check_scene(reply.data, image.width, image.height)
+        cost = reply.usage.cost_usd
+        retried_because = None
+        if checked.fatal is not None:
+            retried_because = checked.fatal
+            reply = await self.read_scene_json(image, fresh=True)
+            cost += reply.usage.cost_usd
+            checked = check_scene(reply.data, image.width, image.height)
+            if checked.fatal is not None:
+                raise AnswerRejected(
+                    "the scene model's answer", [retried_because, checked.fatal], cost
+                )
         try:
-            reading = parse_open_scene(reply.data, image.width, image.height)
+            reading = parse_open_scene(checked.data, image.width, image.height)
         except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
             raise ModelError("scene model returned an unexpected shape") from exc
-        return replace(reading, cost_usd=reply.usage.cost_usd, cached=reply.cached)
+        return replace(
+            reading,
+            cost_usd=cost,
+            cached=reply.cached,
+            prompt_version=SCENE_PROMPT_VERSION,
+            retried_because=retried_because,
+            dropped=tuple(checked.problems),
+        )
 
     async def ask_image(
         self, jpeg: bytes | Sequence[bytes], prompt: str, *, what: str
@@ -899,6 +1018,8 @@ class MuseSparkOpenAdapter:
         usage = Usage()
         latency = 0
         d: dict[str, Any] = {}
+        problems: list[str] = []
+        failed: list[str] = []
         for _ in range(self.audio_attempts):
             try:
                 reply = await self.chat_json(
@@ -909,14 +1030,23 @@ class MuseSparkOpenAdapter:
             except ModelError:
                 continue
             usage, latency = usage + reply.usage, latency + reply.latency_ms
-            d = reply.data
+            checked = check_transcript(reply.data)
+            if checked.fatal is not None:
+                failed.append(checked.fatal)
+                d = {}
+                continue
+            d, problems = checked.data, checked.problems
             if str(d.get("text") or "").strip():
                 break
         if not str(d.get("text") or "").strip():
+            why = f"; its answers failed the checks: {failed[-1]}" if failed else ""
             raise ModelError(
                 f"the audio model returned no transcript in {self.audio_attempts} attempts "
-                "(it answered as if it had not received the audio)"
+                "(it answered as if it had not received the audio)" + why
             )
+        problems = [f"an earlier answer failed its checks ({f}); asked again" for f in failed] + [
+            *problems
+        ]
         words = str(d.get("depth_words") or "").strip()
         words_en = str(d.get("depth_words_en") or "").strip()
         reading = depth_from_words(
@@ -944,4 +1074,6 @@ class MuseSparkOpenAdapter:
             depth_basis="" if reading is None else reading.basis,
             usage=usage,
             latency_ms=latency,
+            prompt_version=TRANSCRIBE_VERSION,
+            validation=tuple(problems),
         )

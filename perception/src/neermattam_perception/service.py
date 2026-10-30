@@ -2,7 +2,8 @@
 
 Endpoints: ``POST /v1/measure``, ``POST /v1/measure/stream`` (the same, as
 server-sent events: each agent step as it happens, then the result),
-``POST /v1/transcribe``, ``GET /healthz``, ``GET /readyz``.
+``POST /v1/transcribe``, ``GET /v1/keys`` (the public key that verifies the
+measurement certificates), ``GET /healthz``, ``GET /readyz``.
 
 Models are chosen by environment (see :func:`default_app`): the open-weights
 path (Muse Spark Open on Baseten, SAM 2.1 locally, with the verify-and-refine
@@ -22,6 +23,7 @@ Set ``NEERMATTAM_STORE_DIR`` to keep each sanitised upload and its response.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -37,6 +39,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from .adapters import MetaApiAdapter, ModelError
 from .agent import TraceStep, VerifyRefineAgent
+from .certificate import Signer
 from .media import (
     MAX_IMAGE_BYTES,
     MAX_VIDEO_BYTES,
@@ -187,6 +190,11 @@ def create_app(
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/v1/keys")
+    async def keys() -> dict[str, list[dict[str, str]]]:
+        signer = pipeline.signer
+        return {"keys": [] if signer is None else [signer.public_entry()]}
 
     @app.get("/readyz")
     async def readyz() -> JSONResponse:
@@ -339,6 +347,9 @@ def create_app(
             depth_basis=t.depth_basis,
             model=MODEL_LABEL,
             cost_usd=round(t.usage.cost_usd, 6),
+            input_sha256=hashlib.sha256(raw).hexdigest(),
+            prompt_version=t.prompt_version or None,
+            validation=list(t.validation),
         )
 
     return app
@@ -387,16 +398,20 @@ def default_app() -> FastAPI:
     )
     key = os.environ.get("MODEL_API_KEY") or key_from_dotenv()
     meta = MetaApiAdapter(key or "")
+    # Every measurement carries a certificate signed with NEERMATTAM_SIGNING_KEY.
+    signer = Signer.from_env()
     if scene_choice == "muse-spark-1.3":
         masks_name = os.environ.get("NEERMATTAM_MASKS", "sam3.1-api")
         masks = meta if masks_name == "sam3.1-api" else mask_model_from_config(masks_name)
-        return create_app(Pipeline(meta, masks), store, muse if muse.api_key else None)
+        return create_app(
+            Pipeline(meta, masks, signer=signer), store, muse if muse.api_key else None
+        )
     # Local hiera-small is the default: on the real photos it reached the same
     # outcomes as large and as large on Modal, and it is the fastest
     # (eval/RESULTS_SAM_AB.md, eval/RESULTS_REAL.md). Modal stays selectable.
     masks = mask_model_from_config(os.environ.get("NEERMATTAM_MASKS", "sam2.1-local"), api=meta)
     agent = VerifyRefineAgent(muse, masks)
-    return create_app(Pipeline(muse, masks, agent=agent), store, muse)
+    return create_app(Pipeline(muse, masks, agent=agent, signer=signer), store, muse)
 
 
 def main() -> None:

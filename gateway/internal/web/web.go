@@ -67,6 +67,7 @@ type Page struct {
 	Control *ControlView
 	Alerts  *AlertsView
 	Dev     *DevView
+	Verify  *VerifyView
 }
 
 // LangLink is one entry of the language menu.
@@ -125,7 +126,7 @@ type Renderer struct {
 }
 
 // Page templates.
-var pageNames = []string{"home", "map", "report", "route", "about", "control", "control_login", "alerts", "developers"}
+var pageNames = []string{"home", "map", "report", "route", "about", "control", "control_login", "alerts", "developers", "verify"}
 
 func langFuncs(a *Assets, lang string) template.FuncMap {
 	f := template.FuncMap{

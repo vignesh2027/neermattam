@@ -1041,6 +1041,14 @@ class DepthMeasurement:
     # Calibrated bias already removed from ``fraction`` (a share of the diameter,
     # never positive). ``fraction_affine`` is the raw affine value.
     fraction_bias: float = 0.0
+    # The parts the sigma is built from (see compose_depth), kept so that a
+    # certificate can record them and a replay can rebuild the depth and sigma.
+    fraction_raw: float = 0.0  # affine or projective, before the bias correction
+    ambiguity_spread: float = 0.0
+    resample_fraction_sigma: float = 0.0
+    resample_sigma_cm: float = 0.0
+    model_sigma_share: float = 0.0
+    camera: PinholeCamera | None = None  # set when the perspective correction was used
 
     @property
     def waterline_y_px(self) -> float:
@@ -1102,6 +1110,61 @@ def _fraction(
         if pr is not None:
             return pr.fraction, True
     return submerged_fraction(e, line, water_n), False
+
+
+def fraction_for(
+    e: Ellipse, line: Line, water_normal: FloatArray, camera: PinholeCamera | None = None
+) -> float:
+    """The submerged fraction for a fitted wheel and a waterline, before the bias
+    correction: exact under ``camera`` when that works, affine otherwise."""
+    return _fraction(e, line, np.asarray(water_normal, dtype=np.float64), camera)[0]
+
+
+@dataclass(frozen=True, slots=True)
+class DepthParts:
+    """The depth and its sigma, built from a raw fraction and the sigma's parts."""
+
+    fraction: float
+    fraction_sigma: float
+    depth_cm: float
+    depth_sigma_cm: float
+    fraction_bias: float
+    model_sigma_share: float
+
+
+def compose_depth(
+    fraction_raw: float,
+    diameter_cm: float,
+    arc_covered_deg: float,
+    ambiguity_spread: float,
+    resample_fraction_sigma: float,
+    resample_sigma_cm: float,
+    cfg: GeometryConfig,
+) -> DepthParts:
+    """Depth and sigma from the fitted wheel's raw fraction and the parts of its sigma.
+
+    The resampled sigma (already scaled, see ``LINEAR_SIGMA_SCALE``) is combined
+    in quadrature with the spread of near-optimal outlines, taken as a uniform
+    range, and the calibrated model error at this visible arc; the calibrated
+    bias, never positive, is removed from the fraction. :func:`measure_wheel_depth`
+    and the certificate replay both call this, so a replay recomputes exactly
+    what the service did.
+    """
+    fr_sigma, d_sigma = resample_fraction_sigma, resample_sigma_cm
+    if ambiguity_spread > 0:
+        amb = ambiguity_spread / math.sqrt(12.0)
+        fr_sigma = math.hypot(fr_sigma, amb)
+        d_sigma = math.hypot(d_sigma, amb * diameter_cm)
+    rel = 0.0
+    if cfg.model_sigma_table:
+        rel = model_sigma(arc_covered_deg, cfg.model_sigma_table)
+        d_sigma = math.hypot(d_sigma, rel * diameter_cm)
+        fr_sigma = math.hypot(fr_sigma, rel)
+    # Short arcs read low (see docs/GEOMETRY.md, section 4); remove the calibrated
+    # bias. It is never positive, so this can only raise the depth.
+    bias = model_bias(arc_covered_deg, cfg.model_bias_table)
+    frac = min(1.0, fraction_raw - bias)
+    return DepthParts(frac, fr_sigma, frac * diameter_cm, d_sigma, bias, rel)
 
 
 def _line_hits(e: Ellipse, line: Line) -> tuple[float, float] | None:
@@ -1395,28 +1458,17 @@ def measure_wheel_depth(
     if linear:
         fr_sigma *= LINEAR_SIGMA_SCALE
         d_sigma *= LINEAR_SIGMA_SCALE
-    if spread > 0:
-        # Treat the spread of near-optimal fits as a uniform range.
-        amb = spread / math.sqrt(12.0)
-        fr_sigma = math.hypot(fr_sigma, amb)
-        d_sigma = math.hypot(d_sigma, amb * diameter_cm)
-    if cfg.model_sigma_table:
-        rel = model_sigma(covered, cfg.model_sigma_table)
-        d_sigma = math.hypot(d_sigma, rel * diameter_cm)
-        fr_sigma = math.hypot(fr_sigma, rel)
-    # Short arcs read low (see docs/GEOMETRY.md, section 4); remove the calibrated
-    # bias. It is never positive, so this can only raise the depth.
-    bias = model_bias(covered, cfg.model_bias_table)
-    frac = min(1.0, frac - bias)
+    # The spread of near-optimal fits, the model error and the bias.
+    parts = compose_depth(frac, diameter_cm, covered, spread, fr_sigma, d_sigma, cfg)
     return DepthMeasurement(
         ellipse=e,
         outline=outline,
         waterline=Waterline(line, water_n, lfit.rms_px, int(chord_pts.shape[0])),
-        fraction=frac,
+        fraction=parts.fraction,
         fraction_affine=frac_affine,
-        fraction_sigma=fr_sigma,
-        depth_cm=frac * diameter_cm,
-        depth_sigma_cm=d_sigma,
+        fraction_sigma=parts.fraction_sigma,
+        depth_cm=parts.depth_cm,
+        depth_sigma_cm=parts.depth_sigma_cm,
         diameter_cm=diameter_cm,
         perspective_corrected=corrected,
         arc_covered_deg=covered,
@@ -1426,7 +1478,13 @@ def measure_wheel_depth(
         cm_per_px=diameter_cm / (2.0 * e.a),
         arc_points=arc_pts,
         chord_points=chord_pts,
-        fraction_bias=bias,
+        fraction_bias=parts.fraction_bias,
+        fraction_raw=frac,
+        ambiguity_spread=spread,
+        resample_fraction_sigma=fr_sigma,
+        resample_sigma_cm=d_sigma,
+        model_sigma_share=parts.model_sigma_share,
+        camera=camera if corrected else None,
     )
 
 
@@ -1678,7 +1736,21 @@ def depth_from_line(
     With ``apply_bias`` the same calibrated bias as ``m.depth_cm`` is removed, so
     the two depths are directly comparable.
     """
-    frac, _ = _fraction(m.ellipse, line, m.waterline.water_normal, camera)
-    if apply_bias:
-        frac = min(1.0, frac - m.fraction_bias)
-    return frac * m.diameter_cm
+    bias = m.fraction_bias if apply_bias else None
+    return depth_at_line(m.ellipse, line, m.waterline.water_normal, m.diameter_cm, bias, camera)
+
+
+def depth_at_line(
+    ellipse: Ellipse,
+    line: Line,
+    water_normal: FloatArray,
+    diameter_cm: float,
+    fraction_bias: float | None,
+    camera: PinholeCamera | None = None,
+) -> float:
+    """Depth (cm) a waterline implies on a fitted wheel, with the bias removed when
+    ``fraction_bias`` is given (as :func:`depth_from_line` does)."""
+    frac, _ = _fraction(ellipse, line, np.asarray(water_normal, dtype=np.float64), camera)
+    if fraction_bias is not None:
+        frac = min(1.0, frac - fraction_bias)
+    return frac * diameter_cm

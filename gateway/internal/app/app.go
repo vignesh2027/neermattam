@@ -13,6 +13,7 @@ import (
 
 	"neermattam/gateway/internal/alerts"
 	"neermattam/gateway/internal/apikeys"
+	"neermattam/gateway/internal/certs"
 	"neermattam/gateway/internal/cities"
 	"neermattam/gateway/internal/config"
 	"neermattam/gateway/internal/facts"
@@ -45,6 +46,10 @@ type App struct {
 	AlertStore *alerts.Store
 	Alerts     *alerts.Service // nil when ALERTS=0
 	Keys       *apikeys.Store
+	// CertKeys are the public keys certificates are checked against;
+	// Certs keeps each report's certificate.
+	CertKeys *certs.KeySet
+	Certs    *certs.Store
 
 	reportLimit *ratelimit.Limiter
 	apiLimit    *ratelimit.Limiter
@@ -53,6 +58,8 @@ type App struct {
 	saveMu      sync.Mutex
 	saveErr     string
 	bg          sync.WaitGroup // the saver, joined by Wait
+	keysFetched time.Time      // last fetch of perception's keys, under keysMu
+	keysMu      sync.Mutex
 }
 
 // Wait blocks until the background saver has stopped (after ctx ends).
@@ -117,6 +124,9 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 		a.Hub.RestoreFeed(live.FeedItem{City: city, Source: r.Source, DepthCm: r.DepthCm, DepthSigmaCm: r.DepthSigmaCm, Place: r.Place, Lat: r.Lat, Lon: r.Lon, At: r.ReceivedAt})
 	}
 	a.Overlays = overlay.NewStore(time.Hour, 300, 96<<20)
+	if err := a.setupCertificates(); err != nil {
+		return nil, err
+	}
 	rain := opts.Rainfall
 	if rain == nil {
 		rain = verify.NewOpenMeteo(cfg.OpenMeteoURL, cfg.WeatherTimeout, m)
@@ -133,12 +143,13 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 			Log:     log,
 			Metrics: m,
 		},
-		Dedupe:   report.NewDedupe(cfg.DuplicateWindow, cfg.NearDuplicateMax),
-		Origins:  a.Origins,
-		Overlays: a.Overlays,
-		Hub:      a.Hub,
-		Log:      log,
-		Metrics:  m,
+		Dedupe:       report.NewDedupe(cfg.DuplicateWindow, cfg.NearDuplicateMax),
+		Origins:      a.Origins,
+		Overlays:     a.Overlays,
+		Certificates: a.Certs,
+		Hub:          a.Hub,
+		Log:          log,
+		Metrics:      m,
 	}
 	if opts.Now != nil {
 		a.Pipeline.SetClock(opts.Now)
@@ -219,6 +230,9 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/route", a.apiRoute)
 	mux.HandleFunc("GET /api/stream", a.apiStream)
 	mux.HandleFunc("GET /api/overlay/{id}", a.apiOverlay)
+	mux.HandleFunc("GET /api/certificates/{id}", a.apiCertificate)
+	mux.Handle("GET /verify/{id}", page(a.verifyPage))
+	mux.HandleFunc("GET /.well-known/neermattam-keys.json", a.wellKnownKeys)
 
 	if a.WhatsApp != nil {
 		mux.HandleFunc("GET /webhooks/whatsapp", a.WhatsApp.Verify)
@@ -289,6 +303,7 @@ func (a *App) SaveProvenance() {
 func (a *App) Run(ctx context.Context) {
 	go a.Hub.Run(ctx, a.Engine)
 	go a.citiesRefresh(ctx)
+	go a.certKeysRefresh(ctx)
 	if a.Alerts != nil {
 		go a.Alerts.Run(ctx)
 	}

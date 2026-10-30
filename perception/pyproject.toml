@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=44",
     "fastapi>=0.162.0",
     "httpx>=0.28.1",
     # Pinned exactly: the official SAM 3.1 output parser. Tests also use its

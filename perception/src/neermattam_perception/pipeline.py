@@ -25,22 +25,26 @@ import asyncio
 import math
 import time
 from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
-from typing import cast
+from typing import Any, cast
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from .adapters import (
+    AnswerRejected,
     MaskModel,
     ModelError,
     SceneModel,
     SceneObject,
     SceneReading,
     VehicleObject,
+    hosted_scene_prompt_sha256,
 )
 from .agent import TraceStep, VerifyRefineAgent
+from .certificate import FORMAT, Signer, utc_now
 from .geometry import (
     DepthFailure,
     DepthMeasurement,
@@ -53,12 +57,14 @@ from .geometry import (
 from .media import ImageInput, VideoInput, image_from_rgb
 from .models import (
     AgentStepOut,
+    CertificateOut,
     MeasureResponse,
     ModelEstimateOut,
     ModelsOut,
     ReferenceOut,
     WaterlineOut,
 )
+from .muse_open import prompt_digest
 from .overlay import png_b64, render_overlay
 from .person import (
     PersonDecline,
@@ -75,6 +81,7 @@ from .person import (
 )
 from .references import WHEEL_KINDS, ReferenceChoice, RefKind, resolve_reference
 from .sam import MAX_PROMPTED_OBJECTS, ObjectMask, ObjectPrompt, PointPrompt
+from .validate import RULES
 from .velocity import VelocityEstimate, surface_velocity
 
 KIND_TEXT = {
@@ -139,6 +146,8 @@ class ModelEstimate:
     depth_cm: float
     sigma_cm: float
     basis: str
+    low_cm: float | None = None  # the range the scene model gave, when it gave one
+    high_cm: float | None = None
 
 
 def _confidence(quality: float, sigma: float, diameter: float, agreement: float | None) -> float:
@@ -158,6 +167,34 @@ def estimate_sigma(depth_cm: float, low: float | None = None, high: float | None
     return sigma
 
 
+def wheel_final(
+    depth_cm: float,
+    sigma_cm: float,
+    squash_cm: float,
+    squash_sigma_cm: float,
+    agreement_cm: float | None,
+) -> tuple[float, float]:
+    """The published depth and sigma from a wheel's own measurement.
+
+    A loaded tyre's fitted circle reaches below the road by its squash, which is
+    subtracted with its own uncertainty. Two waterlines that disagree mean one of
+    them is wrong and we cannot tell which, so the difference widens the sigma.
+    The certificate replay calls this too."""
+    depth = max(0.0, depth_cm - squash_cm)
+    sigma = math.hypot(sigma_cm, squash_sigma_cm)
+    if agreement_cm is not None:
+        sigma = math.hypot(sigma, agreement_cm)
+    return depth, sigma
+
+
+def person_final_sigma(sigma_cm: float, agreement_cm: float | None) -> float:
+    """A person measurement's sigma, widened by the landmark disagreement when the
+    scene model's body landmark lies more than two sigma away."""
+    if agreement_cm is not None and agreement_cm > 2.0 * sigma_cm:
+        return math.hypot(sigma_cm, agreement_cm)
+    return sigma_cm
+
+
 def shallow_conflict(depth_cm: float, sigma_cm: float, est_cm: float, est_sigma_cm: float) -> bool:
     """True when a measurement is too shallow to publish against the scene model's
     estimate: the estimate lies above the measurement's two-sigma upper bound,
@@ -171,9 +208,8 @@ def model_estimate(reading: SceneReading) -> ModelEstimate | None:
     if reading.overall_depth_cm is not None and reading.overall_depth_cm >= 0:
         d = reading.overall_depth_cm
         basis = reading.overall_reason or "the scene model's overall visual estimate"
-        return ModelEstimate(
-            d, estimate_sigma(d, reading.overall_low_cm, reading.overall_high_cm), basis
-        )
+        lo, hi = reading.overall_low_cm, reading.overall_high_cm
+        return ModelEstimate(d, estimate_sigma(d, lo, hi), basis, lo, hi)
     per_ref = [r for r in reading.references if r.depth_cm is not None and r.depth_cm >= 0]
     if not per_ref:
         return None
@@ -284,6 +320,11 @@ def draw_person_axis(rgb: NDArray[np.uint8], pm: PersonMeasurement) -> NDArray[n
     return out
 
 
+# A measured person: the measurement, the scene model's object, the outline and
+# the trace target ("person 1").
+_PersonBest = tuple[PersonMeasurement, SceneObject, NDArray[np.bool_], str]
+
+
 class LiveTrace(list[TraceStep]):
     """The trace list; each appended step is also passed to ``on_step`` at once."""
 
@@ -301,6 +342,109 @@ def _ms(t0: float) -> int:
     return round(1000 * (time.perf_counter() - t0))
 
 
+@dataclass
+class _Record:
+    """What one request's certificate records beyond the response itself: the
+    input and the numbers the depth was computed from (CONTRACTS.md 1.2)."""
+
+    input: dict[str, Any] = field(default_factory=dict)
+    wheel: dict[str, Any] | None = None
+    person: dict[str, Any] | None = None
+    estimate: dict[str, Any] | None = None
+
+
+# The record of the request being measured. Pipeline.measure sets a fresh one for
+# each request (each runs in its own task, so concurrent requests never share it).
+_RECORD: ContextVar[_Record | None] = ContextVar("certificate_record", default=None)
+
+
+def _pair(v: Any) -> list[float]:
+    return [float(v[0]), float(v[1])]
+
+
+def wheel_record(
+    target: str,
+    ref: ReferenceChoice,
+    m: DepthMeasurement,
+    line2: Line | None,
+    agreement: float | None,
+) -> dict[str, Any]:
+    """A wheel measurement's numbers for the certificate, at full precision."""
+    e, wl = m.ellipse, m.waterline
+    cam = m.camera
+    return {
+        "target": target,
+        "reference": {
+            "kind": ref.kind.value,
+            "diameter_cm": float(ref.diameter_cm),
+            "diameter_sigma_cm": float(ref.diameter_sigma_cm),
+            "source": ref.source,
+            "squash_cm": float(ref.squash_cm),
+            "squash_sigma_cm": float(ref.squash_sigma_cm),
+        },
+        "ellipse": {
+            "cx": float(e.cx),
+            "cy": float(e.cy),
+            "a": float(e.a),
+            "b": float(e.b),
+            "theta": float(e.theta),
+        },
+        "waterline": {
+            "point": _pair(wl.line.point),
+            "direction": _pair(wl.line.direction),
+            "water_normal": _pair(wl.water_normal),
+            "rms_px": float(wl.rms_px),
+            "n_points": int(wl.n_points),
+        },
+        "camera": None
+        if cam is None
+        else {"focal_px": float(cam.focal_px), "cx": float(cam.cx), "cy": float(cam.cy)},
+        "arc_covered_deg": float(m.arc_covered_deg),
+        "fraction_raw": float(m.fraction_raw),
+        "fraction_bias": float(m.fraction_bias),
+        "fraction": float(m.fraction),
+        "ambiguity_spread": float(m.ambiguity_spread),
+        "resample_sigma_cm": float(m.resample_sigma_cm),
+        "model_sigma_share": float(m.model_sigma_share),
+        "depth_cm": float(m.depth_cm),
+        "depth_sigma_cm": float(m.depth_sigma_cm),
+        "second_waterline": None
+        if line2 is None
+        else {"point": _pair(line2.point), "direction": _pair(line2.direction)},
+        "agreement_cm": None if agreement is None else float(agreement),
+        "estimate_here_cm": None,
+    }
+
+
+def person_record(target: str, pm: PersonMeasurement) -> dict[str, Any]:
+    """A person measurement's numbers for the certificate, at full precision."""
+    agreement = (
+        abs(pm.landmark_depth_cm - pm.depth_cm) if pm.landmark_depth_cm is not None else None
+    )
+    return {
+        "target": target,
+        "top_y": float(pm.top_y),
+        "shoulder_first_y": float(pm.shoulder_first_y),
+        "shoulder_full_y": float(pm.shoulder_full_y),
+        "bottom_y": float(pm.waterline_y),
+        "height_cm": float(pm.height_cm),
+        "height_sigma_cm": float(pm.height_sigma_cm),
+        "visible_share": float(pm.visible_share),
+        "depth_cm": float(pm.depth_cm),
+        "depth_sigma_cm": float(pm.depth_sigma_cm),
+        "landmark": pm.landmark,
+        "landmark_depth_cm": None if pm.landmark_depth_cm is None else float(pm.landmark_depth_cm),
+        "agreement_cm": None if agreement is None else float(agreement),
+    }
+
+
+def _prompt_entry(version: str) -> dict[str, str | None]:
+    digest = prompt_digest(version)
+    if digest is None and version.startswith("scene-hosted@"):
+        digest = hosted_scene_prompt_sha256()
+    return {"id": version, "sha256": digest}
+
+
 class Pipeline:
     def __init__(
         self,
@@ -308,11 +452,14 @@ class Pipeline:
         masks: MaskModel,
         config: PipelineConfig | None = None,
         agent: VerifyRefineAgent | None = None,
+        signer: Signer | None = None,
     ):
         self.scene = scene
         self.masks = masks
         self.config = config or PipelineConfig()
         self.agent = agent
+        # Signs each response's certificate; without one, no certificate is made.
+        self.signer = signer
 
     @property
     def model_names(self) -> ModelsOut:
@@ -320,6 +467,22 @@ class Pipeline:
             scene=getattr(self.scene, "scene_model_name", self.scene.name),
             masks=getattr(self.masks, "mask_model_name", self.masks.name),
         )
+
+    def model_versions(self) -> list[dict[str, str]]:
+        """Each model with the exact weights or endpoint and settings used."""
+        names = self.model_names
+        return [
+            {
+                "role": "scene",
+                "name": names.scene,
+                "version": str(getattr(self.scene, "scene_model_version", names.scene)),
+            },
+            {
+                "role": "masks",
+                "name": names.masks,
+                "version": str(getattr(self.masks, "mask_model_version", names.masks)),
+            },
+        ]
 
     async def ready(self) -> tuple[bool, str]:
         ok_s, why_s = await self.scene.ready()
@@ -364,14 +527,60 @@ class Pipeline:
         cost: float,
         **kw: object,
     ) -> MeasureResponse:
-        return MeasureResponse(
+        rec = _RECORD.get()
+        resp = MeasureResponse(
             models=self.model_names,
             timings_ms=timings,
             cost_usd=round(cost, 6),
             agent_trace=[AgentStepOut(**asdict(t)) for t in trace],
             captured_at=key.captured_at,
+            input_sha256=None if rec is None else rec.input.get("sha256"),
             **kw,
         )
+        if self.signer is not None and rec is not None:
+            envelope = self.signer.sign(self.certificate_record(resp, rec))
+            resp.certificate = CertificateOut(**envelope)
+        return resp
+
+    def certificate_record(self, resp: MeasureResponse, rec: _Record) -> dict[str, Any]:
+        """The record a certificate signs (CONTRACTS.md, section 1.2)."""
+        versions = sorted({t.prompt_version for t in resp.agent_trace if t.prompt_version})
+        return {
+            "format": FORMAT,
+            "measurement_id": resp.measurement_id,
+            "issued_at": utc_now(),
+            "input": dict(rec.input),
+            "models": self.model_versions(),
+            "prompts": [_prompt_entry(v) for v in versions],
+            "steps": [
+                {
+                    "step": t.step,
+                    "target": t.target,
+                    "model": t.model,
+                    "prompt_version": t.prompt_version,
+                    "decision": t.decision,
+                    "latency_ms": t.latency_ms,
+                }
+                for t in resp.agent_trace
+            ],
+            "checks": {
+                "rules": list(RULES),
+                "failures": [
+                    f"{t.target}: {t.output} ({t.decision})"
+                    for t in resp.agent_trace
+                    if t.step == "validate"
+                ],
+            },
+            "geometry": {"wheel": rec.wheel, "person": rec.person, "estimate": rec.estimate},
+            "decision": {
+                "usable": resp.usable,
+                "method": resp.method,
+                "depth_cm": resp.depth_cm,
+                "depth_sigma_cm": resp.depth_sigma_cm,
+                "confidence": resp.confidence,
+                "reasons": list(resp.reasons),
+            },
+        }
 
     def _unusable(
         self,
@@ -466,8 +675,41 @@ class Pipeline:
         """Measure one photo (or a video's key frame).
 
         ``on_step`` is called with every trace step the moment it is recorded,
-        in the order the steps happen (the streaming endpoint uses it).
+        in the order the steps happen (the streaming endpoint uses it). With a
+        signer, the response carries a signed certificate of the measurement.
         """
+        rec = _Record()
+        key = image if image is not None else (video.key_frame if video is not None else None)
+        if key is not None:
+            measured_video = image is None and video is not None
+            sha = video.source_sha256 if measured_video and video is not None else key.source_sha256
+            rec.input = {
+                "kind": "video" if measured_video else "image",
+                "sha256": sha,
+                "width": key.width,
+                "height": key.height,
+            }
+        token = _RECORD.set(rec)
+        try:
+            return await self._measure(
+                image=image,
+                video=video,
+                hint_reference=hint_reference,
+                hint_diameter_cm=hint_diameter_cm,
+                on_step=on_step,
+            )
+        finally:
+            _RECORD.reset(token)
+
+    async def _measure(
+        self,
+        *,
+        image: ImageInput | None,
+        video: VideoInput | None,
+        hint_reference: str | None,
+        hint_diameter_cm: float | None,
+        on_step: Callable[[TraceStep], None] | None,
+    ) -> MeasureResponse:
         cfg = self.config
         started = time.perf_counter()
         deadline = None if cfg.budget_s is None else started + cfg.budget_s - FINISH_RESERVE_S
@@ -484,10 +726,52 @@ class Pipeline:
         # Model failures (no key, API down, weights not loaded) raise ModelError
         # to the caller: they are service faults, not a verdict on the photo.
         t0 = time.perf_counter()
-        reading = await self.scene.read_scene(key)
+        try:
+            reading = await self.scene.read_scene(key)
+        except AnswerRejected as exc:
+            # Asked twice, and both answers failed a check the decision rests on.
+            timings["scene"] = _ms(t0)
+            version = getattr(self.scene, "scene_prompt_version", None)
+            trace.append(
+                TraceStep(
+                    "scene",
+                    "photo",
+                    scene_name,
+                    f"photo {key.width}x{key.height} px",
+                    "two answers, both failed their checks",
+                    "stop: no checked scene reading",
+                    timings["scene"],
+                    version,
+                )
+            )
+            first, second = exc.attempts[0], exc.attempts[-1]
+            trace.append(
+                TraceStep("validate", "photo", "validator", "scene answer", first, "retry", 0)
+            )
+            trace.append(
+                TraceStep(
+                    "validate", "photo", "validator", "second scene answer", second, "give up", 0
+                )
+            )
+            return self._unusable(
+                key,
+                [f"the scene model's answer failed its checks twice ({second})"],
+                trace,
+                timings,
+                exc.cost_usd,
+            )
         timings["scene"] = _ms(t0)
         cost += reading.cost_usd
         est = model_estimate(reading)
+        rec = _RECORD.get()
+        if rec is not None and est is not None:
+            rec.estimate = {
+                "depth_cm": float(est.depth_cm),
+                "low_cm": est.low_cm,
+                "high_cm": est.high_cm,
+                "sigma_cm": float(est.sigma_cm),
+                "basis": est.basis,
+            }
         kinds = ", ".join(r.kind.value for r in reading.references) or "none"
         trace.append(
             TraceStep(
@@ -500,8 +784,34 @@ class Pipeline:
                 f"{kinds}" + (f"; own estimate {est.depth_cm:.0f} cm" if est is not None else ""),
                 _scene_decision(reading, est is not None),
                 timings["scene"],
+                reading.prompt_version,
             )
         )
+        if reading.retried_because is not None:
+            trace.append(
+                TraceStep(
+                    "validate",
+                    "photo",
+                    "validator",
+                    "first scene answer",
+                    reading.retried_because,
+                    "retry",
+                    0,
+                )
+            )
+        if reading.dropped:
+            n = len(reading.dropped)
+            trace.append(
+                TraceStep(
+                    "validate",
+                    "photo",
+                    "validator",
+                    "scene answer",
+                    "; ".join(reading.dropped),
+                    f"drop {n} field{'s' if n > 1 else ''} that failed, use the rest",
+                    0,
+                )
+            )
 
         q = reading.quality
         if q.score < cfg.min_quality or (q.blurred and q.score < 0.5):
@@ -673,7 +983,7 @@ class Pipeline:
                 key, [*reasons, *failures, "water could not be segmented"], trace, timings, cost
             )
 
-        person_best: tuple[PersonMeasurement, SceneObject, NDArray[np.bool_]] | None = None
+        person_best: _PersonBest | None = None
         if persons:
             person_best = await self._measure_persons(key, persons, water, trace, failures, faces)
 
@@ -784,10 +1094,6 @@ class Pipeline:
             return self._unusable(key, [*reasons, *failures], trace, timings, cost)
 
         m, cand, ref = best
-        # A loaded tyre's fitted circle reaches below the road by its squash;
-        # the correction carries its own uncertainty.
-        depth_cm = max(0.0, m.depth_cm - ref.squash_cm)
-        sigma = math.hypot(m.depth_sigma_cm, ref.squash_sigma_cm)
         reasons.append(f"{KIND_TEXT[cand.obj.kind]} found")
         if ref.source.startswith("catalogue"):
             reasons.append(f"wheel size from catalogue: {ref.label}")
@@ -805,15 +1111,22 @@ class Pipeline:
         line2 = second_line(wl_pts, m) if wl_pts else None
         if line2 is not None:
             agreement = abs(depth_from_line(m, line2, camera) - m.depth_cm)
-            # Two waterlines that disagree mean one of them is wrong and we
-            # cannot tell which: the difference widens the sigma.
-            sigma = math.hypot(sigma, agreement)
             reasons.append(f"scene model waterline agrees within {agreement:.1f} cm")
+        # The squash correction, then the second waterline's disagreement.
+        depth_cm, sigma = wheel_final(
+            m.depth_cm, m.depth_sigma_cm, ref.squash_cm, ref.squash_sigma_cm, agreement
+        )
+        wrec = wheel_record(
+            f"{cand.obj.kind.value.replace('_', ' ')} {cand.index}", ref, m, line2, agreement
+        )
+        if rec is not None:
+            rec.wheel = wrec
         confidence = _confidence(q.score, sigma, ref.diameter_cm, agreement)
 
         if est is not None:
             local = cand.obj.depth_cm if cand.obj.depth_cm is not None else est.depth_cm
             local_sigma = estimate_sigma(local)
+            wrec["estimate_here_cm"] = float(local)
             combined = math.hypot(sigma, local_sigma)
             # Shallow-side guard. Calling deep water shallow is the dangerous
             # error, and the estimate's own sigma (20 cm or more) is too wide for a
@@ -877,6 +1190,8 @@ class Pipeline:
 
         if person_best is not None:
             pm = person_best[0]
+            if rec is not None:
+                rec.person = person_record(person_best[3], pm)
             combined = math.hypot(sigma, pm.depth_sigma_cm)
             differ = abs(depth_cm - pm.depth_cm) > 2.0 * combined
             if differ:
@@ -1135,7 +1450,7 @@ class Pipeline:
         trace: list[TraceStep],
         failures: list[str],
         faces: list[tuple[int, int, int, int]],
-    ) -> tuple[PersonMeasurement, SceneObject, NDArray[np.bool_]] | None:
+    ) -> _PersonBest | None:
         """Segment every person the scene model boxed and measure the depth at each.
 
         SAM is prompted with the person's box, a point on the body and the head
@@ -1176,7 +1491,7 @@ class Pipeline:
                 faces.append(head_region(mask, None))
             masks.append(mask)
         local_water = await self._water_below_people(key, water.mask, masks, trace)
-        best: tuple[PersonMeasurement, SceneObject, NDArray[np.bool_]] | None = None
+        best: _PersonBest | None = None
         for i, (p, _op) in enumerate(prompts):
             target = f"person {i + 1}"
             mask = masks[i]
@@ -1238,7 +1553,7 @@ class Pipeline:
                 )
             )
             if best is None or res.depth_sigma_cm < best[0].depth_sigma_cm:
-                best = (res, p, mask)
+                best = (res, p, mask, target)
         return best
 
     async def _water_below_people(
@@ -1334,12 +1649,12 @@ class Pipeline:
         cost: float,
         est: ModelEstimate | None,
         quality: float,
-        person: tuple[PersonMeasurement, SceneObject, NDArray[np.bool_]],
+        person: _PersonBest,
         water: ObjectMask | None,
         faces: Sequence[tuple[int, int, int, int]],
     ) -> MeasureResponse:
         """No wheel measured, a person was: depth against the adult stature prior."""
-        pm, _p, mask = person
+        pm, _p, mask, target = person
         depth_cm, sigma = pm.depth_cm, pm.depth_sigma_cm
         reasons = [
             *reasons,
@@ -1355,8 +1670,10 @@ class Pipeline:
                 f"the scene model puts the water at the {pm.landmark.replace('_', ' ')}, "
                 f"about {pm.landmark_depth_cm:.0f} cm ({agreement:.0f} cm apart)"
             )
-            if agreement > 2.0 * sigma:
-                sigma = math.hypot(sigma, agreement)
+        sigma = person_final_sigma(sigma, agreement)
+        rec = _RECORD.get()
+        if rec is not None:
+            rec.person = person_record(target, pm)
         confidence = _confidence(quality, sigma, pm.height_cm, agreement)
         if est is not None:
             combined = math.hypot(sigma, est.sigma_cm)

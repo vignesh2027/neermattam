@@ -13,7 +13,7 @@
   </header>
 
   <nav class="dev-toc card" aria-label="{{t "dev.toc"}}">
-    <a href="#start">{{t "dev.start_title"}}</a><a href="#route">GET /api/v1/route</a><a href="#cells">GET /api/v1/cells</a><a href="#usage">GET /api/v1/usage</a><a href="#errors">{{t "dev.errors_title"}}</a><a href="#limits">{{t "dev.limits_title"}}</a><a href="#terms">{{t "dev.terms_title"}}</a>
+    <a href="#start">{{t "dev.start_title"}}</a><a href="#route">GET /api/v1/route</a><a href="#cells">GET /api/v1/cells</a><a href="#usage">GET /api/v1/usage</a><a href="#verify">{{t "dev.cert_title"}}</a><a href="#errors">{{t "dev.errors_title"}}</a><a href="#limits">{{t "dev.limits_title"}}</a><a href="#terms">{{t "dev.terms_title"}}</a>
   </nav>
 
   <section class="dev-sec" id="start" aria-labelledby="start-h">
@@ -95,6 +95,27 @@ go run ./cmd/neermattam-keys usage</code></pre>
     <pre class="code"><code>{"key": "dztyc2uj", "name": "Acme Fleet", "rate_per_min": 600,
  "total": {"routes": 1840, "cells": 96},
  "days": [{"date": "2026-10-29", "routes": 212, "cells": 12}, ...]}</code></pre>
+  </section>
+
+  <section class="dev-sec" id="verify" aria-labelledby="verify-h">
+    <h2 id="verify-h">{{t "dev.cert_title"}}</h2>
+    <p>{{t "dev.cert_p"}}</p>
+    <table class="dev-table">
+      <thead><tr><th>URL</th><th>{{t "dev.th_meaning"}}</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /verify/{measurement_id}</code></td><td>{{t "dev.cert_page"}}</td></tr>
+        <tr><td><code>GET /api/certificates/{measurement_id}</code></td><td>{{t "dev.cert_api"}}</td></tr>
+        <tr><td><code>GET /.well-known/neermattam-keys.json</code></td><td>{{t "dev.cert_keys"}}</td></tr>
+      </tbody>
+    </table>
+    <pre class="code"><code>{"format": "neermattam-certificate/1", "alg": "Ed25519", "key_id": "ed25519:5cadd6dd4ddca908",
+ "payload": "{\"checks\":{...},\"decision\":{\"depth_cm\":23.4,...},\"geometry\":{\"wheel\":{\"ellipse\":{...}}},...}",
+ "signature": "base64url"}</code></pre>
+    <p>{{t "dev.cert_how"}}</p>
+    <p>{{t "dev.cert_replay"}}</p>
+    <pre class="code"><code>curl -s "{{.Dev.Base}}/api/certificates/m_01J..." -o cert.json
+cd perception &amp;&amp; uv run python -m neermattam_perception.replay ../cert.json \
+    --keys "{{.Dev.Base}}/.well-known/neermattam-keys.json"</code></pre>
   </section>
 
   <section class="dev-sec" id="errors" aria-labelledby="errors-h">

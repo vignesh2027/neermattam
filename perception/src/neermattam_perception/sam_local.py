@@ -165,6 +165,11 @@ class Sam21LocalAdapter:
         return f"sam-2.1-hiera-{self.size}" + ("-fp16" if self.dtype == "float16" else "")
 
     @property
+    def mask_model_version(self) -> str:
+        """The exact weights and precision, for the measurement certificate."""
+        return f"{self.model_id}, {self.dtype}, run locally"
+
+    @property
     def loaded(self) -> bool:
         return self._model is not None
 

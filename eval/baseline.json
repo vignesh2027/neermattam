@@ -1,0 +1,43 @@
+{
+ "generated_by": "uv run python ../eval/gate.py --write-baseline (from perception/)",
+ "date": "2026-10-30",
+ "settings": {
+  "synthetic": {
+   "cases": 200,
+   "seed": 2026,
+   "draws": 40
+  },
+  "person": {
+   "n": 400,
+   "seed": 11
+  }
+ },
+ "tolerance": {
+  "mae_cm": 0.02,
+  "share": 0.005
+ },
+ "prompt_versions": {
+  "scene": "scene@cf7a74eb23ee",
+  "verify-wheel": "verify-wheel@1d51d73f5037",
+  "verify-water": "verify-water@2229de9c965d",
+  "transcribe": "transcribe@d9fbcddc2908"
+ },
+ "environment": {
+  "python": "3.12.8",
+  "numpy": "2.5.4"
+ },
+ "results": {
+  "synthetic": {
+   "cases": 200.0,
+   "measured_share": 0.805,
+   "mae_cm": 3.9013914590106125,
+   "within_1_sigma": 0.8385093167701864
+  },
+  "person": {
+   "cases": 400.0,
+   "measured_share": 0.985,
+   "mae_cm": 6.499157243495066,
+   "within_1_sigma": 0.8654822335025381
+  }
+ }
+}

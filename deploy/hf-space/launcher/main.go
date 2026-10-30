@@ -76,9 +76,10 @@ func main() {
 	if frontAddr != "" {
 		gatewayBind = "127.0.0.1:" + port
 	}
-	// Each service sees only the secrets it uses: perception the model keys,
-	// the gateway the control-room key and the Web Push private key.
-	modelSecrets := []string{"BASETEN_API_KEY", "MODEL_API_KEY", "HF_TOKEN", "MODAL_SAM_TOKEN", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"}
+	// Each service sees only the secrets it uses: perception the model keys
+	// and the certificate signing key, the gateway the control-room key and
+	// the Web Push private key.
+	modelSecrets := []string{"BASETEN_API_KEY", "MODEL_API_KEY", "HF_TOKEN", "MODAL_SAM_TOKEN", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "NEERMATTAM_SIGNING_KEY"}
 	gatewaySecrets := []string{"CONTROL_ROOM_KEY", "VAPID_PRIVATE_KEY"}
 	all := append(append([]string{}, modelSecrets...), gatewaySecrets...)
 	bin := env("NEERMATTAM_BIN", "/opt/neermattam/bin")

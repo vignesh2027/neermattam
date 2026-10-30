@@ -116,3 +116,34 @@ def test_real_photo_report_and_commons_metadata(tmp_path: Path, monkeypatch) -> 
     mod.write_results([text.replace("30.0", "31.0")], "header 2")
     out = (tmp_path / "R.md").read_text()
     assert out.count("<!-- real-eval:begin -->") == 1 and "header 2" in out and "31.0" in out
+
+
+def test_eval_gate_compares_against_the_committed_baseline() -> None:
+    """eval/gate.py: the committed baseline matches its settings, and worse numbers fail."""
+    import importlib.util
+    import json
+
+    root = Path(__file__).resolve().parents[2] / "eval"
+    spec = importlib.util.spec_from_file_location("gate", root / "gate.py")
+    assert spec is not None and spec.loader is not None
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    base = json.loads((root / "baseline.json").read_text(encoding="utf-8"))
+    assert base["settings"] == gate.SETTINGS and base["tolerance"] == gate.TOLERANCE
+    now = json.loads(json.dumps(base["results"]))
+    assert all(ok for *_, ok in gate.compare(now, base))
+    # Within the tolerances: still a pass.
+    now["synthetic"]["mae_cm"] += 0.01
+    now["person"]["within_1_sigma"] -= 0.004
+    assert all(ok for *_, ok in gate.compare(now, base))
+    # Beyond them: each one fails on its own.
+    for ev, metric, delta in (
+        ("synthetic", "mae_cm", 0.05),
+        ("synthetic", "within_1_sigma", -0.01),
+        ("person", "measured_share", -0.01),
+        ("person", "mae_cm", 0.05),
+    ):
+        worse = json.loads(json.dumps(base["results"]))
+        worse[ev][metric] += delta
+        failed = [(e, m) for e, m, *_, ok in gate.compare(worse, base) if not ok]
+        assert failed == [(ev, metric)], (ev, metric, failed)

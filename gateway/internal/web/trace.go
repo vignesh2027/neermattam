@@ -12,7 +12,7 @@ import (
 // TraceStepView is one step of perception's agent, ready to draw.
 type TraceStepView struct {
 	Index    int
-	Kind     string // scene, segment, verify, confirm, refine, giveup, geometry, estimate, budget, other
+	Kind     string // scene, segment, verify, confirm, refine, giveup, geometry, estimate, budget, validate, other
 	Label    string
 	Target   string
 	Model    string
@@ -22,8 +22,9 @@ type TraceStepView struct {
 	Detail   string // the rest of the decision, such as the new box
 	Tone     string // ok, refine, stop, neutral
 	Latency  string
-	Slow     bool // over 10 seconds
-	DelayMs  int  // reveal stagger when the trace arrives all at once
+	Prompt   string // the prompt version a language-model step was sent
+	Slow     bool   // over 10 seconds
+	DelayMs  int    // reveal stagger when the trace arrives all at once
 }
 
 // TraceView is the whole agent trace.
@@ -43,7 +44,8 @@ type TraceView struct {
 var stepKinds = map[string]bool{
 	"scene": true, "segment": true, "verify": true, "confirm": true,
 	"refine": true, "giveup": true, "geometry": true, "estimate": true,
-	"budget": true, // perception's time budget stopped the checks still open
+	"budget":   true, // perception's time budget stopped the checks still open
+	"validate": true, // a model answer failed a deterministic check
 }
 
 // NewTraceStep classifies one step. A verify whose decision is a refinement
@@ -52,6 +54,7 @@ func NewTraceStep(lang string, i int, s upstream.AgentStep) TraceStepView {
 	v := TraceStepView{
 		Index: i + 1, Target: s.Target, Model: s.Model, Input: s.Input, Output: s.Output,
 		Latency: latency(s.LatencyMs), Slow: s.LatencyMs >= 10_000, DelayMs: min(i*70, 1400),
+		Prompt: s.PromptVersion,
 	}
 	kind := strings.ToLower(strings.TrimSpace(s.Step))
 	dec := strings.TrimSpace(s.Decision)

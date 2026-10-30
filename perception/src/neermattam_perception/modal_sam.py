@@ -98,6 +98,10 @@ class ModalSamAdapter:
     def mask_model_name(self) -> str:
         return f"sam-2.1-hiera-{self.model} (Modal)"
 
+    @property
+    def mask_model_version(self) -> str:
+        return f"facebook/sam2.1-hiera-{self.model} on the Modal service"
+
     def _client(self) -> httpx.AsyncClient:
         if not self.configured:
             raise ModelError("MODAL_SAM_URL and MODAL_SAM_TOKEN are not set")
@@ -367,6 +371,15 @@ class FallbackMasks:
     @property
     def mask_model_name(self) -> str:
         return self._last or str(self.primary.mask_model_name)
+
+    @property
+    def mask_model_version(self) -> str:
+        """The version of whichever model served last (the primary until one did)."""
+        if self._last.startswith(str(self.fallback.mask_model_name)):
+            used: Any = self.fallback
+        else:
+            used = self.primary
+        return str(getattr(used, "mask_model_version", used.mask_model_name))
 
     def load(self) -> None:
         """Nothing to load up front: the primary is remote and the fallback is lazy."""

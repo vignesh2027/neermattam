@@ -120,3 +120,35 @@ func TestTracePanelRenders(t *testing.T) {
 		}
 	}
 }
+
+func TestResultCardLinksTheCertificateAndTraceShowsPromptVersions(t *testing.T) {
+	r, _ := NewRenderer()
+	d, s := 23.4, 3.1
+	o := &report.Outcome{Status: report.StatusFused, Source: "photo", ReceivedAt: time.Now(), DepthCm: &d, DepthSigmaCm: &s,
+		Measurement: &upstream.Measurement{Usable: true}, CertificateURL: "/verify/m_01M660TESTVERIFY"}
+	for lang, want := range map[string]string{"en": "Verify this measurement", "ta": "இந்த அளவீட்டைச் சரிபார்க்கவும்", "hi": "इस माप की पुष्टि करें"} {
+		html, err := r.Fragment(lang, "result_card", NewResultView(o, lang))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(html, `href="/verify/m_01M660TESTVERIFY"`) || !strings.Contains(html, want) {
+			t.Errorf("%s card lacks the verify link", lang)
+		}
+	}
+	o.CertificateURL = "javascript:alert(1)"
+	if html, _ := r.Fragment("en", "result_card", NewResultView(o, "en")); strings.Contains(html, "Verify this measurement") {
+		t.Error("a link that is not a verify page was shown")
+	}
+	o.CertificateURL = ""
+	if html, _ := r.Fragment("en", "result_card", NewResultView(o, "en")); strings.Contains(html, "vfy-link") {
+		t.Error("a verify link without a certificate")
+	}
+	tv := NewTraceView("en", []upstream.AgentStep{
+		{Step: "verify", Target: "wheel 1", Model: "muse-spark-open", Decision: "accept", PromptVersion: "verify-wheel@1d51d73f5037"},
+		{Step: "validate", Target: "wheel 1", Model: "validator", Output: "is_target: 'yes' is not true or false", Decision: "retry"},
+	}, false)
+	html, _ := r.Fragment("en", "trace_panel", tv)
+	if !strings.Contains(html, "verify-wheel@1d51d73f5037") || tv.Steps[1].Kind != "validate" || tv.Steps[1].Label != "Check" {
+		t.Errorf("trace: kind %s label %s", tv.Steps[1].Kind, tv.Steps[1].Label)
+	}
+}

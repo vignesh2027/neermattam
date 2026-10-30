@@ -106,6 +106,7 @@ type fakePerception struct {
 	body        string
 	stream      bool // serve /v1/measure/stream; otherwise it answers 404
 	transcript  string
+	keys        atomic.Value // string: the GET /v1/keys document
 }
 
 func newFakePerception(t *testing.T, usable bool) *fakePerception {
@@ -117,6 +118,14 @@ func newFakePerception(t *testing.T, usable bool) *fakePerception {
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/readyz" {
 			w.Write([]byte(`{}`))
+			return
+		}
+		if r.URL.Path == "/v1/keys" {
+			doc, _ := p.keys.Load().(string)
+			if doc == "" {
+				doc = `{"keys":[]}`
+			}
+			w.Write([]byte(doc))
 			return
 		}
 		if r.URL.Path == "/v1/transcribe" {

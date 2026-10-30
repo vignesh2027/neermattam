@@ -31,10 +31,12 @@ Response 200:
   "method": "wheel_geometry",
   "model_estimate": {"depth_cm": 30.0, "depth_sigma_cm": 20.0, "basis": "water reaches the lower half of the scooter wheels", "model": "muse-spark-open"},
   "agent_trace": [
-    {"step": "segment", "target": "two wheeler wheel 1", "model": "sam-2.1-hiera-small", "input": "box [612,580,660,628] px + point [636,600]", "output": "mask 1450 px, bbox [610,578,661,626] px, score 0.91", "decision": "verify", "latency_ms": 70},
-    {"step": "verify", "target": "two wheeler wheel 1", "model": "muse-spark-open", "input": "crop [520,488,752,720] px with the outline drawn", "output": "is_target=true, outline good, waterline visible", "decision": "accept", "latency_ms": 18000}
+    {"step": "segment", "target": "two wheeler wheel 1", "model": "sam-2.1-hiera-small", "input": "box [612,580,660,628] px + point [636,600]", "output": "mask 1450 px, bbox [610,578,661,626] px, score 0.91", "decision": "verify", "latency_ms": 70, "prompt_version": null},
+    {"step": "verify", "target": "two wheeler wheel 1", "model": "muse-spark-open", "input": "crop [520,488,752,720] px with the outline drawn", "output": "is_target=true, outline good, waterline visible", "decision": "accept", "latency_ms": 18000, "prompt_version": "verify-wheel@5d0c3a9e41b7"}
   ],
-  "captured_at": "2015-12-02T07:56:12"
+  "captured_at": "2015-12-02T07:56:12",
+  "input_sha256": "9f2c...64 hex digits",
+  "certificate": {"format": "neermattam-certificate/1", "alg": "Ed25519", "key_id": "ed25519:4c1d95a9f0e2b7d1", "payload": "{\"checks\":...}", "signature": "base64url"}
 }
 ```
 When `usable` is false, `depth_cm` is null and `reasons` explains why (no water, no reference object, blurred, ambiguous waterline).
@@ -53,6 +55,10 @@ When `usable` is false, `depth_cm` is null and `reasons` explains why (no water,
 - `waterline.agreement_cm`: when the scene model's waterline and the mask waterline disagree, the difference is added in quadrature to `depth_sigma_cm`, so disagreement widens the uncertainty as well as lowering `confidence`.
 - `agent_trace`: every model step that led to the answer, in the order the steps happened (checks of different objects run in parallel and interleave): the scene reading, each mask proposal (`segment`), each check of a mask by the scene model (`verify`, with decision `accept`, `refine with box ...` or `give up`), each geometry attempt, the estimate, and a `budget` step when the time budget stopped open checks. `latency_ms` is the wall time of that step. On the single-request hosted path there is one `segment` step for all objects and no `verify` steps.
 - `captured_at`: EXIF `DateTimeOriginal` of the photo (RFC 3339; UTC with `Z` when the camera recorded a zone offset, otherwise local time without an offset), or null. Also sent as the `X-Captured-At` response header.
+- `agent_trace[].prompt_version`: on every step that called Muse Spark Open (the scene reading, each `verify` and `confirm`, including a check that failed), the version of the prompt it was sent: a short name, `@`, and the first 12 hex digits of the SHA-256 of the prompt's text (for a prompt with parts filled in per object, of its template). Null on steps that call no language model. The names are `scene`, `scene-hosted` (the Meta Model API path), `verify-wheel`, `verify-water` and `transcribe`.
+- `validate` steps: every Muse Spark Open answer passes deterministic checks before it is used (section 1.1). When a check fails, a step with `step` `validate` and `model` `validator` says what failed and what was done: `retry` (the question is asked once more), `drop ...` (one element or field is left out and the rest used) or `give up` (that target, or the whole photo, is declined). A failed check is never passed silently. No step is added when every check passes.
+- `input_sha256`: lower-case hex SHA-256 of the file measured (the image; the video when no image is sent) exactly as received, before any decoding or re-encoding.
+- `certificate`: the signed measurement certificate (section 1.2). The service always signs; null only when the pipeline runs without a signer (tools that call it directly). An older perception sends neither `input_sha256` nor `certificate`; clients treat both as absent.
 
 ### POST /v1/measure/stream
 The same request as `POST /v1/measure`, answered as server-sent events (`Content-Type: text/event-stream`) so a client can show the agent working while it works. Requests that fail validation (413, 415, 422) get the same plain HTTP errors as `/v1/measure` before any event is sent. Then:
@@ -78,8 +84,12 @@ Multipart `audio` (wav/ogg/m4a/mp3, at most 25 MB). The voice note may be in any
  "place_text": "Velachery Main Road", "place_spoken": "वेलाचेरी मेन रोड",
  "depth_words": "घुटने तक", "depth_words_en": "knee deep",
  "depth_cm": 45.0, "depth_sigma_cm": 13.5, "depth_low_cm": 35.0, "depth_high_cm": 55.0,
- "depth_basis": "phrase table: knee (hi)", "model": "muse-spark-open", "cost_usd": 0.004}
+ "depth_basis": "phrase table: knee (hi)", "model": "muse-spark-open", "cost_usd": 0.004,
+ "input_sha256": "5be1...64 hex digits", "prompt_version": "transcribe@0a7e51c2d9f3", "validation": []}
 ```
+
+- `input_sha256` is the SHA-256 of the audio file exactly as received; `prompt_version` is as in `agent_trace`.
+- `validation` lists what the deterministic checks of the model's answer rejected (section 1.1), one plain sentence each, such as `language "xx" is not a supported language code; dropped`; empty when every check passed. An answer with no usable transcript after the retries is a 503, as before.
 
 - `text` is the transcript in the scripts spoken.
 - `language` is the detected language as ISO 639-1 codes (`hi`, `ta`, `te`, `kn`, `ml`, `bn`, `mr`, `gu`, `pa`, `or`, `ur`, `en`), joined with `+` for code-switching, main language first (for example `ta+en`); `languages` is the same as a list.
@@ -88,6 +98,44 @@ Multipart `audio` (wav/ogg/m4a/mp3, at most 25 MB). The voice note may be in any
 - `depth_cm`, `depth_sigma_cm`, `depth_low_cm` and `depth_high_cm` come from the documented phrase table (`perception/src/neermattam_perception/voice.py`: ankle, shin, knee, thigh, waist, chest and neck deep in every supported language), or from a spoken number with a unit, or, when neither matches, from the model's own reading; `depth_basis` says which. The sigma is at least 10 cm or 30 percent of the depth. All four are null when no depth was spoken.
 
 Returns 503 with a reason when the audio model is unavailable.
+
+### GET /v1/keys
+The public keys that verify this service's certificates: `{"keys": [{"key_id": "ed25519:4c1d95a9f0e2b7d1", "alg": "Ed25519", "public_key": "<base64url of the 32-byte key>"}]}`. `key_id` is `ed25519:` and the first 16 hex digits of the SHA-256 of the 32 public key bytes. The private key is the 32-byte seed in `NEERMATTAM_SIGNING_KEY` (base64url, in `.env`); without it the service makes a key for the life of the process and logs that certificates will not verify after a restart. The key is never logged or returned.
+
+### 1.1 Checks on every model answer
+Muse Spark Open's answers are checked before anything uses them (`perception/src/neermattam_perception/validate.py`):
+
+- **Schema**: the answer is a JSON object; each field has its type (boolean, number, string, list, object or null as the prompt asks).
+- **Grid**: every point and box coordinate lies on the 0 to 1000 grid; a box is `[x_min, y_min, x_max, y_max]` with `x_min < x_max` and `y_min < y_max`. Coordinates are no longer clamped onto the grid silently.
+- **Inside the image**: every box, once in pixels, lies inside the image (or the crop shown).
+- **Allowed values**: reference kinds, vehicle kinds, vehicle models, postures, body landmarks, positions, the verifier's `choice` (`A`, `B` only when two outlines were shown, or `none`), `outline_quality`, `view`, `coverage` and language codes come from fixed lists; shares and confidences lie in 0 to 1; depths are finite and between 0 and 1000 cm, with a low bound no higher than the high bound.
+
+A field the decision rests on (`water_visible` in the scene reading; `is_target` and `outline_quality` in a wheel check, and `choice` when two outlines were shown; `is_water` and `coverage` in a water check; `text` in a transcript) failing its check makes the question be asked once more; failing again declines it: the photo is answered unusable with the reason, or that wheel or the water is given up. Any other field or list element that fails is dropped and named in a `validate` step. A scene answer that fails is never cached.
+
+### 1.2 Measurement certificate
+Each `/v1/measure` answer carries a certificate: a compact record of what was measured and how, signed with Ed25519, so anyone holding the public key can check that a published depth came from this service unchanged, and recompute it.
+
+```json
+{"format": "neermattam-certificate/1", "alg": "Ed25519", "key_id": "ed25519:4c1d95a9f0e2b7d1",
+ "payload": "<canonical JSON text of the record below>",
+ "signature": "<base64url, no padding: the 64-byte Ed25519 signature of the UTF-8 bytes of payload>"}
+```
+
+`payload` is a JSON string holding the record's JSON text, written with keys sorted, no spaces and every non-ASCII character escaped (Python `json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)`). The signature covers exactly those bytes, so a verifier never re-serialises the record. The record:
+
+- `format`: `neermattam-certificate/1`; `measurement_id`; `issued_at` (RFC 3339 UTC).
+- `input`: `kind` (`image` or `video`), `sha256` (as `input_sha256`), `width` and `height` of the image measured, in pixels.
+- `models`: `[{"role": "scene" | "masks", "name", "version"}]`, the model and the exact weights or endpoint and settings used.
+- `prompts`: `[{"id": "scene@...", "sha256": "<64 hex>"}]`, every prompt version the steps used.
+- `steps`: per `agent_trace` step, `step`, `target`, `model`, `prompt_version`, `decision` and `latency_ms` (the model outputs themselves stay in `agent_trace`).
+- `checks`: `rules` (the names of the checks of section 1.1 that ran) and `failures` (what they rejected; empty when none).
+- `geometry`: the numbers the depth was computed from, each block null when not used:
+  - `wheel`: `target`; `reference` (`kind`, `diameter_cm`, `diameter_sigma_cm`, `source`, `squash_cm`, `squash_sigma_cm`); `ellipse` (`cx`, `cy`, `a`, `b`, `theta`: the fitted near sidewall in image pixels, `theta` in radians); `waterline` (`point`, `direction`, `water_normal`, `rms_px`, `n_points`); `camera` (`focal_px`, `cx`, `cy`, or null for the affine model); `arc_covered_deg`; `fraction_raw` (the submerged fraction `f` before the bias correction), `fraction_bias`, `fraction`; `ambiguity_spread`; `resample_sigma_cm` (the bootstrap spread of the depth, from the outline points, which are not stored); `model_sigma_share`; `depth_cm` and `depth_sigma_cm` (the wheel's own, before the tyre squash and the second waterline); `second_waterline` (`point`, `direction`, or null); `agreement_cm`; `estimate_here_cm` (the scene model's estimate the shallow-side guard compared with, or null).
+  - `person`: `target`; `top_y`, `shoulder_first_y`, `shoulder_full_y`, `bottom_y` (image rows of the outline); `height_cm`, `height_sigma_cm`; `visible_share`; `depth_cm`, `depth_sigma_cm`; `landmark`, `landmark_depth_cm`, `agreement_cm`.
+  - `estimate`: `depth_cm`, `low_cm`, `high_cm`, `sigma_cm`, `basis`.
+- `decision`: `usable`, `method`, `depth_cm`, `depth_sigma_cm`, `confidence`, `reasons`, as in the response.
+
+Full-precision numbers are kept in `geometry` so `python -m neermattam_perception.replay <certificate.json>` can check the signature and recompute the depth and sigma with the service's own geometry code and no model call (docs/VERIFY.md). The masks are not in the certificate; the bootstrap part of a wheel's sigma is recorded, and everything built on it is recomputed.
 
 ## 2. Engine (Rust, port 8302)
 
@@ -152,6 +200,7 @@ Every page takes `?lang=` (one of `en`, `ta`, `hi`, `te`, `kn`, `ml`, `bn`, `mr`
 - `GET /control/panel?city=&cell=` (and `/control/demo/panel?cell=`): JSON `{"html": "..."}` with the live parts of the control room re-rendered, for the page's refresh glue. Same access rules as the page.
 - `GET /control/export?city=&format=geojson|csv` (and `/control/demo/export?format=`): the engine's `/v1/export` passed through as an attachment, with `X-Neermattam-Truncated` and `X-Neermattam-Total-Cells`.
 - `GET /developers`: the developer API documentation and terms.
+- `GET /verify/{measurement_id}`: "Verify this measurement": whether the stored certificate's Ed25519 signature checks out against the published key, whether its input hash matches the file the gateway received, and the certificate in readable form. 404 when the gateway holds no certificate for that id (an older perception, an unusable voice note, or an id it never saw).
 - `GET /about`.
 - `GET /sw.js`: the service worker that shows push notifications (served from the root so its scope covers the site).
 
@@ -160,8 +209,10 @@ Every page takes `?lang=` (one of `en`, `ta`, `hi`, `te`, `kn`, `ml`, `bn`, `mr`
 - `GET /api/cells?city=<id>` or `?bbox=minLon,minLat,maxLon,maxLat` (default: the default city): the engine's cells for the city, compacted, each with `properties.city` and `properties.origin` (`reported`, `simulated` or `mixed`), plus top-level `city` and `simulated_scenario`. 2-second cache, `ETag`, 304.
 - `GET /api/route?from=lat,lon&to=lat,lon&vehicle=pedestrian|walking|two_wheeler|auto|car|bus`: the engine's route Feature with its `baseline`. Both ends must lie in one covered city. Engine 400 and 503 answers are passed on with a plain message and `code` `outside_area`, `different_cities` or `routing_unavailable`.
 - `GET /api/stream?city=<id>`: server-sent events: `hello`, `cell` (one compacted cell on that city's map), `report` (a ticker item with `city`), `resync`, and a ping comment every 20 seconds. Without `city`, every city.
-- `POST /api/report`: multipart with `image`, `video` or `audio`, `lat`, `lon`, optional `city`, `hint_reference`, `hint_diameter_cm`. Runs perception, verification and the engine; returns the measurement, the verification and the cell update.
+- `POST /api/report`: multipart with `image`, `video` or `audio`, `lat`, `lon`, optional `city`, `hint_reference`, `hint_diameter_cm`. Runs perception, verification and the engine; returns the measurement, the verification and the cell update. When perception sent a certificate, the reply has `certificate_url` (`/verify/{measurement_id}`) and `measurement.certificate` is left out (it is served on its own, below).
 - `GET /api/overlay/{measurement_id}`: the report overlay JPEG, kept for an hour.
+- `GET /api/certificates/{measurement_id}`: the certificate exactly as perception signed it (section 1.2), as `application/json`, plus `X-Neermattam-Verified: true|false`. Certificates are kept in `GATEWAY_DATA_DIR/certificates` (the newest 20,000; in memory, the newest 2,000, when persistence is off). 404 `no_certificate`.
+- `GET /.well-known/neermattam-keys.json`: the public keys certificates are checked against, in the shape of perception's `GET /v1/keys`, with `"source"` per key (`config` for `CERTIFICATE_PUBLIC_KEYS`, `perception` for keys fetched from perception). The gateway trusts only these keys, never a key carried in a certificate, and keeps the keys it has fetched in `certificate-keys.json`, so certificates signed before a key change still verify.
 - `GET /api/alerts/key`: `{"vapid_public_key": "<base64url P-256 point>"}`, or 404 when push alerts are off.
 - `POST /api/alerts`: JSON `{"subscription": <PushSubscription.toJSON()>, "city", "vehicle", "lang", "point": {"lat","lon"}}`, or with `"route": {"from": "lat,lon", "to": "lat,lon"}` in place of `point`: the gateway plans the water-aware route for that vehicle and watches every map cell along it (sampled every 25 m, at most 800 points). The endpoint must be https on a known push service (`PUSH_HOSTS`). Returns 201 `{"id", "token", "status": "over|under|unknown", "class", "depth_cm", "where", "message", "expires_at"}`. The `token` is needed to read or delete it. 400 `bad_endpoint`, `bad_keys` or `bad_watch`; 409 `too_many` when the endpoint already watches `ALERTS_PER_CLIENT` places; 503 `full` when the gateway holds `ALERTS_MAX`; 404 `alerts_off`.
 - `GET /api/alerts/{id}` and `DELETE /api/alerts/{id}`, with header `X-Alert-Token`: read its status or stop it.

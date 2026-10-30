@@ -74,6 +74,7 @@ modal secret create neermattam-web --from-json /tmp/s.json --force && rm /tmp/s.
 Leave `DEMO_API_KEY` out of that JSON: it is a client credential, not a server setting. (`modal secret create --from-dotenv` needs `python-dotenv` in the CLI's environment; the JSON route avoids that.) The secret holds:
 
 - `BASETEN_API_KEY`, `BASETEN_BASE_URL`, `BASETEN_MODEL`: Muse Spark Open;
+- `NEERMATTAM_SIGNING_KEY`: the Ed25519 seed perception signs measurement certificates with (docs/VERIFY.md); the launcher passes it to perception only. Added to `.env` on 30 October 2026, so the secret must be recreated from `.env` before the next deploy, or the deployed perception signs with a key that lasts only until it restarts;
 - `CONTROL_ROOM_KEY`: unlocks `/control` (48 random hex characters, made with `openssl rand -hex 24`); `/control/demo` stays public;
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`: the Web Push key pair for street alerts (P-256, base64url), generated once and kept in `.env` so subscriptions stay valid across redeploys;
 - `MODAL_SAM_URL`, `MODAL_SAM_TOKEN`: for perception's `sam2.1-modal` masks. The image sets `NEERMATTAM_MASKS=sam2.1-local`, so they are not used now.
