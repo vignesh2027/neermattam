@@ -179,3 +179,38 @@ def test_an_outline_on_the_rim_is_darker_outside_than_inside() -> None:
     rim[360:] = False
     assert outside_inside_ratio(rgb, wheel) > 1.5  # rubber inside, body and water outside
     assert outside_inside_ratio(rgb, rim) < INSIDE_TYRE_RATIO  # rubber outside the rim
+
+
+def test_tyre_failure_tells_tyre_from_rim_cut_and_wrong_size() -> None:
+    from neermattam_perception.wheel_finder import tyre_evidence, tyre_failure
+
+    rgb, wheel, vbox = car_scene()
+    yy, xx = np.mgrid[0:480, 0:640]
+    vw = vbox[2] - vbox[0]
+    ev = tyre_evidence(rgb, wheel)
+    assert ev is not None and ev.dark_inside > ev.dark_outside
+    assert tyre_failure(ev, "car", vw) is None  # 120 px on a 440 px car: 27%
+
+    rim = ((xx - 200) ** 2 + (yy - 330) ** 2) <= 33**2
+    rim[360:] = False
+    why = tyre_failure(tyre_evidence(rgb, rim), "car", vw)
+    assert why is not None and "inside the tyre" in why
+
+    # Half the tyre closed by a chord through the wheel: a tilted oval (the x1 failure).
+    cut = wheel & ((xx - 200) + (yy - 330) < 0)
+    why = tyre_failure(tyre_evidence(rgb, cut))
+    assert why is not None and ("tilted" in why or "inside the tyre" in why)
+
+    why = tyre_failure(ev, "car", 2000)  # a 120 px wheel on a 2000 px car box
+    assert why is not None and "of the vehicle's width" in why
+
+
+def test_tyre_points_outside_the_outline_are_counted() -> None:
+    from neermattam_perception.wheel_finder import points_outside
+
+    _, wheel, _ = car_scene()
+    on_rubber = [(145, 320), (200, 275), (255, 320)]  # radius about 55 of 60
+    assert points_outside(wheel, on_rubber) == 0
+    yy, xx = np.mgrid[0:480, 0:640]
+    rim = ((xx - 200) ** 2 + (yy - 330) ** 2) <= 33**2
+    assert points_outside(rim, on_rubber) == 3

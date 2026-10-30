@@ -29,7 +29,8 @@ from __future__ import annotations
 import asyncio
 import io
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -57,7 +58,10 @@ from .wheel_finder import (
     dark_ellipse_boxes,
     grid_points,
     outside_inside_ratio,
+    points_outside,
     score_wheel,
+    tyre_evidence,
+    tyre_failure,
     wheel_region,
 )
 from .wheel_shape import ShapeScore, dedupe, mask_iou, solid_wheel, wheel_shape
@@ -109,6 +113,8 @@ class Proposal:
     # Brightness just outside over just inside the outline; well below one when
     # the outline follows the rim, inside the dark tyre (wheel_finder).
     edge_ratio: float = 1.0
+    # Why the numbers say this is not a tyre's outer edge (wheel_finder.tyre_failure).
+    not_tyre: str | None = None
 
 
 @dataclass
@@ -409,6 +415,23 @@ def _truthy(v: Any) -> bool:
     return bool(v)
 
 
+# --------------------------------------------------------------------------- time budget
+
+# The moment (``time.perf_counter()``) by which this request's checks must be
+# done; set by :meth:`VerifyRefineAgent.run` for the tasks it starts.
+_DEADLINE: ContextVar[float | None] = ContextVar("agent_deadline", default=None)
+# A check is not started with less time than this left: it would not finish.
+MIN_CALL_S = 6.0
+
+
+class BudgetSpent(ModelError):
+    """The request's time budget ran out before a check could be made."""
+
+
+def _failed(exc: Exception, otherwise: str) -> str:
+    return "time budget reached" if isinstance(exc, BudgetSpent) else otherwise
+
+
 # --------------------------------------------------------------------------- agent
 
 
@@ -452,6 +475,23 @@ class VerifyRefineAgent:
     def scene_name(self) -> str:
         return str(getattr(self.verifier, "scene_model_name", "scene model"))
 
+    async def _ask(
+        self, images: bytes | Sequence[bytes], prompt: str, *, what: str, confirm: bool = False
+    ) -> JsonReply:
+        """One verifier call, inside the request's time budget when there is one."""
+        name = "confirm_image" if confirm else "ask_image"
+        fn: Callable[..., Awaitable[JsonReply]] = getattr(self.verifier, name)
+        deadline = _DEADLINE.get()
+        if deadline is None:
+            return await fn(images, prompt, what=what)
+        left = deadline - time.perf_counter()
+        if left < MIN_CALL_S:
+            raise BudgetSpent("the time budget ran out before this check")
+        try:
+            return await asyncio.wait_for(fn(images, prompt, what=what), left)
+        except TimeoutError as exc:
+            raise BudgetSpent("the time budget ran out during this check") from exc
+
     async def _segment(
         self, image: ImageInput, prompt: ObjectPrompt
     ) -> tuple[ObjectMask | None, int]:
@@ -463,12 +503,30 @@ class VerifyRefineAgent:
             return None, ms
         return m, ms
 
+    @staticmethod
+    def _proposal(
+        image: ImageInput,
+        solid: NDArray[np.bool_],
+        shape: ShapeScore,
+        source: str,
+        vehicle: VehicleObject | None,
+    ) -> Proposal:
+        ratio = outside_inside_ratio(image.rgb, solid)
+        ev = tyre_evidence(image.rgb, solid)
+        why = tyre_failure(
+            ev,
+            vehicle.kind if vehicle is not None else None,
+            vehicle.box[2] - vehicle.box[0] if vehicle is not None else None,
+        )
+        return Proposal(solid, shape, source, ratio, why)
+
     async def _proposals(
         self,
         image: ImageInput,
         box: Box | None,
         pts: tuple[PointPrompt, ...],
         object_id: int,
+        vehicle: VehicleObject | None = None,
     ) -> tuple[list[Proposal], int, int]:
         """Candidate masks for one prompt, best wheel shape first; and how many SAM gave."""
         t0 = time.perf_counter()
@@ -487,8 +545,7 @@ class VerifyRefineAgent:
             out = []
             for i in keep:
                 solid, _ = solid_wheel(raw[i][0])
-                ratio = outside_inside_ratio(image.rgb, solid)
-                out.append(Proposal(solid, wheel_shape(raw[i][0]), raw[i][1], ratio))
+                out.append(self._proposal(image, solid, wheel_shape(raw[i][0]), raw[i][1], vehicle))
             return sorted(out, key=lambda p: -p.shape.score)
 
         props = await asyncio.to_thread(score)
@@ -504,6 +561,7 @@ class VerifyRefineAgent:
         seed: list[Proposal] | None = None,
         target: str | None = None,
         trace: list[TraceStep] | None = None,
+        vehicle: VehicleObject | None = None,
     ) -> RefOutcome:
         """Verify and refine one wheel. ``seed`` replaces SAM's first proposals (the
         vehicle-box search found them already); ``trace`` continues an earlier one."""
@@ -518,7 +576,7 @@ class VerifyRefineAgent:
             if attempt == 0 and seed is not None:
                 props = seed
             else:
-                props, n_raw, ms = await self._proposals(image, box, pts, object_id)
+                props, n_raw, ms = await self._proposals(image, box, pts, object_id, vehicle)
             shown = props[:2]
             if not (attempt == 0 and seed is not None):
                 self._log(
@@ -568,7 +626,7 @@ class VerifyRefineAgent:
             self._keep(both, f"{target.replace(' ', '_')}_try{attempt}.jpg")
             prompt = verify_prompt(kind_text, panels=max(1, len(shown)))
             try:
-                reply = await self.verifier.ask_image(images, prompt, what=f"verify {target}")
+                reply = await self._ask(images, prompt, what=f"verify {target}")
             except ModelError as exc:
                 self._log(
                     out.trace,
@@ -583,7 +641,7 @@ class VerifyRefineAgent:
                     ),
                     emit,
                 )
-                out.verdict = "verification failed"
+                out.verdict = _failed(exc, "verification failed")
                 return out
             out.cost_usd += reply.usage.cost_usd
             chosen = _chosen(reply.data, shown)
@@ -610,7 +668,7 @@ class VerifyRefineAgent:
                 jpeg = render_crop(image.rgb, chosen.mask, box, rect, self.crop_side)
                 self._keep(jpeg, f"{target.replace(' ', '_')}_try{attempt}_close.jpg")
                 try:
-                    reply = await self.verifier.ask_image(
+                    reply = await self._ask(
                         jpeg, verify_prompt(kind_text, 1), what=f"look closer {target}"
                     )
                 except ModelError as exc:
@@ -627,7 +685,7 @@ class VerifyRefineAgent:
                         ),
                         emit,
                     )
-                    out.verdict = "verification failed"
+                    out.verdict = _failed(exc, "verification failed")
                     return out
                 out.cost_usd += reply.usage.cost_usd
                 j = self._judge(reply.data, View(rect), box, chosen, attempt)
@@ -651,8 +709,8 @@ class VerifyRefineAgent:
                 assert chosen is not None
                 one = render_crop(image.rgb, chosen.mask, box, rect, self.crop_side)
                 try:
-                    reply2 = await confirm(
-                        one, verify_prompt(kind_text, 1), what=f"confirm {target}"
+                    reply2 = await self._ask(
+                        one, verify_prompt(kind_text, 1), what=f"confirm {target}", confirm=True
                     )
                 except ModelError as exc:
                     self._log(
@@ -668,7 +726,7 @@ class VerifyRefineAgent:
                         ),
                         emit,
                     )
-                    out.verdict = "confirmation failed"
+                    out.verdict = _failed(exc, "confirmation failed")
                     return out
                 out.cost_usd += reply2.usage.cost_usd
                 j2 = self._judge(reply2.data, View(rect), box, chosen, attempt)
@@ -747,6 +805,16 @@ class VerifyRefineAgent:
             corrected is not None and (box is None or box_iou(corrected, box) <= 0.9)
         )
         can_refine = attempt < self.max_refinements and changed
+        # The numbers that tell a tyre's edge from the rim or a cut outline, and
+        # the verifier's own points on the rubber, which must be inside the outline.
+        not_tyre = chosen.not_tyre if chosen is not None else None
+        if chosen is not None and not_tyre is None and len(positive) >= 2:
+            n_out = points_outside(chosen.mask, positive)
+            if 2 * n_out >= len(positive):
+                not_tyre = (
+                    f"{n_out} of {len(positive)} points the scene model put on the tyre rubber "
+                    "lie outside the outline: it sits inside the tyre"
+                )
         view = str(d.get("view") or "").lower()
         edge = _fraction(d.get("tyre_edge_visible"))
         # A tyre seen edge-on, or with almost none of its edge in view: there is
@@ -770,6 +838,7 @@ class VerifyRefineAgent:
             and chosen.shape.score >= self.accept_shape
             and (box_agree is None or box_agree >= self.min_box_agreement)
             and chosen.edge_ratio >= INSIDE_TYRE_RATIO
+            and not_tyre is None
         ):
             decision = "accept"
         elif can_refine:
@@ -796,6 +865,9 @@ class VerifyRefineAgent:
                 f"{chosen.edge_ratio:.2f})"
             )
             verdict = "outline follows the rim, inside the tyre"
+        elif chosen is not None and is_target and quality == "good" and not_tyre is not None:
+            decision = f"give up: {not_tyre}"
+            verdict = "outline is not the tyre's outer edge"
         elif chosen is not None and is_target and quality == "good":
             decision = f"give up: the outline does not fit a wheel ({chosen.shape.text()})"
             verdict = "outline accepted by the scene model but not wheel-shaped"
@@ -814,6 +886,7 @@ class VerifyRefineAgent:
                 if chosen is not None
                 else ""
             )
+            + (f"not a tyre edge: {not_tyre}, " if not_tyre is not None else "")
             + (f"box agreement {box_agree:.2f}, " if box_agree is not None else "")
             + f"is_target={str(is_target).lower()}, outline {quality}, "
             + (f"view {view}, " if view else "")
@@ -873,9 +946,7 @@ class VerifyRefineAgent:
             jpeg = render_water(image.rgb, mask.mask if mask else None, box, max_side=768)
             self._keep(jpeg, f"water_try{attempt}.jpg")
             try:
-                reply = await self.verifier.ask_image(
-                    jpeg, water_verify_prompt(), what="verify water"
-                )
+                reply = await self._ask(jpeg, water_verify_prompt(), what="verify water")
             except ModelError as exc:
                 self._log(
                     out.trace,
@@ -890,7 +961,18 @@ class VerifyRefineAgent:
                     ),
                     emit,
                 )
-                out.verdict = "verification failed"
+                out.verdict = _failed(exc, "verification failed")
+                if isinstance(exc, BudgetSpent) and confirmed:
+                    # Out of time: the water already confirmed (partial) is used.
+                    union = confirmed[0].mask.copy()
+                    for c in confirmed[1:]:
+                        union |= c.mask
+                    first = confirmed[0]
+                    out.accepted = True
+                    out.mask = ObjectMask(
+                        first.object_id, 0, union, mask_bbox(union) or first.box, first.confidence
+                    )
+                    out.verdict = "partial (time budget reached)"
                 return out
             out.cost_usd += reply.usage.cost_usd
             d = reply.data
@@ -989,6 +1071,14 @@ class VerifyRefineAgent:
             scored = [(score_wheel(image.rgb, raw[i], region, vw), raw[i]) for i in keep]
             scored = [t for t in scored if t[0].score > 0]
             scored.sort(key=lambda t: -t[0].score)
+            # Outlines the numbers already rule out (rim, cut oval, wrong size) go
+            # last, so the verifier sees the plausible tyres first.
+            failed = {
+                id(m)
+                for _, m in scored[:12]
+                if tyre_failure(tyre_evidence(image.rgb, solid_wheel(m)[0]), vehicle.kind, vw)
+            }
+            scored.sort(key=lambda t: id(t[1]) in failed)
             best: list[tuple[WheelScore, NDArray[np.bool_]]] = []
             for sc, m in scored:  # two distinct wheels or outlines
                 if all(mask_iou(m, b) < 0.5 for _, b in best):
@@ -1023,14 +1113,21 @@ class VerifyRefineAgent:
         seed = []
         for sc, wheel in best:
             solid, _ = solid_wheel(wheel)
-            ratio = outside_inside_ratio(image.rgb, solid)
-            seed.append(Proposal(solid, sc.shape, "vehicle search", ratio))
+            seed.append(self._proposal(image, solid, sc.shape, "vehicle search", vehicle))
         bb = mask_bbox(seed[0].mask) or vehicle.box
         obj = SceneObject(
             kind, ((bb[0] + bb[2]) // 2, (bb[1] + bb[3]) // 2), bb, vehicle=vehicle.vehicle
         )
         return await self.refine_reference(
-            image, obj, index, object_id, emit, seed=seed, target=target, trace=trace
+            image,
+            obj,
+            index,
+            object_id,
+            emit,
+            seed=seed,
+            target=target,
+            trace=trace,
+            vehicle=vehicle,
         )
 
     async def run(
@@ -1042,10 +1139,29 @@ class VerifyRefineAgent:
         water_id: int,
         emit: Emit | None = None,
         vehicles: Sequence[tuple[int, VehicleObject, RefKind, int]] = (),
+        deadline: float | None = None,
     ) -> tuple[WaterOutcome, list[RefOutcome]]:
         """Water, every vehicle's wheel and every other reference, verified
         concurrently (SAM itself runs one request at a time). Outcomes come back in
-        the order: vehicles, then references."""
+        the order: vehicles, then references. With ``deadline`` (a
+        ``time.perf_counter()`` value), no check runs past it: what is not
+        verified by then is not accepted (verdict "time budget reached")."""
+        token = _DEADLINE.set(deadline)
+        try:
+            return await self._run(image, refs, water_box, water_points, water_id, emit, vehicles)
+        finally:
+            _DEADLINE.reset(token)
+
+    async def _run(
+        self,
+        image: ImageInput,
+        refs: Sequence[tuple[int, SceneObject, int]],
+        water_box: Box | None,
+        water_points: Sequence[tuple[int, int]],
+        water_id: int,
+        emit: Emit | None,
+        vehicles: Sequence[tuple[int, VehicleObject, RefKind, int]],
+    ) -> tuple[WaterOutcome, list[RefOutcome]]:
         water_job = self.refine_water(image, water_box, water_points, water_id, emit)
         jobs = [
             self.find_vehicle_wheel(image, v, kind, idx, oid, emit)

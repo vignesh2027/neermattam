@@ -14,6 +14,53 @@ Rerun from `perception/` with `uv run --extra local python ../eval/real_photos.p
 * Muse Spark Open runs the scene read at reasoning effort `low` (Baseten's lowest for this model; the default is `xhigh`), images go compressed (1024 px at JPEG quality 75; check crops at 512 px), and scene readings are cached by photo, prompt and settings.
 * `POST /v1/measure/stream` sends each step as server-sent events, then the result.
 
+## Rim checks, the shallow-side guard and latency (30 October, later)
+
+**The x1 failure.** The earlier run accepted an outline of the moped's rear wheel that the scene model called good, whose box agreed with the tyre box (0.86) and whose brightness ratio passed (0.85 against 0.8), and measured 0.7 cm where the scene model said 20 cm. Looking at the proposals again (SAM 2.1 hiera-small, the vehicle-box search, cached scene reading), that outline follows the tyre's left edge and top and then cuts diagonally through the wheel: half a tyre closed by a chord. Its fitted ellipse is an oval (axis ratio 0.57) tilted 38 degrees from upright; the good full-wheel outline of the bike beside it is tilted 1 degree. The outlines that follow the rim instead show a darker ring just outside them (dark share 0.69 outside against 0.15 inside, and 0.42 against 0.05), while tyre outlines show the opposite or no difference.
+
+Two levels of fix:
+
+* **Numeric tyre checks** (`wheel_finder.tyre_failure`, used by the agent and in the vehicle-search ranking), each able to overrule a "good" from the scene model: a darker ring just outside the outline (the rubber is outside, so the outline is on the rim); an oval tilted more than 25 degrees from both image axes with axis ratio below 0.75 (a cut outline; real wheels stand upright and camera roll is small); a diameter outside the range expected for the vehicle box (two-wheeler 18 to 70 percent of the box width, car 8 to 45, auto 9 to 55, bus 4 to 30; wide, to catch a hub or rim fragment and not a slightly small tyre); and the scene model's own points on the tyre rubber, of which at least half must not lie outside the outline. The brightness threshold of 0.8 was left as it was.
+* **A shallow-side guard** in the pipeline. The literal rule "more than two combined sigma apart" would not have caught x1: the estimate's sigma is at least 20 cm, so two combined sigma is about 40 cm and the 19 cm gap passes. So the rule is one-sided: when the scene model's estimate lies above the measurement's own two-sigma upper bound, and by more than half the estimate's sigma (10 cm at least), the wheel reading is not published; the estimate is returned as `model_estimate` and `reasons` gives the wheel's reading. I chose falling back over widening the sigma because the routing engine caps sigma at 10 cm (`engine/src/routing.rs`), so a widened sigma would not raise the depth it routes on, and fusion would still pull the cell shallow. A test uses the x1 numbers (0.7 cm, sigma 2.5, estimate 20 cm).
+
+In the final run below the numeric checks flagged 11 of the outlines the scene model was shown, on 7 photos, and the guard set aside two wheel readings: x1 (0.5 cm, sigma 9.0, against the scene model's 22 cm at that wheel) and x2 (1.3 cm, sigma 5.2, against 25 cm). x2's reading had looked plausible in earlier runs (the rear tyre's lowest point is close to the water), so this is the cautious side costing a measurement that may have been right; no wheel measurement survives on these eleven photos.
+
+**Latency.** The 262 to 462 s photos in the run above were Baseten's tail: single checks of 76 to 160 s where most take 6 to 11 s. Profile of x1 with the network normal (fresh scene reading): scene reading 10.7 s; then, in parallel per object, SAM proposals (1 to 3 s each, but the vehicle-box searches took 5 to 24 s because they wait for each other on the one SAM instance and ranked 50 to 80 full-frame masks each), and three rounds of checks of 6 to 11 s each; geometry 1 to 2 s. What changed:
+
+* every check by Muse Spark Open is cut after 20 s and asked once more (the scene reading after 45 s), instead of waiting up to 120 s per attempt;
+* a time budget: no check is started or waited for later than 50 s after the request began (55 s budget, 5 s kept to finish), and the answer then says the budget ran out and is the best reached in time, with a `budget` step in the trace;
+* the vehicle-box search ranks its masks on windows around them instead of the full 3-megapixel frame (same scores; ranking of one vehicle's 84 proposals went from 9.4 s to 3.3 s, de-duplication from 3.4 s to 0.1 s);
+* smaller images were measured and not adopted: a check took 7.3 and 6.9 s at 1024 px (140 KB) against 6.7 and 9.7 s at 640 px (65 KB), and a scene reading 9.6 s at 1024 px against 10.8 s at 768 px; with the network normal the time follows the length of the model's reasoning, not the upload;
+* the person path already runs only when the scene model reports people; the checks of different objects already ran in parallel, and the rounds for one object depend on each other.
+
+Before and after, the same three photos with fresh scene readings, network normal both times:
+
+| Photo | Before | After |
+|---|---|---|
+| Creta (u_aby-GGLtD-A) | 45.5 s | 39.4 s |
+| c2 | 46.3 s | 29.9 s |
+| x1 | 46.5 s | 48.8 s (the budget stopped one open check at 48 s) |
+
+Under normal service the gain is modest (the critical path is the scene reading plus up to three rounds of checks); what the change buys is a ceiling: no photo can now take the 262 to 462 s seen above.
+
+Final run on all eleven, SAM 2.1 hiera-small locally, fresh scene readings (`--out ../eval/out/final3`):
+
+| Photo | Answer | Scene model's estimate | Wall time | Scene reading | Checks | Cost USD |
+|---|---|---|---|---|---|---|
+| Creta (u_aby-GGLtD-A) | model_estimate 65 cm, sigma 20 (the man pushing the car declined: no shoulder line) | 65 | 43.8 s | 10.7 s | 31.1 s | 0.035 |
+| utility truck (u_0WlJgFHTHE8) | model_estimate 40, sigma 20 | 40 | 38.7 s | 8.8 s | 29.9 s | 0.026 |
+| pickup (u_5T7dG1MRA3U) | model_estimate 45, sigma 20 | 45 | 41.5 s | 9.1 s | 32.3 s | 0.030 |
+| submerged car (u_ple6thPMX3c) | model_estimate 75, sigma 22.5 | 75 | 7.7 s | 7.6 s | none | 0.003 |
+| no wheels (u_Zo6hsIyy75o) | model_estimate 140, sigma 42 | 140 | 8.0 s | 8.0 s | none | 0.006 |
+| c1 | **person_reference 54.2 cm, sigma 12.4** (second person 46.7 cm; landmarks mid-thigh and knee) | 30 | 49.8 s | 9.9 s | 34.3 s | 0.051 |
+| c2 | model_estimate 25, sigma 20 | 25 | 23.3 s | 9.5 s | 13.6 s | 0.018 |
+| c3 | **person_reference 97.0 cm, sigma 12.0** (the man in red; landmark waist, 95 cm) | 105 | 28.1 s | 8.0 s | 16.3 s | 0.011 |
+| c4 | model_estimate 120, sigma 36 | 120 | 31.0 s | 9.0 s | 21.9 s | 0.017 |
+| x1 | model_estimate 18, sigma 20 (wheel read 0.5 cm, set aside by the guard) | 18 | 51.4 s | 10.7 s | 38.8 s | 0.060 |
+| x2 | model_estimate 25, sigma 20 (wheel read 1.3 cm, set aside by the guard) | 25 | 46.3 s | 8.3 s | 36.7 s | 0.027 |
+
+Every photo answered in under 52 s (median 38.7 s). The person results moved between runs because the scene reading was fresh: in c3 a different man was measured this time (97 cm, by eye the water is at his hips or waist), and in c1 the left man read 54 cm against 49 cm before. Both are inside their sigma of each other, which is what a sigma of 12 cm means.
+
 ## People as the reference (30 October)
 
 The service now also measures against an adult standing in the water (`method: person_reference`, `perception/src/neermattam_perception/person.py`, method and sources in `docs/GEOMETRY.md` section 9). SAM outlines the person from the scene model's box, body point and head top; the depth is `H (1 - 0.182 L / s)`, with `L` the visible length, `s` the head-to-shoulder length, and `H` the NCD-RisC adult stature prior for India (158.75 cm, sigma 9.0 cm, sex unknown). The scene model's body landmark at the waterline (knee, waist and so on) is a cross-check. A wheel is preferred when both are measured. Every head the scene model or SAM finds is blurred before an image leaves the service.
@@ -53,7 +100,7 @@ Caveats:
 * The synthetic check (`docs/GEOMETRY.md` section 9.7: 400 figures, mean absolute error 6.5 cm, 4.4 cm low on average) uses the proportions the method assumes; real bodies, clothes, posture and camera angle add error that only field photos with measured depths can show. Expect plus or minus 10 to 15 cm.
 * Where the shoulder is taken is the largest single assumption. Loose clothes, raised arms and hair move it, and the band between the first wide row and full shoulder width is carried in the sigma rather than resolved.
 * Results move between runs, mostly because the verified water mask changes (it decides whether a person's legs reach water and how the outline is trimmed): the c1 blue-shirt man was measured in one run and declined in the next.
-* **x1 regressed on the wheel path.** The accepted outline of the rear wheel of the moped follows the spoked rim inside the tyre (`eval/out/person/x1_agent/two_wheeler_2_wheel_try0.jpg`, panel A), the brightness check passed it (ratio 0.85, the threshold is 0.8), and the geometry returned 0.7 cm, sigma 2.5, which is wrong (the scene model says 20 cm). This is the same failure as the 0.6 cm in an earlier run; the brightness check does not stop it reliably. It is unrelated to the person work and is not fixed here. x2 changed from a wheel measurement to the estimate in this run because its accepted outline did not meet the water.
+* **x1 regressed on the wheel path** in this run (0.7 cm from an outline cut through the wheel). That is fixed, and explained, in the section above.
 * c1 took 462 s in the full run and 41 s in the rerun; the Creta 75 s and 107 s; the submerged car 262 s. The slow ones were waiting on Baseten during the verification calls.
 
 ## Close-up photos and the vehicle-box wheel search (29 October)

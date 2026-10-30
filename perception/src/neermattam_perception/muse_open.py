@@ -586,6 +586,13 @@ class MuseSparkOpenAdapter:
     total_timeout_s: float = 240.0  # all attempts of one call, with backoff
     max_retries: int = 3
     backoff_s: float = 2.0
+    # Hard limits per attempt for the calls on a user's critical path, with one
+    # retry. Baseten's answers are usually 6 to 12 s for a check and 8 to 27 s
+    # for a scene reading, with a rare tail of 80 to 160 s; a stuck call is cut
+    # and asked again rather than waited for (eval/RESULTS_REAL.md, latency).
+    verify_attempt_timeout_s: float | None = 20.0
+    scene_attempt_timeout_s: float | None = 45.0
+    critical_retries: int = 1
     ipv4: bool = True
     max_image_side: int = 1024
     scene_max_tokens: int = 8000
@@ -662,20 +669,35 @@ class MuseSparkOpenAdapter:
         max_tokens: int,
         what: str,
         effort: str | None = None,
+        attempt_timeout_s: float | None = None,
+        retries: int | None = None,
     ) -> ChatReply:
         """One Chat Completions call with retries, under a total time limit.
 
-        Each attempt has the client timeout; all attempts together, with their
-        backoff, must finish within ``total_timeout_s`` or the call fails with a
-        ModelError (never an unbounded wait).
+        Each attempt has the client timeout, or ``attempt_timeout_s`` when given
+        (a hard limit, after which the attempt is abandoned and retried); all
+        attempts together, with their backoff, must finish within
+        ``total_timeout_s`` or the call fails with a ModelError (never an
+        unbounded wait).
         """
+        total = self.total_timeout_s
+        if attempt_timeout_s is not None:
+            n = (self.max_retries if retries is None else retries) + 1
+            total = min(total, n * attempt_timeout_s + 2 * self.backoff_s + 1.0)
         try:
             return await asyncio.wait_for(
-                self._chat(messages, max_tokens=max_tokens, what=what, effort=effort),
-                self.total_timeout_s,
+                self._chat(
+                    messages,
+                    max_tokens=max_tokens,
+                    what=what,
+                    effort=effort,
+                    attempt_timeout_s=attempt_timeout_s,
+                    retries=retries,
+                ),
+                total,
             )
         except TimeoutError as exc:
-            raise ModelError(f"{what} took longer than {self.total_timeout_s:.0f} s") from exc
+            raise ModelError(f"{what} took longer than {total:.0f} s") from exc
 
     async def _chat(
         self,
@@ -684,17 +706,26 @@ class MuseSparkOpenAdapter:
         max_tokens: int,
         what: str,
         effort: str | None = None,
+        attempt_timeout_s: float | None = None,
+        retries: int | None = None,
     ) -> ChatReply:
         body: dict[str, Any] = {"model": self.model, "max_tokens": max_tokens, "messages": messages}
         if effort is not None:
             body["reasoning_effort"] = effort
         t0 = time.perf_counter()
         last = ""
+        max_retries = self.max_retries if retries is None else retries
         async with self._client() as c:
-            for attempt in range(self.max_retries + 1):
+            for attempt in range(max_retries + 1):
                 retry_after: float | None = None
                 try:
-                    r = await c.post("/chat/completions", json=body)
+                    post = c.post("/chat/completions", json=body)
+                    if attempt_timeout_s is not None:
+                        r = await asyncio.wait_for(post, attempt_timeout_s)
+                    else:
+                        r = await post
+                except TimeoutError:
+                    last = f"{what} gave no answer within {attempt_timeout_s:.0f} s"
                 except (httpx.TimeoutException, httpx.TransportError) as exc:
                     last = f"{what} request failed: {type(exc).__name__}"
                 else:
@@ -711,7 +742,7 @@ class MuseSparkOpenAdapter:
                         raise ModelError(last)
                     ra = r.headers.get("retry-after", "")
                     retry_after = float(ra) if ra.replace(".", "", 1).isdigit() else None
-                if attempt < self.max_retries:
+                if attempt < max_retries:
                     delay = retry_after if retry_after is not None else self.backoff_s * 2**attempt
                     await self.sleep(min(delay, 30.0))
         raise ModelError(last or f"{what} failed")
@@ -740,10 +771,13 @@ class MuseSparkOpenAdapter:
         max_tokens: int,
         what: str,
         effort: str | None = None,
+        attempt_timeout_s: float | None = None,
+        retries: int | None = None,
     ) -> JsonReply:
         """A call whose answer must be a JSON object, with one repair retry."""
         messages: list[dict[str, Any]] = [{"role": "user", "content": parts}]
-        first = await self.chat(messages, max_tokens=max_tokens, what=what, effort=effort)
+        limits: dict[str, Any] = {"attempt_timeout_s": attempt_timeout_s, "retries": retries}
+        first = await self.chat(messages, max_tokens=max_tokens, what=what, effort=effort, **limits)
         try:
             return JsonReply(
                 extract_json(first.content), first.usage, first.latency_ms, first.reasoning
@@ -759,7 +793,7 @@ class MuseSparkOpenAdapter:
             },
         ]
         second = await self.chat(
-            repair, max_tokens=max_tokens, what=f"{what} (JSON repair)", effort=effort
+            repair, max_tokens=max_tokens, what=f"{what} (JSON repair)", effort=effort, **limits
         )
         try:
             data = extract_json(second.content)
@@ -806,6 +840,8 @@ class MuseSparkOpenAdapter:
             max_tokens=self.scene_max_tokens,
             what="scene model",
             effort=self.scene_effort,
+            attempt_timeout_s=self.scene_attempt_timeout_s,
+            retries=self.critical_retries,
         )
         self._scene_cache[key] = reply
         while len(self._scene_cache) > self.scene_cache_size:
@@ -826,13 +862,17 @@ class MuseSparkOpenAdapter:
     async def ask_image(
         self, jpeg: bytes | Sequence[bytes], prompt: str, *, what: str
     ) -> JsonReply:
-        """One or more images plus one question, answered as JSON (the verifier's call)."""
+        """One or more images plus one question, answered as JSON (the verifier's call).
+
+        Each attempt is cut after ``verify_attempt_timeout_s`` and retried once."""
         images = [jpeg] if isinstance(jpeg, bytes) else list(jpeg)
         return await self.chat_json(
             [*(self._image_part(j) for j in images), {"type": "text", "text": prompt}],
             max_tokens=self.verify_max_tokens,
             what=what,
             effort=self.verify_effort,
+            attempt_timeout_s=self.verify_attempt_timeout_s,
+            retries=self.critical_retries,
         )
 
     async def confirm_image(self, jpeg: bytes, prompt: str, *, what: str) -> JsonReply:

@@ -91,6 +91,12 @@ KIND_TEXT = {
 # larger (and at least half of any range the model gave).
 ESTIMATE_MIN_SIGMA_CM = 20.0
 ESTIMATE_REL_SIGMA = 0.30
+# A wheel measurement is not used when the scene model's estimate is deeper than
+# the measurement's two-sigma upper bound and by more than this share of the
+# estimate's own sigma (at least 20 cm, so at least 10 cm; see measure()). A few
+# centimetres between a precise wheel and a coarse estimate are not a conflict.
+SHALLOW_EST_SIGMA_SHARE = 0.5
+FINISH_RESERVE_S = 5.0
 # Largest gap, in pixels, closed between a tyre and the water segmented just
 # below it (SAM's mask edges are soft by a few pixels at this resolution).
 WATER_SEAM_PX = 3
@@ -108,6 +114,11 @@ class PipelineConfig:
     max_vehicles: int = 2
     max_persons: int = 3
     min_quality: float = 0.25
+    # Seconds from the request's start after which no further check by the scene
+    # model is started or waited for; the best answer reached by then is
+    # returned, labelled. None: no budget. The last FINISH_RESERVE_S are kept for
+    # the steps after the checks (geometry, people, overlay).
+    budget_s: float | None = 55.0
 
 
 @dataclass
@@ -145,6 +156,14 @@ def estimate_sigma(depth_cm: float, low: float | None = None, high: float | None
     if low is not None and high is not None and high > low:
         sigma = max(sigma, (high - low) / 2.0)
     return sigma
+
+
+def shallow_conflict(depth_cm: float, sigma_cm: float, est_cm: float, est_sigma_cm: float) -> bool:
+    """True when a measurement is too shallow to publish against the scene model's
+    estimate: the estimate lies above the measurement's two-sigma upper bound,
+    and by more than half the estimate's own sigma. Only the shallow side counts."""
+    gap = est_cm - depth_cm
+    return gap > max(2.0 * sigma_cm, SHALLOW_EST_SIGMA_SHARE * est_sigma_cm)
 
 
 def model_estimate(reading: SceneReading) -> ModelEstimate | None:
@@ -385,11 +404,14 @@ class Pipeline:
         water: ObjectMask | None = None,
         wheels: Sequence[ObjectMask] = (),
         faces: Sequence[tuple[int, int, int, int]] = (),
+        lead: str | None = None,
     ) -> MeasureResponse:
-        """No wheel could be measured: the scene model's estimate, clearly labelled."""
+        """No wheel could be measured (or ``lead`` says why a measurement was not
+        used): the scene model's estimate, clearly labelled."""
         reasons = [
             *reasons,
-            "no wheel could be measured; depth is the scene model's visual estimate, "
+            lead
+            or "no wheel could be measured; depth is the scene model's visual estimate, "
             "not a measurement",
             f"estimate based on: {est.basis}",
         ]
@@ -398,7 +420,7 @@ class Pipeline:
                 "estimate",
                 "photo",
                 self.model_names.scene,
-                "no measurable wheel",
+                "no measurable wheel" if lead is None else "measurement not used",
                 f"{est.depth_cm:.0f} cm, sigma {est.sigma_cm:.0f} cm",
                 "report model estimate",
                 0,
@@ -447,6 +469,8 @@ class Pipeline:
         in the order the steps happen (the streaming endpoint uses it).
         """
         cfg = self.config
+        started = time.perf_counter()
+        deadline = None if cfg.budget_s is None else started + cfg.budget_s - FINISH_RESERVE_S
         key = image if image is not None else (video.key_frame if video is not None else None)
         if key is None:
             raise ValueError("an image or a video is required")
@@ -587,9 +611,25 @@ class Pipeline:
             # The verifier is shown crops of this photo: faces blurred first.
             agent_key = image_from_rgb(blur_heads(key.rgb, faces)) if faces else key
             water, failures, extra_cost = await self._agent_masks(
-                agent_key, reading, cands, water_id, trace
+                agent_key, reading, cands, water_id, trace, deadline
             )
             timings["agent"] = _ms(t0)
+            if any("time budget" in f for f in failures):
+                trace.append(
+                    TraceStep(
+                        "budget",
+                        "photo",
+                        "pipeline",
+                        f"time budget {cfg.budget_s:.0f} s",
+                        f"{_ms(started) / 1000:.0f} s used; checks still open were stopped",
+                        "answer with what was verified in time",
+                        0,
+                    )
+                )
+                reasons.append(
+                    f"the time budget of {cfg.budget_s:.0f} s ran out before every check was "
+                    "done; this is the best answer reached in time"
+                )
         else:
             water, failures, extra_cost = await self._single_request(
                 key, reading, cands, water_id, trace
@@ -775,6 +815,47 @@ class Pipeline:
             local = cand.obj.depth_cm if cand.obj.depth_cm is not None else est.depth_cm
             local_sigma = estimate_sigma(local)
             combined = math.hypot(sigma, local_sigma)
+            # Shallow-side guard. Calling deep water shallow is the dangerous
+            # error, and the estimate's own sigma (20 cm or more) is too wide for a
+            # two-combined-sigma test to catch it: a rim outline measured 0.7 cm,
+            # sigma 2.5, against an estimate of 20 cm (x1). So a measurement is not
+            # used when the scene model's estimate lies above the measurement's own
+            # two-sigma upper bound and by more than half the estimate's sigma; the
+            # estimate is reported instead, and the reading is in ``reasons``.
+            gap = local - depth_cm
+            if shallow_conflict(depth_cm, sigma, local, local_sigma):
+                trace.append(
+                    TraceStep(
+                        "estimate",
+                        "photo",
+                        "geometry",
+                        f"measurement {depth_cm:.1f} cm (sigma {sigma:.1f}) and model "
+                        f"estimate {local:.0f} cm",
+                        f"the estimate is {gap:.0f} cm deeper, beyond the measurement's "
+                        f"two-sigma bound of {depth_cm + 2.0 * sigma:.0f} cm",
+                        "shallow reading not trusted: report the estimate",
+                        0,
+                    )
+                )
+                return self._estimate_only(
+                    key,
+                    [*reasons, *failures],
+                    trace,
+                    timings,
+                    cost,
+                    est,
+                    q.score,
+                    water,
+                    [c.wheel for c in cands if c.wheel is not None],
+                    faces=faces,
+                    lead=(
+                        f"the {KIND_TEXT[cand.obj.kind]} measured {depth_cm:.1f} cm (sigma "
+                        f"{sigma:.1f} cm), but the scene model estimates {local:.0f} cm "
+                        + ("at that wheel" if cand.obj.depth_cm is not None else "for the street")
+                        + ", above the measurement's two-sigma bound; a shallow reading that "
+                        "disagrees is not trusted, so the scene model's estimate is reported"
+                    ),
+                )
             if abs(depth_cm - local) > 2.0 * combined:
                 confidence = round(confidence * 0.5, 2)
                 reasons.append(
@@ -917,6 +998,7 @@ class Pipeline:
         cands: list[_Candidate],
         water_id: int,
         trace: list[TraceStep],
+        deadline: float | None = None,
     ) -> tuple[ObjectMask | None, list[str], float]:
         """Masks through the verify-and-refine agent.
 
@@ -937,6 +1019,7 @@ class Pipeline:
             water_id,
             emit=trace.append,
             vehicles=vjobs,
+            deadline=deadline,
         )
         # The agent returns vehicles first, then references; restore the order of cands.
         by_index = {o.index: o for o in outs}
@@ -956,6 +1039,8 @@ class Pipeline:
             c.wheel = out.mask
             c.waterline_points = out.waterline_points
         water = water_out.mask if water_out.accepted else None
+        if water is not None and "time budget" in water_out.verdict:
+            failures.append("water: only the part confirmed before the time budget ran out is used")
         if water is None:
             failures.append(f"water mask not confirmed ({water_out.verdict})")
         else:

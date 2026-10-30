@@ -78,7 +78,30 @@ class ShapeScore:
         )
 
 
+def bbox_window(mask: NDArray[np.bool_], margin: int) -> tuple[int, int, int, int] | None:
+    """``(y0, y1, x0, x1)`` around the mask's pixels, grown by ``margin``, clipped."""
+    rows = np.flatnonzero(mask.any(axis=1))
+    if rows.size == 0:
+        return None
+    cols = np.flatnonzero(mask.any(axis=0))
+    h, w = mask.shape
+    return (
+        max(0, int(rows[0]) - margin),
+        min(h, int(rows[-1]) + margin + 1),
+        max(0, int(cols[0]) - margin),
+        min(w, int(cols[-1]) + margin + 1),
+    )
+
+
 def wheel_shape(mask: NDArray[np.bool_], seed: int = 3) -> ShapeScore:
+    # Work on a window around the mask (a full photo is 3 megapixels; the same
+    # numbers come out, only faster); the photo border is still the full frame's.
+    full_h, full_w = mask.shape
+    win = bbox_window(mask, 4)
+    oy = ox = 0
+    if win is not None:
+        oy, ox = win[0], win[2]
+        mask = mask[win[0] : win[1], win[2] : win[3]]
     rng = np.random.default_rng(seed)
     solid, hull = solid_wheel(mask)
     area = int(solid.sum())
@@ -90,8 +113,8 @@ def wheel_shape(mask: NDArray[np.bool_], seed: int = 3) -> ShapeScore:
     ys, xs = np.nonzero(solid)
     extent = float(max(xs.max() - xs.min(), ys.max() - ys.min()) + 1)
     tol = max(1.5, 0.01 * extent)  # as in the geometry
-    h, w = solid.shape
-    border = (pts[:, 0] < 1) | (pts[:, 1] < 1) | (pts[:, 0] > w - 2) | (pts[:, 1] > h - 2)
+    gx, gy = pts[:, 0] + ox, pts[:, 1] + oy
+    border = (gx < 1) | (gy < 1) | (gx > full_w - 2) | (gy > full_h - 2)
     straight = straight_runs(pts, rng, tol=tol, min_len=0.3 * extent)
     curved = pts[~straight & ~border]
     if curved.shape[0] < 12:
@@ -127,8 +150,26 @@ def mask_iou(a: NDArray[np.bool_], b: NDArray[np.bool_]) -> float:
 
 def dedupe(masks: list[NDArray[np.bool_]], threshold: float = 0.95) -> list[int]:
     """Indices of masks to keep, dropping near duplicates of earlier ones."""
+    if not masks:
+        return []
+    union = np.zeros_like(masks[0])
+    for m in masks:
+        union |= m
+    win = bbox_window(union, 0)
+    if win is not None:  # compare only where any mask has pixels
+        masks = [m[win[0] : win[1], win[2] : win[3]] for m in masks]
+    areas = [int(m.sum()) for m in masks]
     keep: list[int] = []
     for i, m in enumerate(masks):
-        if all(mask_iou(m, masks[j]) < threshold for j in keep):
+        ok = True
+        for j in keep:
+            # IoU can only reach the threshold when the areas are close.
+            small, big = sorted((areas[i], areas[j]))
+            if big and small / big < threshold:
+                continue
+            if mask_iou(m, masks[j]) >= threshold:
+                ok = False
+                break
+        if ok:
             keep.append(i)
     return keep

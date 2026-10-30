@@ -24,7 +24,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from .wheel_shape import ShapeScore, solid_wheel, wheel_shape
+from .wheel_shape import ShapeScore, bbox_window, solid_wheel, wheel_shape
 
 Box = tuple[int, int, int, int]
 
@@ -148,7 +148,11 @@ def darkness_score(rgb: NDArray[np.uint8], mask: NDArray[np.bool_], region: Box)
     A tyre is a dark ring: the share of the band's pixels darker than the
     region's 40th percentile of brightness.
     """
-    solid, _ = solid_wheel(mask)
+    win = bbox_window(mask, 2)
+    if win is None:
+        return 0.0
+    # The band lies inside the mask: a window around it gives the same answer.
+    solid, _ = solid_wheel(mask[win[0] : win[1], win[2] : win[3]])
     if not solid.any():
         return 0.0
     xs = np.nonzero(solid.any(axis=0))[0]
@@ -161,7 +165,7 @@ def darkness_score(rgb: NDArray[np.uint8], mask: NDArray[np.bool_], region: Box)
     x0, y0, x1, y1 = region
     v_region = _value(rgb[y0:y1, x0:x1])
     thr = float(np.percentile(v_region, 40))
-    v = _value(rgb)
+    v = _value(rgb[win[0] : win[1], win[2] : win[3]])
     return float(np.mean(v[band] <= thr))
 
 
@@ -183,9 +187,14 @@ def outside_inside_ratio(rgb: NDArray[np.uint8], mask: NDArray[np.bool_]) -> flo
     the rubber inside and the road, water or bodywork outside. The upper part
     of the outline is used, where the tyre is above the water.
     """
-    solid, _ = solid_wheel(mask)
-    if not solid.any():
+    full, _ = solid_wheel(mask)
+    if not full.any():
         return 1.0
+    fx = np.flatnonzero(full.any(axis=0))
+    win = bbox_window(full, round(0.1 * (fx[-1] - fx[0] + 1)) + 4)
+    assert win is not None
+    rgb = rgb[win[0] : win[1], win[2] : win[3]]
+    solid = full[win[0] : win[1], win[2] : win[3]]
     ys, xs = np.nonzero(solid)
     width = max(3, round(0.06 * (xs.max() - xs.min() + 1)))
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * width + 1, 2 * width + 1))
@@ -204,3 +213,150 @@ def outside_inside_ratio(rgb: NDArray[np.uint8], mask: NDArray[np.bool_]) -> flo
 
 # Below this ratio the outline is taken to sit inside the tyre (on the rim).
 INSIDE_TYRE_RATIO = 0.8
+
+
+@dataclass(frozen=True, slots=True)
+class TyreEvidence:
+    """Numbers that tell a tyre's outer edge from an outline inside the tyre (rim,
+    spokes) or a cut one (half a tyre closed by a chord). See :func:`tyre_evidence`."""
+
+    dark_inside: float  # share of dark pixels in the band just inside the outline
+    dark_outside: float  # ... just outside it
+    tilt_deg: float  # fitted ellipse's major axis away from the nearest image axis
+    axis_ratio: float
+    diameter_px: float  # fitted ellipse's major axis
+
+
+def tyre_evidence(rgb: NDArray[np.uint8], solid: NDArray[np.bool_]) -> TyreEvidence | None:
+    """Darkness either side of the upper outline, and the fitted ellipse's tilt.
+
+    A tyre is the darkest ring of a wheel, so an outline on its outer edge has
+    dark rubber just inside and road, water or bodywork just outside; an outline
+    on the rim has the dark rubber just outside (a darker annulus around it).
+    "Dark" is relative to the neighbourhood: below its 35th percentile of
+    brightness. The bands are 7 percent of the outline's width, above the
+    outline's middle row (the part above the water).
+    """
+    win = bbox_window(solid, 0)
+    if win is None:
+        return None
+    pad0 = win[3] - win[2]  # one outline width around it holds every band and window
+    win = bbox_window(solid, pad0)
+    assert win is not None
+    rgb = rgb[win[0] : win[1], win[2] : win[3]]
+    solid = solid[win[0] : win[1], win[2] : win[3]]
+    ys, xs = np.nonzero(solid)
+    if xs.size < 200:
+        return None
+    width = float(xs.max() - xs.min() + 1)
+    band = max(2, round(0.07 * width))
+    s8 = solid.astype(np.uint8)
+    dist_in = cv2.distanceTransform(s8, cv2.DIST_L2, 3)
+    dist_out = cv2.distanceTransform(1 - s8, cv2.DIST_L2, 3)
+    top = np.zeros_like(solid)
+    top[: int(np.median(ys)) + 1] = True
+    inner = solid & (dist_in <= band) & top
+    outer = ~solid & (dist_out <= band) & top
+    if inner.sum() < 10 or outer.sum() < 10:
+        return None
+    h, w = solid.shape
+    pad = round(width)
+    y0, y1 = max(0, int(ys.min()) - pad), min(h, int(ys.max()) + pad)
+    x0, x1 = max(0, int(xs.min()) - pad), min(w, int(xs.max()) + pad)
+    v = _value(rgb).astype(np.float64)
+    thr = float(np.percentile(v[y0:y1, x0:x1], 35))
+    dark = v <= thr
+    contours, _ = cv2.findContours(s8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    c = max(contours, key=len)
+    tilt, ratio, diam = 0.0, 1.0, width
+    if len(c) >= 5:
+        (_, _), (ma, mi), ang = cv2.fitEllipse(c)
+        big, small = max(ma, mi), min(ma, mi)
+        ratio, diam = small / max(big, 1e-6), big
+        # OpenCV's angle is that of the first axis; turn it into the major axis's.
+        major = ang if ma >= mi else ang + 90.0
+        m = major % 90.0
+        tilt = min(m, 90.0 - m)
+    return TyreEvidence(
+        round(float(dark[inner].mean()), 3),
+        round(float(dark[outer].mean()), 3),
+        round(tilt, 1),
+        round(ratio, 3),
+        round(diam, 1),
+    )
+
+
+# Wheel diameter (the fitted ellipse's major axis) as a share of the vehicle box
+# width. Side-on: a 55 cm two-wheeler wheel on a 1.8 to 2.1 m machine is about
+# 0.28; a 60 to 65 cm car wheel on a 3.6 to 4.5 m car about 0.15; an auto-
+# rickshaw's 45 cm wheel on 2.6 m about 0.17; a bus's 1 m wheel on 10 to 12 m
+# about 0.09. A turned vehicle has a narrower box and a relatively larger wheel,
+# and boxes take in neighbours, so the limits are wide: they catch a hub or a
+# rim fragment, not a slightly small tyre.
+WHEEL_SHARE: dict[str, tuple[float, float]] = {
+    "two_wheeler": (0.18, 0.7),
+    "car": (0.08, 0.45),
+    "auto_rickshaw": (0.09, 0.55),
+    "bus": (0.04, 0.3),
+}
+# An ellipse tilted further than this from both image axes, and clearly oval,
+# is not an upright wheel: real wheels stand on the road, and camera roll and
+# oblique views tilt them less. Cut outlines (half a tyre closed by a chord
+# through the wheel) are tilted ovals.
+MAX_TILT_DEG = 25.0
+TILT_RATIO = 0.75
+# A darker ring just outside the outline than just inside: the rubber is outside.
+ANNULUS_GAP = 0.2
+ANNULUS_MAX_INSIDE = 0.5
+ANNULUS_SOLID_OUTSIDE = 0.85  # or an almost wholly dark ring outside
+
+
+def tyre_failure(
+    ev: TyreEvidence | None,
+    vehicle_kind: str | None = None,
+    vehicle_width: int | None = None,
+) -> str | None:
+    """Why an outline is not a tyre's outer edge, or None when the numbers allow it."""
+    if ev is None:
+        return None
+    if ev.dark_outside - ev.dark_inside >= ANNULUS_GAP and (
+        ev.dark_inside < ANNULUS_MAX_INSIDE or ev.dark_outside >= ANNULUS_SOLID_OUTSIDE
+    ):
+        return (
+            f"a darker ring lies just outside the outline (dark {ev.dark_outside:.2f} outside, "
+            f"{ev.dark_inside:.2f} inside): it follows the rim, inside the tyre"
+        )
+    if ev.tilt_deg > MAX_TILT_DEG and ev.axis_ratio < TILT_RATIO:
+        return (
+            f"the outline is an oval tilted {ev.tilt_deg:.0f} degrees: a cut or partial "
+            "outline, not an upright wheel"
+        )
+    if vehicle_kind in WHEEL_SHARE and vehicle_width:
+        lo, hi = WHEEL_SHARE[vehicle_kind]
+        share = ev.diameter_px / vehicle_width
+        if not lo <= share <= hi:
+            return (
+                f"the outline is {100 * share:.0f}% of the vehicle's width; a "
+                f"{vehicle_kind.replace('_', ' ')} wheel is {100 * lo:.0f} to {100 * hi:.0f}%"
+            )
+    return None
+
+
+def points_outside(
+    solid: NDArray[np.bool_], points: list[tuple[int, int]], tolerance: float = 0.06
+) -> int:
+    """How many points lie outside the outline by more than ``tolerance`` of its width.
+
+    The verifier's points on the tyre rubber should be inside an outline of the
+    tyre's outer edge; outside it, the outline is inside the tyre."""
+    xs = np.nonzero(solid.any(axis=0))[0]
+    if xs.size == 0:
+        return 0
+    limit = tolerance * float(xs.max() - xs.min() + 1)
+    dist_out = cv2.distanceTransform((~solid).astype(np.uint8), cv2.DIST_L2, 3)
+    h, w = solid.shape
+    n = 0
+    for x, y in points:
+        if 0 <= x < w and 0 <= y < h and dist_out[y, x] > limit:
+            n += 1
+    return n

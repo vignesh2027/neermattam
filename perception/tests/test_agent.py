@@ -25,6 +25,7 @@ from neermattam_perception.pipeline import (
     Pipeline,
     PipelineConfig,
     estimate_sigma,
+    shallow_conflict,
 )
 from neermattam_perception.references import RefKind
 from neermattam_perception.sam import ObjectMask, ObjectPrompt
@@ -353,17 +354,32 @@ def test_estimate_sigma_rule() -> None:
     assert estimate_sigma(50.0, 20.0, 120.0) == 50.0
 
 
-def test_disagreement_with_the_estimate_lowers_confidence(easy_case) -> None:  # type: ignore[no-untyped-def]
+def test_shallow_conflict_rule_from_the_x1_numbers() -> None:
+    """x1: a rim outline measured 0.7 cm, sigma 2.5, the scene model said 20 cm."""
+    est_sigma = estimate_sigma(20.0)
+    assert est_sigma == ESTIMATE_MIN_SIGMA_CM
+    # Two combined sigma would not catch it: hypot(2.5, 20) x 2 is 40 cm.
+    assert 2.0 * math.hypot(2.5, est_sigma) > 20.0 - 0.7
+    assert shallow_conflict(0.7, 2.5, 20.0, est_sigma)
+    # A precise wheel a few centimetres below a coarse estimate is not a conflict.
+    assert not shallow_conflict(15.0, 1.0, 20.0, est_sigma)
+    # Deeper than the estimate is never a shallow conflict.
+    assert not shallow_conflict(60.0, 2.0, 20.0, est_sigma)
+    # A wide measurement whose upper band reaches the estimate is kept.
+    assert not shallow_conflict(5.0, 9.0, 20.0, est_sigma)
+
+
+def test_shallow_measurement_against_a_deeper_estimate_reports_the_estimate(easy_case) -> None:  # type: ignore[no-untyped-def]
     agree, _, _ = agent_pipeline(easy_case, open_reading(easy_case))
     far = replace(open_reading(easy_case), overall_depth_cm=150.0)
-    disagree, _, _ = agent_pipeline(easy_case, far)
+    deeper, _, _ = agent_pipeline(easy_case, far)
     a = run(agree, image=case_image(easy_case), hint_diameter_cm=43.4)
-    d = run(disagree, image=case_image(easy_case), hint_diameter_cm=43.4)
-    assert a.method == d.method == "wheel_geometry"
-    assert d.depth_cm == a.depth_cm  # the map uses the geometry
-    assert d.confidence < a.confidence
-    assert any("more than two sigma" in x for x in d.reasons)
-    assert not any("more than two sigma" in x for x in a.reasons)
+    d = run(deeper, image=case_image(easy_case), hint_diameter_cm=43.4)
+    assert a.method == "wheel_geometry"
+    assert d.method == "model_estimate" and d.depth_cm == 150.0
+    assert any("shallow reading that disagrees is not trusted" in x for x in d.reasons)
+    assert any(f"measured {a.depth_cm:.1f} cm" in x for x in d.reasons)
+    assert any(t.decision.startswith("shallow reading not trusted") for t in d.agent_trace)
 
 
 def test_waterline_disagreement_widens_sigma(easy_case) -> None:  # type: ignore[no-untyped-def]
@@ -410,3 +426,48 @@ def test_squash_correction_adds_its_own_sigma(easy_case) -> None:  # type: ignor
         math.hypot(r0.depth_sigma_cm or 0.0, 0.5 * 1.9),
         abs=0.1,  # both are rounded to 0.1
     )
+
+
+def test_a_rim_outline_is_not_accepted_even_when_the_verifier_says_good(easy_case) -> None:  # type: ignore[no-untyped-def]
+    """The x1 failure: the scene model calls an outline inside the tyre good."""
+    import cv2
+
+    img = case_image(easy_case)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (91, 91))  # down to the rim
+    rim = cv2.erode(easy_case.wheel_mask.astype(np.uint8), k).astype(bool)
+    sam = BoxSam({1: rim}, rim.shape)
+    ver = ScriptedVerifier(lambda what, n: GOOD)
+    obj = reading_for(easy_case).references[0]
+    out = asyncio.run(VerifyRefineAgent(ver, sam).refine_reference(img, obj, 1, 1))
+    assert not out.accepted
+    assert any("inside the tyre" in t.decision or "inside the tyre" in t.output for t in out.trace)
+
+
+@dataclass
+class SlowVerifier(ScriptedVerifier):
+    delay_s: float = 0.0
+
+    async def ask_image(self, jpeg: bytes, prompt: str, *, what: str) -> JsonReply:
+        await asyncio.sleep(self.delay_s)
+        return await super().ask_image(jpeg, prompt, what=what)
+
+
+def test_time_budget_stops_open_checks_and_says_so(easy_case) -> None:  # type: ignore[no-untyped-def]
+    import neermattam_perception.agent as agent_mod
+    import neermattam_perception.pipeline as pipeline_mod
+
+    sam = BoxSam({1: easy_case.wheel_mask, 16: easy_case.water_mask}, easy_case.wheel_mask.shape)
+    ver = SlowVerifier(lambda what, n: WATER_OK if what == "verify water" else GOOD, delay_s=2.0)
+    scene = FakeScene(open_reading(easy_case), scene_model_name="muse-spark-open")
+    cfg = replace(FAST, budget_s=0.6)
+    p = Pipeline(scene, sam, cfg, agent=VerifyRefineAgent(ver, sam))
+    old = (agent_mod.MIN_CALL_S, pipeline_mod.FINISH_RESERVE_S)
+    agent_mod.MIN_CALL_S, pipeline_mod.FINISH_RESERVE_S = 0.05, 0.1
+    try:
+        r = run(p, image=case_image(easy_case))
+    finally:
+        agent_mod.MIN_CALL_S, pipeline_mod.FINISH_RESERVE_S = old
+    assert r.method == "model_estimate"  # nothing was verified in time
+    assert any("time budget of 1 s ran out" in x for x in r.reasons)
+    assert any(t.step == "budget" for t in r.agent_trace)
+    assert any("time budget reached" in x for x in r.reasons)

@@ -216,7 +216,7 @@ def test_retries_on_429_and_5xx_with_backoff() -> None:
         headers = {"retry-after": "3"} if st == 429 else {}
         return httpx.Response(st, json={"error": {"message": "busy"}}, headers=headers)
 
-    a = adapter(handler)
+    a = adapter(handler, critical_retries=3)  # the backoff itself (default: one retry)
     a.sleep = sleep
     r = asyncio.run(a.ask_image(b"x", "check", what="verify"))
     assert r.data["is_target"] is False
@@ -368,3 +368,29 @@ def test_every_call_has_a_total_time_limit() -> None:
     )
     with pytest.raises(ModelError, match="took longer than"):
         asyncio.run(a.ask_image(b"x", "check", what="verify"))
+
+
+def test_a_stuck_check_is_cut_and_asked_once_more() -> None:
+    """A call that hangs is abandoned after the per-attempt limit and retried once."""
+    rec = recorded("baseten_verify_response.json")
+    calls: list[int] = []
+
+    async def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            await asyncio.sleep(5.0)  # the stuck first attempt
+        return httpx.Response(200, json=rec)
+
+    a = adapter(handler, verify_attempt_timeout_s=0.2)
+    r = asyncio.run(asyncio.wait_for(a.ask_image(b"\xff\xd8jpeg", "check", what="verify"), 3.0))
+    assert len(calls) == 2 and r.data
+
+
+def test_a_check_that_never_answers_fails_within_its_limits() -> None:
+    async def handler(req: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(5.0)
+        return httpx.Response(500)
+
+    a = adapter(handler, verify_attempt_timeout_s=0.2)
+    with pytest.raises(ModelError, match="no answer within"):
+        asyncio.run(asyncio.wait_for(a.ask_image(b"x", "check", what="verify"), 3.0))
