@@ -3,7 +3,7 @@
 //! | Variable | Default | Meaning |
 //! |---|---|---|
 //! | `ENGINE_BIND` | `127.0.0.1:8302` | Listen address; keep it on the internal network |
-//! | `ENGINE_CITIES` | `chennai,mumbai,bengaluru,hyderabad,kolkata,delhi` | Cities to cover, in order |
+//! | `ENGINE_CITIES` | `chennai,mumbai,bengaluru,hyderabad,kolkata,delhi,visakhapatnam` | Cities to cover, in order |
 //! | `ENGINE_OSM_DIR` | `../data/osm` | Folder holding `<city>-roads.osm.pbf` |
 //! | `ENGINE_CITY_<ID>_BBOX` | built-in box | Override a city's box, or give a new city its box |
 //! | `ENGINE_CITY_<ID>_NAME` | built-in name, else the id | Display name |
@@ -589,7 +589,7 @@ mod tests {
         assert_eq!(c.policy.sigma_cap_cm, 10.0);
         assert_eq!(c.policy.growth_cap_cm, 5.0);
         assert_eq!(c.resolution, Resolution::Ten);
-        assert_eq!(c.cities.len(), 6);
+        assert_eq!(c.cities.len(), 7);
         assert_eq!(c.city("chennai").unwrap().bbox, BBox::CHENNAI);
         assert_eq!(
             c.city("delhi").unwrap().osm_path,

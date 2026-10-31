@@ -59,7 +59,7 @@ The worst thing this system could do is call a flooded road safe. The rules agai
 * **Unknown is never safe.** A cell with no report, a stale report or too much uncertainty is shown as unknown, in grey hatching, never as clear.
 * **Uncertainty is carried everywhere.** A road closes to a vehicle when depth plus 1.5 sigma, plus growth with age, exceeds its limit: 15 cm for cars, autos and two-wheelers, 30 cm for buses. Old reports never drain away on their own, and conflicting reports widen the estimate instead of averaging out.
 * **Routes are advisory**, and every route and alert says so.
-* **Shallow-side errors fall back to caution.** A wheel reading shallower than the scene model's estimate beyond its own two-sigma bound is not published; the estimate is returned with the reason. On the real photos this set aside two readings, one clearly wrong and one possibly right. That is the price of never publishing a falsely shallow depth.
+* **Shallow-side errors fall back to caution.** A wheel reading shallower than the scene model's estimate beyond its own two-sigma bound is not published; the estimate is returned with the reason. In one run on the real photos (30 October, `eval/out/final3`, described in [eval/RESULTS_REAL.md](eval/RESULTS_REAL.md)) it set aside two readings, one clearly wrong and one possibly right; in the run recorded at the end of that file no wheel outline reached the geometry, so it had nothing to set aside. That is the price of never publishing a falsely shallow depth.
 * **Faces are blurred** in the overlay, the verifier's crops and the stored photo, and GPS metadata is stripped.
 
 ## Verify any measurement
@@ -132,7 +132,7 @@ Third-party pieces I did not write:
 | MapLibre GL JS 5.6.0 | Vendored in `gateway/internal/web/static/vendor/` | BSD 3-Clause ([LICENSE.txt](gateway/internal/web/static/vendor/maplibre-gl-5.6.0/LICENSE.txt)) |
 | Inter typeface | Vendored | SIL Open Font License 1.1 ([licence](gateway/internal/web/static/fonts/LICENSE-Inter.txt)) |
 | Noto Sans for Indic scripts | Loaded from Google Fonts | SIL Open Font License 1.1 |
-| OpenStreetMap road extracts, six cities | Cut from Geofabrik extracts, not in git | ODbL 1.0 |
+| OpenStreetMap road extracts, seven cities | Cut from Geofabrik extracts, not in git | ODbL 1.0 |
 | OpenFreeMap base map tiles | Loaded by the map | OpenStreetMap and OpenMapTiles attribution |
 | Open-Meteo rainfall | Called at run time | CC BY 4.0 |
 | SAM 2.1 hiera-small weights | Downloaded at build time | Apache 2.0 |
@@ -143,12 +143,12 @@ Library dependencies are pinned in `engine/Cargo.lock` and `perception/uv.lock`.
 
 ## Languages and cities
 
-Every page, message and result card is available in English, Tamil, Hindi, Telugu, Kannada, Malayalam, Bengali and Marathi ([docs/GATEWAY.md](docs/GATEWAY.md)). The engine covers six cities by default (`ENGINE_CITIES`): Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata and Delhi, each with its own road graph. Another city needs only configuration.
+Every page, message and result card is available in English, Tamil, Hindi, Telugu, Kannada, Malayalam, Bengali and Marathi ([docs/GATEWAY.md](docs/GATEWAY.md)). The engine covers seven cities by default (`ENGINE_CITIES`): Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata, Delhi and Visakhapatnam, each with its own road graph. Another city needs only configuration.
 
 ## Limits and what's next
 
 * No field accuracy yet. The next step is real photos with a measured depth beside them.
-* No wheel measurement has survived on a real photo. SAM outlines a full wheel when prompted by hand; the model's prompts are not yet precise enough.
+* No wheel measurement survived on the real photos in the latest run (30 October); two photos were measured from a person and nine got the labelled model estimate. SAM outlines a full wheel when prompted by hand; the model's prompts are not yet precise enough.
 * The scene model's own estimates are uncalibrated, and moved by up to 60 cm between runs on one photo.
 * Latency depends on Baseten; on slow days it was two to six times longer.
 * No published source was found for the auto, two-wheeler or bus depth limits. The first two borrow the car figure.

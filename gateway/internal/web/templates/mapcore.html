@@ -22,7 +22,7 @@ window.NM = (function () {
     return p.charAt(0).toUpperCase() + p.slice(1);
   }
   // The page's city: its box frames the map; cells and the stream are its.
-  var CITY = { id: "chennai", bbox: [80.10, 12.85, 80.33, 13.24], centre: [80.215, 13.045] };
+  var CITY = { id: "chennai", bbox: [80.10, 12.80, 80.33, 13.24], centre: [80.215, 13.02] };
   try { CITY = JSON.parse(document.getElementById("city").textContent) || CITY; } catch (e) {}
   function cityView(extra) {
     var o = CITY.id === "chennai" ? { center: [80.2209, 13.0], zoom: 11.3 }

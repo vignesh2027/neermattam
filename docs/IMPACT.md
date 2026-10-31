@@ -62,7 +62,7 @@ What an operator might pay for: private sites and alerts through the developer A
 
 ## What we expect from Meta's tooling, and what we already use
 - **Muse Spark Open** reads scenes, points at reference objects, checks masks and understands voice notes in Indian languages.
-- **SAM** turns those points into pixel-exact outlines of wheels and water, and tracks floating debris in video for speed.
+- **SAM 2.1** turns those points into pixel-exact outlines of wheels, people and water. Tracking floating debris in video for speed waits on SAM 3.1, which tracks by noun phrase.
 - **Open weights on partner infrastructure** mean a city can run the whole stack without depending on a single hosted API.
 - When the hosted Meta Model API is available to us, Muse Spark 1.3, SAM 3.1 and Muse Voice Transcribe switch on behind the same interfaces.
 

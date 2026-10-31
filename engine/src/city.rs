@@ -14,12 +14,13 @@
 //!
 //! | id | Box (minLon,minLat,maxLon,maxLat) | Covers |
 //! |---|---|---|
-//! | chennai | 80.10,12.85,80.33,13.24 | Greater Chennai Corporation, Tambaram to Ennore |
+//! | chennai | 80.10,12.80,80.33,13.24 | Greater Chennai Corporation, Tambaram to Ennore, and Siruseri on the Old Mahabalipuram Road |
 //! | mumbai | 72.77,18.88,73.13,19.32 | Island city, western and eastern suburbs, Thane, Navi Mumbai to Belapur |
 //! | bengaluru | 77.44,12.82,77.80,13.15 | BBMP inside the outer ring, Electronic City to Yelahanka |
 //! | hyderabad | 78.24,17.22,78.66,17.62 | GHMC and Secunderabad, inside the outer ring road |
 //! | kolkata | 88.20,22.42,88.52,22.72 | Kolkata Municipal Corporation, Howrah, Salt Lake and New Town |
 //! | delhi | 76.84,28.40,77.35,28.89 | National Capital Territory of Delhi |
+//! | visakhapatnam | 83.11,17.55,83.53,18.07 | Visakhapatnam District (the OpenStreetMap admin_level 5 boundary's box) |
 
 use crate::geo::BBox;
 use h3o::{CellIndex, LatLng};
@@ -87,7 +88,7 @@ pub const CELL_MARGIN_EDGES: f64 = 3.0;
 const METRES_PER_DEGREE: f64 = 111_195.0;
 
 /// The built-in cities: id, display name, metro box.
-pub const DEFAULT_CITIES: [(&str, &str, BBox); 6] = [
+pub const DEFAULT_CITIES: [(&str, &str, BBox); 7] = [
     ("chennai", "Chennai", BBox::CHENNAI),
     (
         "mumbai",
@@ -137,6 +138,16 @@ pub const DEFAULT_CITIES: [(&str, &str, BBox); 6] = [
             min_lat: 28.40,
             max_lon: 77.35,
             max_lat: 28.89,
+        },
+    ),
+    (
+        "visakhapatnam",
+        "Visakhapatnam",
+        BBox {
+            min_lon: 83.11,
+            min_lat: 17.55,
+            max_lon: 83.53,
+            max_lat: 18.07,
         },
     ),
 ];
@@ -217,7 +228,7 @@ mod tests {
     #[test]
     fn defaults_are_distinct_and_do_not_overlap() {
         let cities = default_cities(Path::new("/d"));
-        assert_eq!(cities.len(), 6);
+        assert_eq!(cities.len(), 7);
         for (i, a) in cities.iter().enumerate() {
             assert!(valid_id(&a.id));
             assert_eq!(

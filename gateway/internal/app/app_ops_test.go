@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -18,12 +19,12 @@ import (
 func addAnalytics(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/cities", func(w http.ResponseWriter, _ *http.Request) {
 		var list []string
-		for _, c := range [][2]string{{"chennai", "ready"}, {"mumbai", "ready"}, {"bengaluru", "ready"}, {"hyderabad", "ready"}, {"kolkata", "failed"}, {"delhi", "loading"}} {
+		for _, c := range [][2]string{{"chennai", "ready"}, {"mumbai", "ready"}, {"bengaluru", "ready"}, {"hyderabad", "ready"}, {"kolkata", "failed"}, {"delhi", "loading"}, {"visakhapatnam", "ready"}} {
 			list = append(list, fmt.Sprintf(`{"id":%q,"name":%q,"cells":0,"graph":{"status":%q}}`, c[0], strings.ToUpper(c[0][:1])+c[0][1:], c[1]))
 		}
 		// Boxes are left out here; the gateway keeps its built-in ones only
 		// when the engine sends none, so send the real ones.
-		boxes := map[string]string{"chennai": "80.10,12.85,80.33,13.24", "mumbai": "72.77,18.88,73.13,19.32", "bengaluru": "77.44,12.82,77.80,13.15", "hyderabad": "78.24,17.22,78.66,17.62", "kolkata": "88.20,22.42,88.52,22.72", "delhi": "76.84,28.40,77.35,28.89"}
+		boxes := map[string]string{"chennai": "80.10,12.80,80.33,13.24", "mumbai": "72.77,18.88,73.13,19.32", "bengaluru": "77.44,12.82,77.80,13.15", "hyderabad": "78.24,17.22,78.66,17.62", "kolkata": "88.20,22.42,88.52,22.72", "delhi": "76.84,28.40,77.35,28.89", "visakhapatnam": "83.11,17.55,83.53,18.07"}
 		for i, l := range list {
 			for id, b := range boxes {
 				if strings.Contains(l, `"id":"`+id+`"`) {
@@ -37,7 +38,7 @@ func addAnalytics(mux *http.ServeMux) {
 		fmt.Fprintf(w, `{"city":%q,"cells":12,"by_class":{"low":3,"danger_some":4,"danger_most":2,"danger_all":1,"unknown":2},"unknown":2,"stale":1,"expired":1,"cells_in_conflict":1,"conflicting_readings":3,"blocked":{"pedestrian":7,"two_wheeler":8,"auto":8,"car":8,"bus":3},"needs_fresh_report":1,"needs_fresh_report_cells":[{"cell":"8a618c4e2d47fff","lat":12.99,"lon":80.217,"last_depth_cm":42,"last_reading_age_h":7.5,"expired":false}],"readings":40,"newest_reading_at":"2026-10-29T09:00:00Z","generated_at":"2026-10-29T09:05:00Z"}`, r.URL.Query().Get("city"))
 	})
 	mux.HandleFunc("GET /v1/hotspots", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"city":"chennai","advisory":true,"score":"depth 40 x ...","count":1,"hotspots":[{"cell":"8a618c4e2d47fff","lat":12.99,"lon":80.217,"score":77.2,"parts":{"depth":35.2,"hazard":20,"freshness":20,"reports":2},"depth_block_cm":52.8,"depth_cm":48,"depth_sigma_cm":3.2,"hazard_class_upper":"danger_most","age_h":0,"independent_reports":1,"unknown":false,"blocks":["pedestrian","two_wheeler","auto","car","bus"],"reasons":["Water may be as deep as 53 cm here (mean 48 cm plus the safety margin): 35.2 of 40 points."]}]}`))
+		w.Write([]byte(`{"city":"chennai","advisory":true,"score":"depth 40 x ...","count":1,"hotspots":[{"cell":"8a618c4e2d47fff","lat":12.99,"lon":80.217,"score":77.2,"parts":{"depth":35.2,"hazard":20,"freshness":20,"reports":2},"depth_block_cm":52.8,"depth_cm":48,"depth_sigma_cm":3.2,"hazard_class_upper":"danger_most","age_h":0,"independent_reports":1,"unknown":false,"blocks":["pedestrian","two_wheeler","auto","car","bus"],"reasons":["Water may be as deep as 53 cm here (mean 48 cm plus the safety margin): 35.2 of 40 points."],"place":{"name":"Velachery Main Road","distance_m":42,"source":"osm_road"}}]}`))
 	})
 	mux.HandleFunc("GET /v1/recession", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("cell") != "8a618c4e2d47fff" {
@@ -93,7 +94,7 @@ func TestCitySwitcherScopesEveryPage(t *testing.T) {
 	if !strings.Contains(resp.Header.Get("Set-Cookie"), "nm_city=mumbai") {
 		t.Fatal("?city= is not remembered")
 	}
-	for _, c := range []string{"chennai", "mumbai", "bengaluru", "hyderabad", "kolkata", "delhi"} {
+	for _, c := range []string{"chennai", "mumbai", "bengaluru", "hyderabad", "kolkata", "delhi", "visakhapatnam"} {
 		if !strings.Contains(body, "city="+c) {
 			t.Errorf("the switcher lacks %s", c)
 		}
@@ -106,6 +107,11 @@ func TestCitySwitcherScopesEveryPage(t *testing.T) {
 	r2.Body.Close()
 	if !strings.Contains(string(b2), "Dadar station") || strings.Contains(string(b2), "Velachery station") {
 		t.Fatal("the route page should offer Mumbai's presets")
+	}
+	// Visakhapatnam is the seventh city, with its own presets and name.
+	_, vz := get(t, nil, h.srv.URL+"/route?city=visakhapatnam&lang=te")
+	if !strings.Contains(vz, "Visakhapatnam station") || !strings.Contains(vz, "RK Beach") || !strings.Contains(vz, "విశాఖపట్నం") || strings.Contains(vz, "Kodambakkam station") {
+		t.Fatal("the route page should offer Visakhapatnam's presets and its Telugu name")
 	}
 	// Chennai keeps the labelled simulated scenario.
 	_, body = get(t, nil, h.srv.URL+"/map?city=chennai")
@@ -229,6 +235,17 @@ func TestControlRoomNeedsItsKeyAndTheDemoIsLabelled(t *testing.T) {
 	r, demo := get(t, nil, h.srv.URL+"/control/demo?city=mumbai")
 	if r.StatusCode != 200 || !strings.Contains(demo, "Public demo with simulated data.") || !strings.Contains(demo, "Chennai, flood response") {
 		t.Fatalf("demo: %d", r.StatusCode)
+	}
+	// Each hotspot is named after the nearest named road and locality, and
+	// readings from the simulated drip are labelled simulated, never counted
+	// as independent reports.
+	for _, want := range []string{"Velachery Main Road", "42 m", `<span class="muted">Velachery</span>`, "Simulated readings: 1", "not reports from people"} {
+		if !strings.Contains(html.UnescapeString(demo), want) {
+			t.Errorf("demo control room lacks %q", want)
+		}
+	}
+	if strings.Contains(demo, "independent report") {
+		t.Error("the demo control room still says independent reports")
 	}
 	// Other languages build the reasons themselves.
 	_, ta := withSession("/control?city=chennai&lang=ta")

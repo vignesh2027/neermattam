@@ -105,8 +105,8 @@ async fn cities_are_listed_with_their_graphs() {
     let c = &cities[0];
     assert_eq!(c["id"], "chennai");
     assert_eq!(c["name"], "Chennai");
-    assert_eq!(c["bbox"], json!([80.10, 12.85, 80.33, 13.24]));
-    assert!((c["centre"]["lat"].as_f64().unwrap() - 13.045).abs() < 1e-9);
+    assert_eq!(c["bbox"], json!([80.10, 12.80, 80.33, 13.24]));
+    assert!((c["centre"]["lat"].as_f64().unwrap() - 13.02).abs() < 1e-9);
     assert_eq!(c["graph"]["status"], "ready");
     assert!(c["graph"]["nodes"].as_u64().unwrap() > 0);
     assert!(c["graph"]["memory_mib"].is_number());
@@ -419,7 +419,9 @@ async fn hotspots_rank_with_reasons() {
     assert_eq!(pos(19.00), 0);
     assert!(pos(19.00) < pos(19.01) && pos(19.01) < pos(19.02) && pos(19.02) < pos(19.03));
     let top = &list[0];
-    assert!(top["score"].as_f64().unwrap() > 70.0);
+    assert!(top["score"].as_f64().unwrap() > 50.0);
+    // No road graph is loaded for Mumbai here, so no place name.
+    assert!(top["place"].is_null());
     for key in ["depth", "hazard", "freshness", "reports"] {
         assert!(top["parts"][key].is_number(), "missing part {key}");
     }
@@ -442,6 +444,39 @@ async fn hotspots_rank_with_reasons() {
         assert_400(&app, &format!("/v1/hotspots?limit={bad}"), "limit must be").await;
     }
     assert_400(&app, "/v1/hotspots?city=gotham", "unknown city").await;
+}
+
+#[tokio::test]
+async fn hotspots_are_named_after_the_nearest_named_road() {
+    let state = AppState::new(config());
+    let app = router(Arc::clone(&state));
+    // One named street running east and an unnamed one 400 m north of it.
+    let mut b = GraphBuilder::new();
+    let (lat, lon) = CHENNAI;
+    let south: Vec<u32> = (0..10)
+        .map(|j| b.add_node(lat, lon + 0.001 * f64::from(j)))
+        .collect();
+    let north: Vec<u32> = (0..10)
+        .map(|j| b.add_node(lat + 0.0036, lon + 0.001 * f64::from(j)))
+        .collect();
+    b.add_named_way(
+        south.clone(),
+        0b11111,
+        0b11111,
+        true,
+        Some("Velachery Main Road"),
+    );
+    b.add_named_way(north.clone(), 0b11111, 0b11111, false, None);
+    b.add_way(vec![south[0], north[0]], 0b11111, 0b11111);
+    state.set_graph("chennai", b.build(Resolution::Ten));
+    send(&app, reading("a", lat + 0.0002, lon + 0.004, 70.0)).await;
+    let (s, body) = send(&app, get("/v1/hotspots?city=chennai&limit=1")).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let place = &body["hotspots"][0]["place"];
+    assert_eq!(place["name"], "Velachery Main Road", "{body}");
+    assert_eq!(place["source"], "osm_road");
+    assert!(place["distance_m"].as_f64().unwrap() < 100.0, "{place}");
+    assert!(body["score"].as_str().unwrap().contains("150 cm"));
 }
 
 #[tokio::test]

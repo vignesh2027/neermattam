@@ -159,9 +159,12 @@ type Pipeline struct {
 	Overlays   *overlay.Store
 	// Certificates keeps each measurement's signed certificate (nil: none kept).
 	Certificates *certs.Store
-	Hub          *live.Hub
-	Log          *slog.Logger
-	Metrics      *metrics.Set
+	// ReasonTexts gives a check's reason in every page language, for the
+	// decision kept with a certificate; nil keeps the English only.
+	ReasonTexts func(verify.RuleResult) map[string]string
+	Hub         *live.Hub
+	Log         *slog.Logger
+	Metrics     *metrics.Set
 
 	sem chan struct{}
 	now func() time.Time
@@ -395,6 +398,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 		if !m.Usable {
 			out.Status = StatusUnusable
 			out.Summary = "The photo could not be measured."
+			p.recordDecision(out, verify.Result{})
 			p.Dedupe.Remember(c.sum, c.dhash, c.hasHash)
 			p.finish(out, start)
 			return out, nil
@@ -445,6 +449,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 	if !verdict.Accepted {
 		out.Status = StatusRejected
 		out.Summary = "Measured, but not added to the map."
+		p.recordDecision(out, verdict)
 		p.Dedupe.Remember(c.sum, c.dhash, c.hasHash)
 		p.finish(out, start)
 		return out, nil
@@ -482,6 +487,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 	p.Dedupe.Remember(c.sum, c.dhash, c.hasHash)
 	out.Status = StatusFused
 	out.Summary = fmt.Sprintf("About %.0f cm of water, plus or minus %.0f cm.", depth, sigma)
+	p.recordDecision(out, verdict)
 	if p.Metrics != nil {
 		p.Metrics.Trust.Observe(verdict.Trust)
 	}
@@ -542,6 +548,45 @@ func (p *Pipeline) attachCertificate(out *Outcome, m *upstream.Measurement, uplo
 		return
 	}
 	out.CertificateURL = "/verify/" + m.MeasurementID
+}
+
+// recordDecision keeps what the gateway did with a measurement beside its
+// certificate, so the certificate's page can say whether it reached the
+// map and, if not, why. Without a stored certificate there is nothing to
+// annotate.
+func (p *Pipeline) recordDecision(out *Outcome, verdict verify.Result) {
+	if p.Certificates == nil || out.CertificateURL == "" || out.Measurement == nil {
+		return
+	}
+	d := certs.Decision{Status: out.Status, DecidedAt: p.now().UTC()}
+	switch out.Status {
+	case StatusFused:
+		d.Trust = verdict.Trust
+		d.ReadingID = out.ReadingID
+		if out.Cell != nil {
+			d.Cell = out.Cell.Cell
+		}
+	case StatusRejected:
+		d.Trust = verdict.Trust
+		for _, r := range verdict.Rules {
+			if r.Outcome != verify.Reject {
+				continue
+			}
+			text := map[string]string{"en": r.Reason}
+			if p.ReasonTexts != nil {
+				text = p.ReasonTexts(r)
+			}
+			d.Reasons = append(d.Reasons, certs.DecisionReason{Rule: r.Rule, Outcome: string(r.Outcome), Text: text})
+		}
+	case StatusUnusable:
+		for _, reason := range out.Measurement.Reasons {
+			// Perception's own words, in English on every page.
+			d.Reasons = append(d.Reasons, certs.DecisionReason{Text: map[string]string{"en": reason}})
+		}
+	}
+	if err := p.Certificates.SetDecision(out.Measurement.MeasurementID, d); err != nil {
+		p.Log.Warn("decision not kept with the certificate", "error", err.Error())
+	}
 }
 
 func (p *Pipeline) finish(out *Outcome, start time.Time) {

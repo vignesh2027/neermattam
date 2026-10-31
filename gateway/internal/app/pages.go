@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"neermattam/gateway/internal/buildinfo"
 	"neermattam/gateway/internal/cities"
 	"neermattam/gateway/internal/i18n"
 	"neermattam/gateway/internal/ratelimit"
@@ -26,14 +27,19 @@ func (a *App) page(w http.ResponseWriter, r *http.Request, active string, needsM
 	city := a.cityFor(w, r)
 	info, _ := i18n.Get(lang)
 	p := &web.Page{
-		Request:     r,
-		PublicURL:   a.Cfg.PublicURL,
-		Title:       i18n.T(lang, "title."+active),
-		Active:      active,
-		Nonce:       nonceFrom(r.Context()),
-		NeedsMap:    needsMap,
-		Footer:      active == "report" || active == "about" || active == "home",
-		Demo:        a.Cfg.Demo,
+		Request:   r,
+		PublicURL: a.Cfg.PublicURL,
+		Title:     i18n.T(lang, "title."+active),
+		Active:    active,
+		Nonce:     nonceFrom(r.Context()),
+		NeedsMap:  needsMap,
+		Footer:    active == "report" || active == "about" || active == "home",
+		Demo:      a.Cfg.Demo,
+		WhatsApp:  a.WhatsApp != nil,
+		Build: web.BuildView{
+			Repo: buildinfo.Repository, RepoLabel: strings.TrimPrefix(buildinfo.Repository, "https://"),
+			Commit: a.Build.Commit, Short: a.Build.Short(), URL: a.Build.URL(), Dirty: a.Build.Dirty,
+		},
 		Lang:        lang,
 		LangNative:  info.Native,
 		LangFont:    info.Font,

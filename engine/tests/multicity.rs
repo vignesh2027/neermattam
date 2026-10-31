@@ -25,13 +25,14 @@ use tower::ServiceExt;
 type Point = (f64, f64);
 
 /// A trip per city between two well-known places, about 3 to 15 km apart.
-const TRIPS: [(&str, Point, Point); 6] = [
+const TRIPS: [(&str, Point, Point); 7] = [
     ("chennai", (13.0827, 80.2707), (12.9791, 80.2209)), // Central to Velachery
     ("mumbai", (18.9398, 72.8355), (19.0544, 72.8406)),  // CSMT to Bandra
     ("bengaluru", (12.9767, 77.5713), (12.9756, 77.6066)), // Majestic to MG Road
     ("hyderabad", (17.4344, 78.5013), (17.3616, 78.4747)), // Secunderabad to Charminar
     ("kolkata", (22.5839, 88.3426), (22.5675, 88.3700)), // Howrah to Sealdah
     ("delhi", (28.6431, 77.2197), (28.6129, 77.2295)),   // New Delhi station to India Gate
+    ("visakhapatnam", (17.7214, 83.2906), (17.7404, 83.3362)), // the station to MVP Colony
 ];
 
 fn osm_dir() -> PathBuf {

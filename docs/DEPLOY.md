@@ -18,14 +18,14 @@ This page explains how the image is built, how the container is configured, how 
 
 ## How the image is built
 
-`modal deploy deploy/modal-web/app.py` stages the build context into a temporary folder (the engine, gateway and perception sources as they are in the checkout it runs from, the launcher, the Dockerfile cut at the Space-only line, `DATA_LICENSE`, `BUILD_INFO` and the six road extracts) and has Modal build it with `Image.from_dockerfile`. Modal caches each step, so a change to one service rebuilds only the steps after it. The stages:
+`modal deploy deploy/modal-web/app.py` stages the build context into a temporary folder (the engine, gateway and perception sources as they are in the checkout it runs from, the launcher, the Dockerfile cut at the Space-only line, `DATA_LICENSE`, `BUILD_INFO` and the seven road extracts) and has Modal build it with `Image.from_dockerfile`. Modal caches each step, so a change to one service rebuilds only the steps after it. The stages:
 
 1. **Engine.** `rust:1.97-bookworm` runs `cargo build --release --locked` on `engine/`.
 2. **Gateway, key tool and launcher.** `golang:1.26-bookworm` runs `go test ./...` and builds static binaries of the gateway, `neermattam-keys` and the launcher. A failing test fails the build. One gateway test is skipped: `TestEmbeddedFactsMatchTheDocs` compares the landing page's numbers with `docs/` and `eval/RESULTS_REAL.md`, which the build context does not include. (Its recorded run now lives in git at `gateway/internal/facts/testdata/x2.json`, so it passes on a clean checkout; in the image it would skip itself anyway, so the `-skip` in the Dockerfile is no longer needed.)
 3. **Weights.** `facebook/sam2.1-hiera-small` (Apache-2.0, not gated) is downloaded at one pinned revision, keeping only the four files `transformers` reads. Nothing is downloaded at run time; `HF_HUB_OFFLINE=1` makes sure of it.
 4. **Runtime.** `python:3.12-slim-bookworm`. Perception's dependencies are installed from its `uv.lock` at the locked versions, except that `torch` and `torchvision` come from the PyTorch CPU index at the same versions, without the NVIDIA libraries the PyPI builds pull in. The build ends by importing perception and checking that torch has no CUDA. The binaries, the weights and the road extracts are copied in.
 
-`BUILD_INFO` in the image records the full source commit, its subject, whether the services or the deploy files had uncommitted changes, and when the context was staged.
+`BUILD_INFO` in the image records the full source commit, its subject, whether the services or the deploy files had uncommitted changes, and when the context was staged. The gateway reads it at start (`BUILD_INFO_PATH`, default `/opt/neermattam/BUILD_INFO`) and the About page shows the commit, linked on GitHub, with a note when uncommitted changes were included.
 
 **Always deploy from a clean checkout.** Other work may be in progress in the main working tree, and whatever is there is what gets built. Make a worktree of the commit, copy in any deploy-file changes, deploy from it and remove it:
 
@@ -35,7 +35,7 @@ cd /Users/vignesh/nm-deploy && modal deploy deploy/modal-web/app.py
 git -C /Users/vignesh/neermattam worktree remove /Users/vignesh/nm-deploy
 ```
 
-The six road extracts, `<city>-roads.osm.pbf` for Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata and Delhi (ODbL, about 53 MB together), are not in the GitHub repository. The staging step takes them from the first of `data/osm/` and `~/neermattam-data/osm/` that holds all six. The About page credits OpenStreetMap contributors under the ODbL, and `DATA_LICENSE` is in the image at `/opt/neermattam/DATA_LICENSE`.
+The seven road extracts, `<city>-roads.osm.pbf` for Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata, Delhi and Visakhapatnam (ODbL, 54 MB together since the Chennai re-cut of 31 October 2026, checked with `push.py --stage-dir`), are not in the GitHub repository. The staging step takes them from the first of `data/osm/` and `~/neermattam-data/osm/` that holds all seven (`CITIES` in `deploy/hf-space/push.py`). The About page credits OpenStreetMap contributors under the ODbL, and `DATA_LICENSE` is in the image at `/opt/neermattam/DATA_LICENSE`.
 
 ## What runs in the container
 
@@ -45,7 +45,7 @@ The six road extracts, `<city>-roads.osm.pbf` for Chennai, Mumbai, Bengaluru, Hy
 |---|---|---|
 | Front proxy | `0.0.0.0:8000` | Inside the launcher. Modal's `@modal.web_server(8000)` routes the public URL here. It rewrites `X-Forwarded-For` (see below) and passes everything else, including server-sent events, straight through. |
 | Gateway | `127.0.0.1:7860` | Answers `/` as soon as it starts, without waiting for perception to load SAM. |
-| Engine | `127.0.0.1:8302` | Loads all six cities' road graphs at start (`ENGINE_OSM_DIR`); ready once Chennai's is loaded. Cell snapshot and history on the Volume. |
+| Engine | `127.0.0.1:8302` | Loads all seven cities' road graphs at start (`ENGINE_OSM_DIR`); ready once Chennai's is loaded. Cell snapshot and history on the Volume. |
 | Perception | `127.0.0.1:8301` | SAM 2.1 small on the CPU, loaded and warmed up before it serves. Muse Spark Open on Baseten for the scene reading and the mask checks. |
 | Budget guard | `127.0.0.1:8300` | Inside the launcher. The gateway's `PERCEPTION_URL` points here; it forwards to perception and counts model calls. |
 
@@ -140,6 +140,7 @@ When a visitor leaves, or the gateway's perception timeout expires, the gateway 
 - The site is served from Modal's `us-east` region.
 - Modal bills a container for the larger of what it asks for and what it uses. At the rates Modal published on 28 October 2026 ($0.0473 per core hour and $0.008 per GiB hour), 2 cores and 4 GiB held all day come to 24 x (2 x 0.0473 + 4 x 0.008) = $3.04 a day, before Baseten. One core would bring it to about $1.90 a day, with slower SAM passes. The Volume holds a few MB, which costs nothing worth counting at $0.09 per GiB a month.
 - Memory, measured in the container on 29 October 2026 with all six graphs loaded: 2.2 GiB idle (engine 0.5 GiB, perception 1.6 GiB, gateway 0.1 GiB), 2.6 GiB after a photo report (perception 2.0 GiB). The 4 GiB request leaves room for the second report that may run at the same time; the hard limit is 6 GiB. Baseten is billed separately; its cost per report is in each response's `cost_usd`, and the daily cap bounds it.
+- **Seven cities (not yet deployed).** Visakhapatnam and the wider Chennai extract add graph memory: the seven graphs hold 254.1 MiB against 215.5 MiB for six, and the release engine measured 438 MiB resident once loaded and 684 MiB at its peak while the graphs load in parallel (docs/ENGINE.md, Cities; local, 31 October 2026), against 369 MiB resident for six. Adding the difference in the engine's resident memory (about 70 MiB, about 0.3 GiB at the load peak, which comes before perception has loaded SAM) to the container figures above gives about 2.3 GiB idle and 2.7 GiB after a photo report, inside the 4 GiB request and the 6 GiB limit. This is an estimate from local measurements; measure in the container after the next deploy.
 
 ## Updating
 
@@ -162,7 +163,7 @@ Checking a deployment:
 U=https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run
 for p in / /map /report /route /about /alerts /control /control/demo /developers /readyz; do
   curl -s -o /dev/null -w "$p %{http_code}\n" "$U$p?lang=ta"; done
-curl -s "$U/api/route?from=18.9398,72.8355&to=19.0544,72.8406&vehicle=car" | head -c 300   # one city of six
+curl -s "$U/api/route?from=18.9398,72.8355&to=19.0544,72.8406&vehicle=car" | head -c 300   # one city of seven
 curl -s -H "Authorization: Bearer $DEMO_API_KEY" "$U/api/v1/route?from=13.0827,80.2707&to=12.9791,80.2209&vehicle=car" | head -c 300
 curl -s -F image=@photo.jpg -F lat=12.9791 -F lon=80.2209 $U/api/report
 ```

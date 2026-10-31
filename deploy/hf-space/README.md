@@ -22,6 +22,6 @@ The map runs with a labelled simulated scenario based on places that flooded dur
 
 To protect the shared model credit, each visitor may send a few reports a minute, and the whole Space makes at most a fixed number of model calls a day. Beyond that, measurements pause until midnight India time while the map and routes keep working.
 
-Road data: the six city road extracts in `data/osm/` are © OpenStreetMap contributors, available under the Open Database Licence. See `DATA_LICENSE`.
+Road data: the seven city road extracts in `data/osm/` are © OpenStreetMap contributors, available under the Open Database Licence. See `DATA_LICENSE`.
 
 How this Space is built and updated: `docs/DEPLOY.md` in the source repository.

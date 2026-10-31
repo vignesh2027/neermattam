@@ -67,7 +67,7 @@ def stage_context() -> Path:
     spec.loader.exec_module(push)
     osm = push.find_osm_dir()
     if osm is None:
-        raise SystemExit("no folder holds all six city road extracts (see docs/DEPLOY.md)")
+        raise SystemExit("no folder holds all seven city road extracts (see docs/DEPLOY.md)")
     ctx = Path(tempfile.mkdtemp(prefix="neermattam-modal-"))
     push.stage(ctx, osm)
     full = (ctx / "Dockerfile").read_text()

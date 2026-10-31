@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"neermattam/gateway/internal/i18n"
+	"neermattam/gateway/internal/places"
 	"neermattam/gateway/internal/upstream"
 )
 
@@ -70,6 +71,14 @@ type HotspotView struct {
 	Class      string
 	Age        string
 	Reports    int
+	// Origin is "simulated", "mixed" or "reported": the readings behind the
+	// count come from the simulated scenario, partly, or from real reports.
+	Origin string
+	// Road is the nearest named road (OpenStreetMap), RoadM its distance in
+	// metres, Locality the nearest known locality.
+	Road       string
+	RoadM      int
+	Locality   string
 	Unknown    bool
 	Blocks     []string
 	Reasons    []string
@@ -120,7 +129,9 @@ func f0(v float64) string { return fmt.Sprintf("%.0f", v) }
 // NewControlView builds the view from the engine's answers. Reasons are
 // the engine's own sentences in English; other languages get sentences
 // built from the same parts.
-func NewControlView(lang, city, base string, demo bool, sum *upstream.Summary, hs *upstream.Hotspots, cell string) *ControlView {
+// origin labels a cell simulated, mixed or reported; nil labels every cell
+// reported.
+func NewControlView(lang, city, base string, demo bool, sum *upstream.Summary, hs *upstream.Hotspots, cell string, origin func(cell string, lat, lon float64) string) *ControlView {
 	v := &ControlView{Demo: demo, Base: base, City: city}
 	cityQ := ""
 	if !demo {
@@ -183,6 +194,16 @@ func NewControlView(lang, city, base string, demo bool, sum *upstream.Summary, h
 				MapHref:    "/map?" + url.Values{"city": {city}, "at": {fmt.Sprintf("%.5f,%.5f", h.Lat, h.Lon)}}.Encode(),
 				DetailHref: q(url.Values{"cell": {h.Cell}}),
 				Selected:   h.Cell == cell,
+				Origin:     "reported",
+			}
+			if origin != nil {
+				hv.Origin = origin(h.Cell, h.Lat, h.Lon)
+			}
+			if p := h.Place; p != nil && p.Name != "" {
+				hv.Road, hv.RoadM = p.Name, int(math.Round(p.DistanceM))
+			}
+			if name, ok := places.Nearest(h.Lat, h.Lon, 2500); ok {
+				hv.Locality = name
 			}
 			for _, p := range []struct {
 				key      string
@@ -191,14 +212,19 @@ func NewControlView(lang, city, base string, demo bool, sum *upstream.Summary, h
 				hv.Parts = append(hv.Parts, HotspotPart{Key: p.key, Value: math.Round(p.val*10) / 10, Max: p.max, Pct: fmt.Sprintf("%.1f%%", math.Max(0, p.val))})
 			}
 			if lang == i18n.Default {
-				hv.Reasons = h.Reasons
+				hv.Reasons = append([]string(nil), h.Reasons...)
 			} else {
 				hv.Reasons = []string{
 					i18n.T(lang, "ctl.reason_depth", f0(h.DepthBlockCm), f0(h.DepthCm), fmt.Sprintf("%.1f", h.Parts.Depth)),
 					i18n.T(lang, "ctl.reason_hazard", i18n.T(lang, "hazard."+orUnknown(h.HazardClassUpper)), fmt.Sprintf("%.0f", h.Parts.Hazard)),
 					i18n.T(lang, "ctl.reason_fresh", fmt.Sprintf("%.1f", h.AgeH), fmt.Sprintf("%.1f", h.Parts.Freshness)),
-					i18n.T(lang, "ctl.reason_reports", h.IndependentReports, fmt.Sprintf("%.0f", h.Parts.Reports)),
+					i18n.T(lang, "ctl.reason_reports", h.IndependentReports, fmt.Sprintf("%.1f", h.Parts.Reports)),
 				}
+			}
+			if hv.Origin != "reported" {
+				// The engine counts readings; the scenario's drip makes many
+				// in one cell, and none of them is a person.
+				hv.Reasons = append(hv.Reasons, i18n.T(lang, "ctl.reason_sim"))
 			}
 			v.Hotspots = append(v.Hotspots, hv)
 		}

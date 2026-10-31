@@ -53,13 +53,14 @@
           <span class="visually-hidden">{{range .Parts}}{{t (printf "ctl.part_%s" .Key)}} {{.Value}} / {{.Max}}. {{end}}</span>
         </div>
         <div class="hot-main">
+          {{if or .Road .Locality}}<p class="hot-place">{{if .Road}}<b title="{{t "ctl.place_title"}}">{{.Road}}</b>{{if .RoadM}} <span class="muted small num">{{.RoadM}} m</span>{{end}}{{end}}{{if and .Road .Locality}}<span class="muted"> · </span>{{end}}{{if .Locality}}<span class="muted">{{.Locality}}</span>{{end}}</p>{{end}}
           <div class="hot-line">
             <b class="num">{{t "ctl.up_to" .DepthBlock}}</b>
             <span class="muted small">{{t "ctl.mean" .Depth .Sigma}}</span>
             <span class="chip {{if eq .Class "danger_all"}}chip-danger{{else if eq .Class "danger_most"}}chip-violet{{else if eq .Class "unknown"}}chip-grey{{end}}">{{t (printf "hazard.%s" .Class)}}</span>
             {{if .Unknown}}<span class="chip chip-grey">{{t "ctl.uncertain"}}</span>{{end}}
           </div>
-          <div class="hot-meta"><span>{{.Age}}</span><span>{{t "ctl.reports_n" .Reports}}</span>{{if .Blocks}}<span class="hot-blocks" title="{{t "ctl.closed_to"}}">{{range .Blocks}}{{template "vehicle-icon" .}}{{end}}</span>{{end}}</div>
+          <div class="hot-meta"><span>{{.Age}}</span>{{if eq .Origin "simulated"}}<span class="chip chip-violet">{{t "ctl.reports_sim" .Reports}}</span>{{else if eq .Origin "mixed"}}<span class="chip chip-violet">{{t "ctl.reports_mixed" .Reports}}</span>{{else}}<span>{{t "ctl.reports_n" .Reports}}</span>{{end}}{{if .Blocks}}<span class="hot-blocks" title="{{t "ctl.closed_to"}}">{{range .Blocks}}{{template "vehicle-icon" .}}{{end}}</span>{{end}}</div>
           <details class="hot-why"><summary>{{t "ctl.why"}}</summary><ul>{{range .Reasons}}<li>{{.}}</li>{{end}}</ul></details>
         </div>
         <div class="hot-links"><a href="{{.DetailHref}}#ctl-cell">{{t "ctl.details"}}</a><a href="{{.MapHref}}">{{t "ctl.on_map"}}</a></div>

@@ -69,22 +69,22 @@ A point that lies inside an outline of the same kind is dropped, so a place mapp
 python3 scripts/extract_sites.py --osm-dir ~/neermattam-data/osm
 ```
 
-**Real counts**, from the extracts with OpenStreetMap data until 25 October 2026 (southern zone) and 27 October 2026 (the others):
+**Real counts**, from the extracts with OpenStreetMap data until 25 October 2026 (southern zone) and 27 October 2026 (the others), regenerated on 31 October 2026 for the wider Chennai box:
 
 | City | Data centres | Hospitals | Telephone exchanges | Cable landing stations | Fuel stations |
 |---|---|---|---|---|---|
-| Chennai | 13 | 834 | 5 | 0 | 238 |
+| Chennai | 15 | 842 | 5 | 0 | 243 |
 | Mumbai | 2 | 1,457 | 11 | 0 | 225 |
 | Bengaluru | 5 | 1,092 | 11 | 0 | 656 |
 | Hyderabad | 2 | 1,071 | 0 | 0 | 382 |
 | Kolkata | 0 | 337 | 3 | 0 | 96 |
 | Delhi | 1 | 828 | 2 | 0 | 465 |
-| Visakhapatnam (not a default city) | 0 | 283 | 2 | 0 | 126 |
+| Visakhapatnam | 0 | 283 | 2 | 0 | 126 |
 
 What the counts say:
 
-- **OpenStreetMap is thin on data centres.** Chennai's 13 are mostly in Ambattur (CtrlS, NTT, Iron Mountain, Colt, CapitaLand, Digital Connexion and others) plus a "Government Data Centre" by the Adyar in south Chennai. Hyderabad's two (one is a data recovery service) and Delhi's one (an Aadhaar centre) are small listings tagged as data centres; they are listed because that is what is mapped. Mumbai's two are CtrlS Mumbai and NTT Mumbai 7.
-- **Siruseri is outside the Chennai box.** Nxtra Data Chennai (way 355599482) and AdaniConneX Chennai 1 (way 1462367447), at about 12.82 to 12.83 N on the Old Mahabalipuram Road, lie just south of the engine's Chennai box (minimum latitude 12.85), so the engine refuses readings there and they are not listed. The script prints every data centre within 10 km of a box but outside it. Widening the box to `80.10,12.80,80.33,13.24` (`ENGINE_CITY_CHENNAI_BBOX`, and the gateway's built-in copy) would cover them; the Chennai road extract was clipped at 12.79, so its roads reach that far but with almost no margin. That is a decision for the maintainer, not made here.
+- **OpenStreetMap is thin on data centres.** Chennai's 15 are the two in Siruseri (below) and 13 that are mostly in Ambattur (CtrlS, NTT, Iron Mountain, Colt, CapitaLand, Digital Connexion and others) plus a "Government Data Centre" by the Adyar in south Chennai. Hyderabad's two (one is a data recovery service) and Delhi's one (an Aadhaar centre) are small listings tagged as data centres; they are listed because that is what is mapped. Mumbai's two are CtrlS Mumbai and NTT Mumbai 7.
+- **Siruseri is now inside the Chennai box.** Nxtra Data Chennai (way 355599482, 12.8306 N 80.2210 E) and AdaniConneX Chennai 1 (way 1462367447, 12.8216 N 80.2261 E), on the Old Mahabalipuram Road, lay just south of the first Chennai box (minimum latitude 12.85). On 31 October 2026 the box was widened to `80.10,12.80,80.33,13.24` in the engine, the gateway's built-in copy, the script and the tests, the Chennai road extract was re-cut from the southern zone with a margin so its roads reach 12.77 N (docs/ENGINE.md, Cities; the old file is kept as `chennai-roads.osm.pbf.bak-2026-10-26`), and this file was regenerated. Checked against the release engine: `/v1/sites?city=chennai&kind=data_centre` lists 15, both Siruseri sites among them, and Nxtra Data Chennai's six access routes are all open (main road 1,315 m, fuel 1,955 m, on a map with no water there). The script still prints every data centre within 10 km of a box but outside it.
 - **No cable landing station is mapped** in either the southern or the western zone extract. A search of every telecom, communication and submarine object in both for the word "landing" found none. The kind exists so an operator can add one, and the script's filter will pick them up once mapped.
 - **Hospitals are plentiful but noisy**: `amenity=hospital` includes many clinics.
 
@@ -183,7 +183,7 @@ The gateway sets the owner to the key's id; a query or body cannot choose anothe
 
 ## Visakhapatnam
 
-Google's AI hub makes Visakhapatnam the headline siting case. The engine adds a city without code, so it can be covered today:
+Google's AI hub makes Visakhapatnam the headline siting case. Since 31 October 2026 it is the seventh default city: in the engine's built-in list, the gateway's city list and switcher with five route presets, and the deployed image's road extracts. It was cut and first run like this:
 
 ```sh
 osmium extract -s complete_ways -b 83.08,17.52,83.56,18.10 southern-zone-latest.osm.pbf -o visakhapatnam-bbox.osm.pbf
@@ -192,7 +192,7 @@ ENGINE_CITIES=chennai,mumbai,bengaluru,hyderabad,kolkata,delhi,visakhapatnam \
 ENGINE_CITY_VISAKHAPATNAM_BBOX=83.11,17.55,83.53,18.07 ENGINE_CITY_VISAKHAPATNAM_NAME=Visakhapatnam cargo run --release
 ```
 
-The box is the bounding box of the Visakhapatnam District boundary (admin_level 5) in OpenStreetMap, padded by 0.03 degrees for the extract as for the other cities. Started this way on 30 October 2026, the engine built Visakhapatnam's graph from 39,709 ways (261,705 nodes, 14.2 MiB) and planned access routes for its hospitals. The site file already holds its sites, which load only when the city is configured. OpenStreetMap has no data centre mapped there yet (0), and no Google site; an operator would add its own. It is not a default city because the gateway's built-in city list, its route presets (five well-known places per city) and their tests would all change with it; the city name is translated in all eight languages, ready for that change.
+The box is the bounding box of the Visakhapatnam District boundary (admin_level 5) in OpenStreetMap, padded by 0.03 degrees for the extract as for the other cities. Started this way on 30 October 2026, the engine built Visakhapatnam's graph from 39,709 ways (261,705 nodes, 14.2 MiB) and planned access routes for its hospitals. The site file already holds its sites, which load only when the city is configured. OpenStreetMap has no data centre mapped there yet (0), and no Google site; an operator would add its own. The city name is translated in all eight languages.
 
 ## Limits
 
@@ -204,10 +204,10 @@ The box is the bounding box of the Visakhapatnam District boundary (admin_level 
 
 ## Cost
 
-Measured once on the local release build (8 GB M1 MacBook Air, other work running), Chennai with the demo map: the 13 data centres with both rings in about 2 ms, the 834 hospitals in about 100 ms, and one site's six access routes, rings and area record in about 100 ms. Indicative, not a benchmark.
+Measured once on the local release build (8 GB M1 MacBook Air, other work running), Chennai with the demo map, before the box was widened: the 13 data centres with both rings in about 2 ms, the 834 hospitals in about 100 ms, and one site's six access routes, rings and area record in about 100 ms. Indicative, not a benchmark.
 
 ## Tests
 
 - Engine (`cargo test`): zone cells, unknown versus known rings (a ring with one shallow report is unknown, not under), outer-ring water as `nearby`, expired deep water named as old, the rising trend, the tanker's limit against the AIDR ceiling, fuel candidates, operator sites private to their owner and capped, the embedded OpenStreetMap file, the ledger's spells, India dates, unresolved spells, the two buckets and its file; and over HTTP on a flooded synthetic grid (`tests/sites.rs`): open routes on a dry map, 20 cm that detours the car and two-wheeler but not the tanker, 60 cm at the site that closes every route, the list's order and input checks, operator sites across a restart, and the ledger keeping simulated water out of the reported record.
-- Script (`pytest scripts/test_extract_sites.py`): kinds come from tags only, OpenStreetMap references, city boxes (Siruseri outside Chennai's), centroids and point-in-polygon.
+- Script (`pytest scripts/test_extract_sites.py`): kinds come from tags only, OpenStreetMap references, city boxes (Siruseri inside the widened Chennai box, 12.79 N outside it, Visakhapatnam covered), centroids and point-in-polygon.
 - Gateway (`go test ./...`): the page in English and Tamil (every key resolved, the nonce on every inline script, no operator site requested), the developer API's key checks and owner scoping, usage counting, and the site watcher's threshold crossing, closed and reopened routes, the held message inside the gap, stale water never called clear, one engine call per site, Tamil messages and the store's persistence.

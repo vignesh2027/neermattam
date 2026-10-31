@@ -306,8 +306,7 @@ func (p *Perception) Keys(ctx context.Context) ([]byte, error) {
 
 // Ready checks perception's /readyz.
 func (p *Perception) Ready(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
+	// The caller's context bounds the probe (READY_PROBE_TIMEOUT).
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.base+"/readyz", nil)
 	if err != nil {
 		return err

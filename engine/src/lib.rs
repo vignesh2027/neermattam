@@ -1,6 +1,6 @@
 //! Neermattam engine: fuses street-level flood depth reports into a live hex
-//! map of six Indian metros (Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata
-//! and Delhi by default), rates the hazard to people with the UK Defra and
+//! map of seven Indian cities (Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata,
+//! Delhi and Visakhapatnam by default), rates the hazard to people with the UK Defra and
 //! Environment Agency formula, and routes each kind of vehicle around water it
 //! cannot safely cross.
 //!

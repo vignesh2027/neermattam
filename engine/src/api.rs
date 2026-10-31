@@ -1164,7 +1164,9 @@ async fn get_hotspots(
         blocking(move || {
             let views = city_views(&st, city.as_ref(), now);
             let cfg = &st.config;
-            analytics::hotspots(views, &cfg.policy, &cfg.fusion, now, limit)
+            let mut ranked = analytics::hotspots(views, &cfg.policy, &cfg.fusion, now, limit);
+            name_hotspots(&st, &mut ranked);
+            ranked
         })
         .await?
     };
@@ -1172,10 +1174,30 @@ async fn get_hotspots(
         "city": city.map(|c| &c.id),
         "generated_at": now,
         "advisory": true,
-        "score": "depth 40 x min(depth_block / 60 cm, 1) + hazard 0, 10, 20 or 30 by class at depth_block + freshness 20 x (1 - age_h / 12) + reports 10 x min(independent reports / 5, 1)",
+        "score": "depth 40 x min(depth_block / 150 cm, 1) + hazard 30 x min(HR / 3, 1) with HR the Defra rating at depth_block + freshness 20 x (1 - age_h / 12) + reports 10 x min(ln(1 + n) / ln(31), 1) with n the readings in force",
         "count": ranked.len(),
         "hotspots": ranked,
     })))
+}
+
+/// Name each hotspot after the nearest named road in its city's graph. A
+/// city whose graph is not loaded leaves its hotspots unnamed.
+fn name_hotspots(st: &AppState, ranked: &mut [analytics::Hotspot]) {
+    for h in ranked {
+        let Some(city) = st.config.city_at(h.lat, h.lon) else {
+            continue;
+        };
+        let Some(g) = st.graph(&city.id) else {
+            continue;
+        };
+        if let Some((name, d)) = g.nearest_road_name(h.lat, h.lon, analytics::PLACE_MAX_M) {
+            h.place = Some(analytics::PlaceName {
+                name: name.to_string(),
+                distance_m: d.round(),
+                source: "osm_road",
+            });
+        }
+    }
 }
 
 async fn get_summary(

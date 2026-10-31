@@ -4,6 +4,8 @@
 
 Rerun from `perception/` with `uv run --extra local python ../eval/real_photos.py` (live: Muse Spark Open on Baseten, SAM 2.1 hiera-small locally; add `--modal` for hiera-large on the Modal CPU service). The SAM size comparison is `../eval/sam_ab.py` (table in `RESULTS_SAM_AB.md`) and the latency breakdown is `../eval/latency.py`. The photos are downloaded from Wikimedia Commons into `eval/photos/` and are not in git; their source, author and licence are in `eval/commons_photos.json` and repeated per photo below. Overlays, response JSON and every image the verifier was shown go to `eval/out/` (also not in git). There are two sets. The Unsplash close-ups (`eval/unsplash_photos.json`, Unsplash License, photographers credited there) are the real use case: a resident photographing a vehicle a few metres away. The Commons set (`eval/commons_photos.json`) is the four wide street photos named in the first brief (c1 to c4) plus two with motorcycles standing in water side-on (x1, x2).
 
+**The current result is the generated section at the end of this file** (run of 2026-10-30, Muse Spark Open on Baseten and SAM 2.1 hiera-small locally). Of the eleven photos, none was measured from a wheel; two were measured from a person (c1 45.6 cm, sigma 13.0 cm, confidence 0.22; c3 102.9 cm, sigma 10.9 cm, confidence 0.28); the other nine got the scene model's labelled estimate (confidence 0.21 to 0.23). Wall time was 7.2 to 50.2 s per photo. The hand-written sections below describe other runs, each with its date or output folder, and their numbers differ from the generated section because the scene reading is fresh on each run and the verifier is not deterministic.
+
 ## What changed in this milestone
 
 * SAM is prompted with the box **and** a ring of points on the tyre rubber, with negative points on the hub and on what touches the tyre (exhaust, mudguard, wall); the scene model is asked for those points. A box alone let a wall leak into the c3 scooters on the Modal probe.
@@ -16,16 +18,16 @@ Rerun from `perception/` with `uv run --extra local python ../eval/real_photos.p
 
 ## Rim checks, the shallow-side guard and latency (30 October, later)
 
-**The x1 failure.** The earlier run accepted an outline of the moped's rear wheel that the scene model called good, whose box agreed with the tyre box (0.86) and whose brightness ratio passed (0.85 against 0.8), and measured 0.7 cm where the scene model said 20 cm. Looking at the proposals again (SAM 2.1 hiera-small, the vehicle-box search, cached scene reading), that outline follows the tyre's left edge and top and then cuts diagonally through the wheel: half a tyre closed by a chord. Its fitted ellipse is an oval (axis ratio 0.57) tilted 38 degrees from upright; the good full-wheel outline of the bike beside it is tilted 1 degree. The outlines that follow the rim instead show a darker ring just outside them (dark share 0.69 outside against 0.15 inside, and 0.42 against 0.05), while tyre outlines show the opposite or no difference.
+**The x1 failure.** The person run of 30 October (next section) accepted an outline of the moped's rear wheel that the scene model called good, whose box agreed with the tyre box (0.86) and whose brightness ratio passed (0.85 against 0.8), and measured 0.7 cm where the scene model said 20 cm. Looking at the proposals again (SAM 2.1 hiera-small, the vehicle-box search, cached scene reading), that outline follows the tyre's left edge and top and then cuts diagonally through the wheel: half a tyre closed by a chord. Its fitted ellipse is an oval (axis ratio 0.57) tilted 38 degrees from upright; the good full-wheel outline of the bike beside it is tilted 1 degree. The outlines that follow the rim instead show a darker ring just outside them (dark share 0.69 outside against 0.15 inside, and 0.42 against 0.05), while tyre outlines show the opposite or no difference.
 
 Two levels of fix:
 
 * **Numeric tyre checks** (`wheel_finder.tyre_failure`, used by the agent and in the vehicle-search ranking), each able to overrule a "good" from the scene model: a darker ring just outside the outline (the rubber is outside, so the outline is on the rim); an oval tilted more than 25 degrees from both image axes with axis ratio below 0.75 (a cut outline; real wheels stand upright and camera roll is small); a diameter outside the range expected for the vehicle box (two-wheeler 18 to 70 percent of the box width, car 8 to 45, auto 9 to 55, bus 4 to 30; wide, to catch a hub or rim fragment and not a slightly small tyre); and the scene model's own points on the tyre rubber, of which at least half must not lie outside the outline. The brightness threshold of 0.8 was left as it was.
 * **A shallow-side guard** in the pipeline. The literal rule "more than two combined sigma apart" would not have caught x1: the estimate's sigma is at least 20 cm, so two combined sigma is about 40 cm and the 19 cm gap passes. So the rule is one-sided: when the scene model's estimate lies above the measurement's own two-sigma upper bound, and by more than half the estimate's sigma (10 cm at least), the wheel reading is not published; the estimate is returned as `model_estimate` and `reasons` gives the wheel's reading. I chose falling back over widening the sigma because the routing engine caps sigma at 10 cm (`engine/src/routing.rs`), so a widened sigma would not raise the depth it routes on, and fusion would still pull the cell shallow. A test uses the x1 numbers (0.7 cm, sigma 2.5, estimate 20 cm).
 
-In the final run below the numeric checks flagged 11 of the outlines the scene model was shown, on 7 photos, and the guard set aside two wheel readings: x1 (0.5 cm, sigma 9.0, against the scene model's 22 cm at that wheel) and x2 (1.3 cm, sigma 5.2, against 25 cm). x2's reading had looked plausible in earlier runs (the rear tyre's lowest point is close to the water), so this is the cautious side costing a measurement that may have been right; no wheel measurement survives on these eleven photos.
+In the run on all eleven photos after these changes (`eval/out/final3`, table below) the numeric checks flagged 11 of the outlines the scene model was shown, on 7 photos, and the guard set aside two wheel readings: x1 (0.5 cm, sigma 9.0, against the scene model's 22 cm at that wheel) and x2 (1.3 cm, sigma 5.2, against 25 cm). x2's reading had looked plausible in earlier runs (the rear tyre's lowest point is close to the water), so this is the cautious side costing a measurement that may have been right; no wheel measurement survived in that run. In the generated run at the end of this file the guard did not act: no wheel outline reached the geometry (on x1 and x2 the checked tyres were seen head-on, and on x1 the time budget stopped one open check).
 
-**Latency.** The 262 to 462 s photos in the run above were Baseten's tail: single checks of 76 to 160 s where most take 6 to 11 s. Profile of x1 with the network normal (fresh scene reading): scene reading 10.7 s; then, in parallel per object, SAM proposals (1 to 3 s each, but the vehicle-box searches took 5 to 24 s because they wait for each other on the one SAM instance and ranked 50 to 80 full-frame masks each), and three rounds of checks of 6 to 11 s each; geometry 1 to 2 s. What changed:
+**Latency.** The 262 to 462 s photos in the person run (next section) were Baseten's tail: single checks of 76 to 160 s where most take 6 to 11 s. Profile of x1 with the network normal (fresh scene reading): scene reading 10.7 s; then, in parallel per object, SAM proposals (1 to 3 s each, but the vehicle-box searches took 5 to 24 s because they wait for each other on the one SAM instance and ranked 50 to 80 full-frame masks each), and three rounds of checks of 6 to 11 s each; geometry 1 to 2 s. What changed:
 
 * every check by Muse Spark Open is cut after 20 s and asked once more (the scene reading after 45 s), instead of waiting up to 120 s per attempt;
 * a time budget: no check is started or waited for later than 50 s after the request began (55 s budget, 5 s kept to finish), and the answer then says the budget ran out and is the best reached in time, with a `budget` step in the trace;
@@ -41,9 +43,9 @@ Before and after, the same three photos with fresh scene readings, network norma
 | c2 | 46.3 s | 29.9 s |
 | x1 | 46.5 s | 48.8 s (the budget stopped one open check at 48 s) |
 
-Under normal service the gain is modest (the critical path is the scene reading plus up to three rounds of checks); what the change buys is a ceiling: no photo can now take the 262 to 462 s seen above.
+Under normal service the gain is modest (the critical path is the scene reading plus up to three rounds of checks); what the change buys is a ceiling: no photo can now take the 262 to 462 s seen in the person run.
 
-Final run on all eleven, SAM 2.1 hiera-small locally, fresh scene readings (`--out ../eval/out/final3`):
+Run on all eleven after these changes, SAM 2.1 hiera-small locally, fresh scene readings (`--out ../eval/out/final3`). This table is kept as context and is not the current result; the generated section at the end of this file is:
 
 | Photo | Answer | Scene model's estimate | Wall time | Scene reading | Checks | Cost USD |
 |---|---|---|---|---|---|---|
@@ -59,7 +61,7 @@ Final run on all eleven, SAM 2.1 hiera-small locally, fresh scene readings (`--o
 | x1 | model_estimate 18, sigma 20 (wheel read 0.5 cm, set aside by the guard) | 18 | 51.4 s | 10.7 s | 38.8 s | 0.060 |
 | x2 | model_estimate 25, sigma 20 (wheel read 1.3 cm, set aside by the guard) | 25 | 46.3 s | 8.3 s | 36.7 s | 0.027 |
 
-Every photo answered in under 52 s (median 38.7 s). The person results moved between runs because the scene reading was fresh: in c3 a different man was measured this time (97 cm, by eye the water is at his hips or waist), and in c1 the left man read 54 cm against 49 cm before. Both are inside their sigma of each other, which is what a sigma of 12 cm means.
+In that run every photo answered in under 52 s (median 38.7 s). The person results moved between runs because the scene reading was fresh: in c3 a different man was measured this time (97 cm, by eye the water is at his hips or waist), and in c1 the left man read 54 cm against 49 cm before. Both are inside their sigma of each other, which is what a sigma of 12 cm means.
 
 ## People as the reference (30 October)
 
@@ -83,7 +85,7 @@ c1 and the Creta were run a second time with `--only` after one last change to t
 | c2 | 0 | none | model_estimate 28 cm, sigma 20 | 28 cm | |
 | c3 | 4 (3 measured at most) | 1 of 3: 72.4 cm (sigma 14.2); one outline was a fragment between two men (box check), one had no shoulder line | **person_reference 72.4 cm, sigma 14.2**, confidence 0.16 | 110 cm | waist, 95 cm (23 cm apart) |
 | c4 | 0 (people on a distant rooftop) | none | model_estimate 180 cm, sigma 54 | 180 cm | |
-| x1 | 0 | none | wheel_geometry 0.7 cm, sigma 2.5 (see below: wrong) | 20 cm | |
+| x1 | 0 | none | wheel_geometry 0.7 cm, sigma 2.5 (wrong; see the section above) | 20 cm | |
 | x2 | 0 | none | model_estimate 22 cm, sigma 20 | 22 cm | |
 
 What I saw in the overlays:
@@ -107,7 +109,7 @@ Caveats:
 
 The scene model now boxes each vehicle, and its wheels are searched for inside the lower part of the box without relying on the scene model's points: SAM is prompted from a 6 by 4 grid of points and from boxes around dark, roughly elliptical blobs (OpenCV threshold and ellipse fit), every proposal is ranked by wheel shape times tyre darkness times a size plausible for the vehicle (`wheel_finder.py`), and the best two go to the verifier with the same three-way accept rule. A fourth check was added after the x1 result below: an outline that is darker just outside than just inside (the brightness ratio below 0.8) follows the rim, inside the dark tyre, and is not measured.
 
-Final run, SAM 2.1 hiera-small locally, fresh scene readings, network normal (overlays and every verifier image in `eval/out/final2/`, the generated section below has every step):
+Final run, SAM 2.1 hiera-small locally, fresh scene readings, network normal (overlays and every verifier image in `eval/out/final2/`; the generated section at the end of this file is a different run, of 30 October):
 
 | Photo | Result | Estimate by the scene model | Wall time | Model cost USD | Overlay |
 |---|---|---|---|---|---|
@@ -130,7 +132,7 @@ What I saw in the overlays and verifier images:
 * **The submerged car and the no-wheel photo** are declined for geometry and answered with the estimate, as intended.
 * **The vehicle search finds tyres the scene model's points missed.** On x1 and x2 it ranked full side-on wheels first (wheel scores 0.7 or more); on x1 two of them reached the geometry in an earlier run.
 * **A wrong measurement got through once, and is now blocked.** In that earlier run x1 measured 0.6 cm, sigma 1.0 cm: the accepted outline followed the spoked rim inside the tyre (`eval/out/commons-small/x1_agent/two_wheeler_1_wheel_try0.jpg`, panel B), so the fitted wheel was too small and its bottom sat on the waterline. Muse Spark Open called it good and its box agreed (0.82). The outside-over-inside brightness check now rejects such outlines (a unit test covers it), and the final run declined x1.
-* **x2's 1.5 cm is plausible but not certain.** The accepted outline follows the rear tyre's outer edge on the left and top and is cut on the right by the exhaust; the fitted waterline is tilted by about 10 degrees, and the wheel size is the generic two-wheeler prior (55 cm, sigma 8.5). By eye the rear tyre's lowest point is just at the water, so a depth of a few centimetres there is believable; the scene model's own 25 cm is for the street as a whole. The sigma (3.1 cm) does not include the tilt, so this number should be read as "shallow at that wheel", not as a calibrated measurement.
+* **x2's 1.5 cm is plausible but not certain.** (The shallow-side guard added on 30 October now sets a reading like this aside; see the first section.) The accepted outline follows the rear tyre's outer edge on the left and top and is cut on the right by the exhaust; the fitted waterline is tilted by about 10 degrees, and the wheel size is the generic two-wheeler prior (55 cm, sigma 8.5). By eye the rear tyre's lowest point is just at the water, so a depth of a few centimetres there is believable; the scene model's own 25 cm is for the street as a whole. The sigma (3.1 cm) does not include the tilt, so this number should be read as "shallow at that wheel", not as a calibrated measurement.
 
 SAM size on the close-ups: hiera-small and hiera-large in fp16 reached the same outcome on all five (no geometry; the same rejections), with small faster, so small is the default (`eval/out/close-small/`, `eval/out/close-large16/`). Modal stays selectable (`NEERMATTAM_MASKS=sam2.1-modal`).
 
@@ -146,7 +148,7 @@ These notes come from looking at the overlays and verifier images of this run, o
 * **Head-on tyres** (c2's oncoming motorcycle, one bike in x1) are recognised and dropped at once.
 * **Water masks** are accepted on every photo with wheels. The confirmed-water union now keeps the first verified region when the agent refines towards more water (in an earlier c2 run the refinement had replaced a 16 percent mask with a 2 percent one).
 
-## SAM 2.1 sizes (from `RESULTS_SAM_AB.md`)
+## SAM 2.1 sizes (28 October, from `RESULTS_SAM_AB.md`)
 
 Same scene readings for every arm, 10 wheels checked per arm. Every arm accepted the same 1 wheel (the scooter cut off by c2's left edge, whose bottom is outside the photo, so the geometry correctly declined it), except Modal, which accepted none; no arm reached a geometry depth. Medians of per-photo time were 41 s (small), 53 s (base-plus), 57 s (large), 33 s (large fp16) and 79 s (large on Modal CPU), with the scene reading cached. Peak memory: 0.4 to 0.5 GB of process memory and 2.3 to 2.8 GB on the GPU for fp32, 1.5 GB GPU for large in fp16 (1.3 GB process peak while converting). Base-plus pushed this 8 GB machine into swap once (270 s for one photo). On these photos the larger models did not change the outcome, so the size is not the limiting factor; the prompts are.
 
@@ -158,10 +160,10 @@ After, measured on 28 October with `latency.py` (local SAM small, fresh scene re
 
 ## What still fails
 
-* One geometry measurement on eleven real photos (x2, 1.5 cm), and it is believable but not certain. The close-up demo photo (the Creta) has no visible tyre, so it cannot be measured from a wheel at all; a wheel-arch reference would be the next step for photos like it.
+* No wheel measurement on the eleven real photos in the current run (the generated section below): two were measured from a person (c1 45.6 cm, c3 102.9 cm) and nine got the scene model's labelled estimate. Two wheel readings reached a result in earlier runs: x2 at 1.5 cm (29 October), believable but not certain, and x1 at 0.7 cm (the person run of 30 October), which was wrong. The numeric tyre checks and the shallow-side guard added on 30 October now stop readings like these. The close-up demo photo (the Creta) has no visible tyre, so it cannot be measured from a wheel at all; a wheel-arch reference would be the next step for photos like it.
 * Muse Spark Open calls partial, rim-only or bumper-and-splash outlines "good" quite often at low reasoning effort; the numeric checks (shape, box agreement, brightness across the edge) carry the weight, and one of them was only added after a wrong 0.6 cm got through.
 * The fitted waterline can tilt where an occluder (an exhaust) cuts the outline, and that tilt is not in the sigma.
-* Latency is set by Baseten and the network: 7 to 59 s per photo when both were normal, two to six times that when they were not.
+* Latency is set by Baseten and the network: 7.2 to 50.2 s per photo in the current run. Before the 55 s time budget, photos took 7 to 59 s when both were normal (29 October) and up to 462 s when Baseten was slow; the budget now stops the open checks instead, so a slow service costs checks rather than time.
 * The scene model's own estimates have no calibration and moved by up to 60 cm between runs on the same photo (c4).
 
 <!-- real-eval:begin -->

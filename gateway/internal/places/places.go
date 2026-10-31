@@ -6,6 +6,8 @@
 package places
 
 import (
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"math"
 )
@@ -22,55 +24,42 @@ type Place struct {
 func (p Place) Coord() string { return fmt.Sprintf("%.4f,%.4f", p.Lat, p.Lon) }
 
 // Presets are Chennai's route quick picks.
-var Presets = CityPresets["chennai"]
+var Presets []Place
 
 // CityPresets are each city's route quick picks, the first two being the
-// form's default ends. Every one was checked to snap to its city's road
-// graph and to route between each pair for a car (gateway tests and
-// docs/GATEWAY.md). Several are places that are known to flood.
-var CityPresets = map[string][]Place{
-	"chennai": {
-		{"velachery", "Velachery station", 12.9791, 80.2209},
-		{"tnagar", "T. Nagar", 13.0418, 80.2341},
-		{"guindy", "Guindy", 13.0067, 80.2206},
-		{"tambaram", "Tambaram", 12.9249, 80.1275},
-		{"central", "Chennai Central", 13.0827, 80.2707},
-	},
-	"mumbai": {
-		{"dadar", "Dadar station", 19.0186, 72.8424},
-		{"andheri", "Andheri station", 19.1197, 72.8464},
-		{"csmt", "CSMT station", 18.9402, 72.8353},
-		{"kurla", "Kurla station", 19.0655, 72.8794},
-		{"bandra", "Bandra station", 19.0544, 72.8406},
-	},
-	"bengaluru": {
-		{"majestic", "KSR Bengaluru station", 12.9781, 77.5697},
-		{"silkboard", "Silk Board junction", 12.9172, 77.6227},
-		{"mgroad", "MG Road", 12.9755, 77.6068},
-		{"hebbal", "Hebbal", 13.0358, 77.5970},
-		{"whitefield", "Whitefield", 12.9698, 77.7500},
-	},
-	"hyderabad": {
-		{"secunderabad", "Secunderabad station", 17.4337, 78.5016},
-		{"hitec", "HITEC City", 17.4474, 78.3762},
-		{"ameerpet", "Ameerpet", 17.4375, 78.4483},
-		{"charminar", "Charminar", 17.3616, 78.4747},
-		{"lbnagar", "LB Nagar", 17.3457, 78.5522},
-	},
-	"kolkata": {
-		{"howrah", "Howrah station", 22.5839, 88.3426},
-		{"parkstreet", "Park Street", 22.5535, 88.3525},
-		{"sealdah", "Sealdah station", 22.5678, 88.3707},
-		{"saltlake", "Salt Lake Sector V", 22.5735, 88.4331},
-		{"garia", "Garia", 22.4636, 88.3946},
-	},
-	"delhi": {
-		{"ndls", "New Delhi station", 28.6427, 77.2197},
-		{"ito", "ITO", 28.6286, 77.2410},
-		{"cp", "Connaught Place", 28.6315, 77.2167},
-		{"aiims", "AIIMS", 28.5672, 77.2100},
-		{"dwarka", "Dwarka Sector 21", 28.5523, 77.0583},
-	},
+// form's default ends. They are read from presets.json, which the engine's
+// real-graph test (engine/tests/presets.rs) reads too: every preset snaps to
+// its city's road graph, every pair routes for a car, and the default pair
+// routes for a two-wheeler and a car. Several are places that are known to
+// flood. Chennai's default pair, Kodambakkam station to Guindy station,
+// crosses the simulated scenario's water, so the first click shows a route
+// that bends around it (internal/demo/presets_live_test.go).
+var CityPresets map[string][]Place
+
+//go:embed presets.json
+var presetsJSON []byte
+
+type presetFile struct {
+	Cities map[string][]struct {
+		ID   string  `json:"id"`
+		Name string  `json:"name"`
+		Lat  float64 `json:"lat"`
+		Lon  float64 `json:"lon"`
+	} `json:"cities"`
+}
+
+func init() {
+	var f presetFile
+	if err := json.Unmarshal(presetsJSON, &f); err != nil {
+		panic("places: presets.json: " + err.Error())
+	}
+	CityPresets = map[string][]Place{}
+	for city, list := range f.Cities {
+		for _, p := range list {
+			CityPresets[city] = append(CityPresets[city], Place{p.ID, p.Name, p.Lat, p.Lon})
+		}
+	}
+	Presets = CityPresets["chennai"]
 }
 
 // PresetByID finds a preset in any city.
@@ -111,6 +100,8 @@ var localities = []Place{
 	{"", "Chromepet", 12.9516, 80.1462},
 	{"", "Medavakkam", 12.9171, 80.1923},
 	{"", "Sholinganallur", 12.9010, 80.2279},
+	{"", "Navalur", 12.8456, 80.2272},
+	{"", "Siruseri", 12.8368, 80.2034},
 	{"", "Perambur", 13.1210, 80.2330},
 	{"", "Kolathur", 13.1240, 80.2120},
 	{"", "Royapuram", 13.1137, 80.2954},
@@ -133,6 +124,28 @@ func Landmarks() []Place {
 		}
 	}
 	return out
+}
+
+// Nearest is the closest locality (or another city's preset) within maxM
+// metres, by name.
+func Nearest(lat, lon, maxM float64) (string, bool) {
+	best, bestD := "", math.Inf(1)
+	for _, p := range nearAll() {
+		if d := distanceM(lat, lon, p.Lat, p.Lon); d < bestD {
+			best, bestD = p.Name, d
+		}
+	}
+	return best, bestD <= maxM
+}
+
+func nearAll() []Place {
+	all := localities
+	for id, list := range CityPresets {
+		if id != "chennai" {
+			all = append(all[:len(all):len(all)], list...)
+		}
+	}
+	return all
 }
 
 // Near names the closest locality (or city preset) within 2.5 km, or

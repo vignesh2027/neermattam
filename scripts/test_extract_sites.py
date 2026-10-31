@@ -25,8 +25,10 @@ def test_osm_references_and_cities():
     assert es.osm_ref("a14") == "way/7"  # osmium area ids: 2 x way id
     assert es.osm_ref("a15") == "relation/7"  # 2 x relation id + 1
     assert es.city_of(13.1, 80.16) == "chennai"
-    assert es.city_of(12.83, 80.22) is None  # Siruseri lies south of the Chennai box
-    assert es.near_a_box(12.83, 80.22, "southern")
+    assert es.city_of(12.83, 80.22) == "chennai"  # Siruseri, inside the widened box
+    assert es.city_of(12.79, 80.22) is None  # just south of it
+    assert es.near_a_box(12.79, 80.22, "southern")
+    assert es.city_of(17.72, 83.30) == "visakhapatnam"
 
 
 def test_centroid_and_point_in_polygon():

@@ -12,25 +12,34 @@
 //! parts:
 //!
 //! ```text
-//! depth     = 40 x min(depth_block / 60 cm, 1)
-//! hazard    = 0, 10, 20 or 30 for low, danger_some, danger_most, danger_all
+//! depth     = 40 x min(depth_block / 150 cm, 1)
+//! hazard    = 30 x min(HR / 3, 1)        HR: the Defra rating at depth_block
 //! freshness = 20 x max(0, 1 - age_h / expire_h)       expire_h = 12
-//! reports   = 10 x min(independent_reports / 5, 1)
+//! reports   = 10 x min(ln(1 + n) / ln(31), 1)          n: readings in force
 //! ```
 //!
 //! - `depth_block` is the depth routing judges the cell at (the safety model's
 //!   blocking estimate: the deeper side of any conflict, plus the measurement
-//!   margin and growth with time). 60 cm is twice the bus limit, past which a
-//!   street is closed to everything and more depth adds no urgency.
-//! - `hazard` is the Defra class at that depth and the blocking velocity.
+//!   margin and growth with time). 150 cm is about chest deep on an adult,
+//!   five times the bus limit. An earlier scale filled the depth part at
+//!   60 cm, so every street closed to buses scored the same and a control
+//!   room could not tell 65 cm from 100 cm.
+//! - `HR` is the Defra hazard rating `d x (v + 0.5) + DF` at that depth and
+//!   the blocking velocity (the 1 m/s default when not measured). 3 is one
+//!   and a half times the "danger for all" boundary (2.0), so the part keeps
+//!   rising inside the top class instead of stopping at its edge. The class
+//!   itself is still reported.
 //! - `age_h` is the time since the latest evidence in force; evidence stops
 //!   counting at `expire_h`, so freshness falls to zero there.
-//! - `independent_reports` is the number of direct readings plus the number
-//!   of adjacent cells whose readings are in force. Many reports from one
-//!   neighbour count once, as in the fusion model.
+//! - `n` (`independent_reports` in the API) is the number of direct readings
+//!   in force plus the number of adjacent cells whose readings are in force.
+//!   Many reports from one neighbour count once, as in the fusion model. The
+//!   engine cannot tell who sent a reading, so `n` counts readings, not
+//!   people. The part grows with the logarithm of `n`: the second reading adds
+//!   more than the twentieth, and the part is full at 30.
 //!
 //! Depth and hazard carry 70 of the 100 points, so a fresh report of a dry
-//! street (about 25 points) never outranks deep water a few hours old. Ties
+//! street (under 30 points) never outranks deep water a few hours old. Ties
 //! are broken by the blocking depth, then by cell id, so the order is stable.
 //! Each hotspot lists its parts and a plain-English reason for each.
 //!
@@ -46,7 +55,9 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 /// Blocking depth at which the depth part is full, cm.
-pub const DEPTH_SATURATION_CM: f64 = 60.0;
+pub const DEPTH_SATURATION_CM: f64 = 150.0;
+/// Hazard rating at which the hazard part is full.
+pub const HAZARD_SATURATION_HR: f64 = 3.0;
 /// Points for depth.
 pub const DEPTH_POINTS: f64 = 40.0;
 /// Points for the worst hazard class.
@@ -55,8 +66,8 @@ pub const HAZARD_POINTS: f64 = 30.0;
 pub const FRESHNESS_POINTS: f64 = 20.0;
 /// Points for many independent reports.
 pub const REPORT_POINTS: f64 = 10.0;
-/// Independent reports at which the report part is full.
-pub const REPORT_SATURATION: f64 = 5.0;
+/// Readings in force at which the report part is full.
+pub const REPORT_SATURATION: f64 = 30.0;
 
 /// A last level above this, in a stale or expired cell, means the cell needs
 /// a fresh report: it is the lowest vehicle depth limit.
@@ -121,15 +132,39 @@ pub struct Hotspot {
     pub blocks: Vec<Vehicle>,
     /// One plain-English sentence per part, plus notes.
     pub reasons: Vec<String>,
+    /// The nearest named road in the city's road graph, when one is within
+    /// [`PLACE_MAX_M`]; filled in by the API, which holds the graphs.
+    pub place: Option<PlaceName>,
 }
 
-fn hazard_points(class: HazardClass) -> f64 {
-    match class {
-        HazardClass::Low | HazardClass::Unknown => 0.0,
-        HazardClass::DangerSome => 10.0,
-        HazardClass::DangerMost => 20.0,
-        HazardClass::DangerAll => HAZARD_POINTS,
+/// Furthest a named road may be from a cell centre to name it, metres.
+pub const PLACE_MAX_M: f64 = 400.0;
+
+/// A place name for a cell.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PlaceName {
+    /// The road's OpenStreetMap name (`name:en`, else `name`, else `ref`).
+    pub name: String,
+    /// Distance from the cell centre to the road, metres.
+    pub distance_m: f64,
+    /// Where the name comes from: always `osm_road`.
+    pub source: &'static str,
+}
+
+/// Points for a hazard rating: proportional to the rating, full at
+/// [`HAZARD_SATURATION_HR`].
+fn hazard_points(rating: f64) -> f64 {
+    if rating.is_finite() {
+        HAZARD_POINTS * (rating / HAZARD_SATURATION_HR).clamp(0.0, 1.0)
+    } else {
+        0.0
     }
+}
+
+/// Points for `n` readings in force: logarithmic, full at
+/// [`REPORT_SATURATION`].
+fn report_points(n: u32) -> f64 {
+    REPORT_POINTS * ((1.0 + f64::from(n)).ln() / (1.0 + REPORT_SATURATION).ln()).min(1.0)
 }
 
 /// The numbers behind one cell's score.
@@ -140,6 +175,7 @@ struct Scored {
     velocity: f64,
     assumed: bool,
     class: HazardClass,
+    rating: f64,
     age_h: f64,
     direct: u32,
     independent: u32,
@@ -169,9 +205,9 @@ fn score(
     let independent = direct + v.neighbour_sources;
     let parts = ScoreParts {
         depth: DEPTH_POINTS * (depth_block / DEPTH_SATURATION_CM).clamp(0.0, 1.0),
-        hazard: hazard_points(hazard.class),
+        hazard: hazard_points(hazard.rating),
         freshness: FRESHNESS_POINTS * (1.0 - age_h / params.expire_after_h).clamp(0.0, 1.0),
-        reports: REPORT_POINTS * (f64::from(independent) / REPORT_SATURATION).min(1.0),
+        reports: report_points(independent),
     };
     Some(Scored {
         score: round1(parts.depth + parts.hazard + parts.freshness + parts.reports),
@@ -180,6 +216,7 @@ fn score(
         velocity,
         assumed,
         class: hazard.class,
+        rating: hazard.rating,
         age_h,
         direct,
         independent,
@@ -201,6 +238,7 @@ pub fn hotspot(
         velocity,
         assumed,
         class,
+        rating,
         age_h,
         direct,
         independent,
@@ -221,7 +259,8 @@ pub fn hotspot(
             depth_block, v.depth.mean, parts.depth
         ),
         format!(
-            "At that depth the Defra hazard is {}: {:.0} of 30 points.",
+            "At that depth the Defra hazard rating is {:.2}, {}: {:.1} of 30 points.",
+            rating,
             class.describe(),
             parts.hazard
         ),
@@ -230,7 +269,7 @@ pub fn hotspot(
             age_h, parts.freshness
         ),
         format!(
-            "{} independent report{} ({} in the cell, {} from adjacent cells): {:.0} of 10 points.",
+            "{} reading{} in force ({} in the cell, {} from adjacent cells; readings, not necessarily different people): {:.1} of 10 points.",
             independent,
             if independent == 1 { "" } else { "s" },
             direct,
@@ -290,6 +329,7 @@ pub fn hotspot(
         unknown: v.unknown,
         blocks,
         reasons,
+        place: None,
     })
 }
 
@@ -755,7 +795,7 @@ mod tests {
         assert!(pos(2) < pos(3));
         // Neighbour-only cells around the deep reports also appear, below them.
         let top = &r[0];
-        assert!(top.score <= 100.0 && top.score > 70.0, "{}", top.score);
+        assert!(top.score <= 100.0 && top.score > 50.0, "{}", top.score);
         let p = top.parts;
         assert!((top.score - (p.depth + p.hazard + p.freshness + p.reports)).abs() < 0.2);
         assert!(top.reasons.len() >= 4);
@@ -768,6 +808,37 @@ mod tests {
         for text in r.iter().flat_map(|h| h.reasons.iter()) {
             assert!(!text.contains('\u{2014}') && !text.contains("->"), "{text}");
         }
+    }
+
+    #[test]
+    fn deep_cells_with_many_readings_are_told_apart() {
+        // Regression: the depth part filled at 60 cm, the hazard part at the
+        // top class and the report part at five readings, so every deep cell
+        // of the demonstration scored 99.7 to 100.
+        let mut g = grid();
+        for k in 0..40 {
+            let at = t(5.0 - 0.01 * f64::from(k));
+            g.ingest(&obs(PLACES[0].0, PLACES[0].1, 70.0, at)).unwrap();
+            g.ingest(&obs(PLACES[1].0, PLACES[1].1, 100.0, at)).unwrap();
+            g.ingest(&obs(PLACES[2].0, PLACES[2].1, 85.0, at)).unwrap();
+        }
+        let r = ranked(&g, t(5.0));
+        let find = |i: usize| r.iter().find(|h| h.cell == cell_of(&g, i)).unwrap();
+        let (shallow, mid, deep) = (find(0), find(2), find(1));
+        assert!(deep.score > mid.score && mid.score > shallow.score);
+        assert!(
+            deep.score - shallow.score > 8.0,
+            "{} {}",
+            deep.score,
+            shallow.score
+        );
+        assert!(deep.score < 95.0, "{}", deep.score);
+        assert!(deep.parts.depth > shallow.parts.depth + 7.0);
+        assert!(deep.parts.hazard > shallow.parts.hazard);
+        // The report part grows slowly: one reading is worth a fifth of it.
+        assert!((report_points(1) - 2.0).abs() < 0.05);
+        assert!(report_points(5) < 6.0 && report_points(30) == 10.0);
+        assert!(deep.reasons[3].contains("not necessarily different people"));
     }
 
     #[test]
@@ -822,7 +893,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(h.independent_reports, 1);
-        assert!(h.reasons[3].contains("(0 in the cell, 1 from adjacent cells)"));
+        assert!(h.reasons[3].contains("(0 in the cell, 1 from adjacent cells;"));
     }
 
     #[test]

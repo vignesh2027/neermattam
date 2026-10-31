@@ -1103,3 +1103,103 @@ pre.code {
   .vfy-table th { border-top: 1px solid var(--line); padding-bottom: 2px; }
   .vfy-table td { border-top: 0; padding-top: 2px; }
 }
+
+/* Review fixes, 30 October 2026. */
+
+/* Narrow phones, every script: two rows. The mark and the language button
+   sit on the first, the five links share the second and wrap if a language
+   needs it, so no link is ever hidden under the language button. */
+@media (max-width: 480px) {
+  :root { --header-h: 92px; }
+  .site-header { flex-wrap: wrap; align-content: center; height: var(--header-h); padding: 4px 12px 2px; row-gap: 0; column-gap: 8px; }
+  .site-header .brand { order: 1; height: 46px; }
+  .site-header .lang-menu { order: 2; margin-left: auto; }
+  .site-header .nav { order: 3; flex: 1 0 100%; margin: 0; overflow: visible; min-width: 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 2px; }
+  .site-header .nav a { padding: 6px 8px; font-size: 13.5px; white-space: nowrap; }
+  .site-header .nav a:first-child { margin-left: -8px; }
+  .site-header .nav a:last-child { margin-right: -8px; }
+}
+@media (max-width: 370px) {
+  .site-header .nav a { padding: 6px 5px; font-size: 13px; }
+  .site-header .nav a:first-child { margin-left: -5px; }
+  .site-header .nav a:last-child { margin-right: -5px; }
+}
+/* Scripts with wide glyphs: smaller links, so the five fit on one row at
+   360 px (checked in headless Chrome for all eight languages). */
+@media (max-width: 480px) {
+  body:not(.lang-en) .site-header .nav a { padding: 6px 4px; font-size: 12.5px; letter-spacing: 0; }
+  body:not(.lang-en) .site-header .nav a:first-child { margin-left: -4px; }
+  body:not(.lang-en) .site-header .nav a:last-child { margin-right: -4px; }
+}
+@media (max-width: 370px) {
+  body.lang-ta .site-header .nav a, body.lang-ml .site-header .nav a, body.lang-te .site-header .nav a, body.lang-kn .site-header .nav a { padding: 6px 3px; font-size: 11.5px; }
+}
+
+/* Developer and certificate tables wrap inside their own box on a phone
+   instead of running off the side. */
+.dev-table td, .dev-table th { overflow-wrap: anywhere; }
+.dev-table code { overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .dev-table { display: table; table-layout: fixed; overflow: visible; }
+  .dev-table th:first-child, .dev-table td:first-child { width: 42%; }
+  .dev-table th, .dev-table td { padding: 8px 9px; font-size: 13px; }
+}
+/* Code blocks scroll inside their own box. A grid or flex child defaults
+   to min-width: auto, which let a long line widen the whole page. */
+pre.code { max-width: 100%; }
+.vfy > *, .vfy-grid > *, .vfy-sec, .dev-sec, .page > section { min-width: 0; }
+.vfy pre.code, .dev-sec pre.code { overflow-x: auto; }
+
+/* Route form: the coordinates field holds "12.9791,80.2209" whole. */
+.endpoint-fields { grid-template-columns: minmax(0, 1fr) 168px; }
+.endpoint-fields .input#from, .endpoint-fields .input#to { font-size: 14px; padding: 0 10px; }
+@media (max-width: 560px) { .endpoint-fields { grid-template-columns: 1fr; } }
+
+/* About: the hackathon line, the repository and the deployed commit. */
+.about-build { margin-top: 18px; padding: 16px 18px; border-left: 4px solid var(--primary); max-width: 760px; }
+.about-built { font-size: 15.5px; }
+.about-src { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 10px 0 0; font-size: 14.5px; }
+.about-src dt { color: var(--muted); font-weight: 600; }
+.about-src dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.about-src code { font-size: 13.5px; background: var(--soft-2); padding: 1px 6px; border-radius: 6px; }
+.about-src > div { display: contents; }
+
+/* Certificate page: what the gateway did with the measurement. */
+.vfy-verdict.v-verified.not-used { border-left-color: var(--amber); }
+.vfy-verdict.not-used .vfy-ic { background: var(--amber-soft); color: var(--amber); }
+.vfy-checks .c-warn svg { color: var(--amber); }
+.vfy-checks .c-warn span { color: var(--amber); font-weight: 650; }
+.vfy-decision { margin-top: 18px; border-left: 4px solid var(--line-strong); }
+.vfy-decision.d-fused { border-left-color: var(--ok); }
+.vfy-decision.d-rejected { border-left-color: var(--amber); background: linear-gradient(135deg, #FFFBF2, #FFFFFF); }
+.vfy-decision.d-unusable { border-left-color: var(--faint); }
+.vfy-decision p { margin-top: 8px; }
+.vfy-dec-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.vfy-dec-head h2 { font-size: 19px; font-weight: 730; }
+
+/* Control room: a hotspot's place. */
+.hot-place { font-size: 14.5px; margin: 0 0 4px; overflow-wrap: anywhere; }
+.hot-meta .chip { font-size: 12px; padding: 2px 9px; }
+
+/* Not found. */
+.nf { max-width: 720px; }
+.nf-card { text-align: center; padding: 34px 24px; margin-top: 24px; }
+.nf-mark { width: 64px; height: 64px; margin: 0 auto 6px; }
+.nf-card h1 { font-size: clamp(24px, 4vw, 32px); font-weight: 760; margin-top: 4px; }
+.nf-body { color: var(--muted); margin-top: 10px; }
+.nf-path code { font-size: 13px; background: var(--soft-2); padding: 2px 8px; border-radius: 8px; overflow-wrap: anywhere; }
+.nf-cta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+.nf-links { list-style: none; padding: 0; margin: 20px 0 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; font-size: 14.5px; font-weight: 600; }
+
+/* A chip with a long label (Tamil and Malayalam run long) wraps inside
+   its own box rather than pushing the page sideways. */
+.chip { max-width: 100%; }
+@media (max-width: 560px) {
+  .chip { white-space: normal; overflow-wrap: anywhere; height: auto; min-height: 24px; text-align: left; }
+  .dev-chips li { max-width: 100%; }
+}
+/* Long single words (Malayalam compounds, file names) may break anywhere on
+   a phone rather than widen the page. */
+@media (max-width: 560px) {
+  main { overflow-wrap: anywhere; }
+}

@@ -18,6 +18,15 @@ type VerifyView struct {
 	Reason string // the check's own English sentence, shown as a detail
 	KeyID  string
 
+	// Decision is what this gateway did with the measurement: fused,
+	// rejected, unusable, or unknown when no decision was recorded. The
+	// signature says who made the record; the decision says whether the
+	// map uses it.
+	Decision        string
+	DecisionTrust   string
+	DecisionAt      string
+	DecisionReasons []string
+
 	// Upload is "match", "mismatch" or "unknown": does the certificate's
 	// input hash equal the SHA-256 of the file the gateway received?
 	Upload     string
@@ -76,6 +85,26 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 	v.ReplayCmd = fmt.Sprintf("curl -4 -s %s/api/certificates/%s -o %s.json\n"+
 		"cd perception && uv run python -m neermattam_perception.replay ../%s.json \\\n"+
 		"    --keys %s/.well-known/neermattam-keys.json", base, id, id, id, base)
+	v.Decision = "unknown"
+	if d := st.Decision; d != nil {
+		switch d.Status {
+		case certs.DecisionFused, certs.DecisionRejected, certs.DecisionUnusable:
+			v.Decision = d.Status
+		}
+		v.DecisionTrust = fmt.Sprintf("%.2f", d.Trust)
+		if !d.DecidedAt.IsZero() {
+			v.DecisionAt = When(lang, d.DecidedAt)
+		}
+		for _, r := range d.Reasons {
+			text := r.Text[lang]
+			if text == "" {
+				text = r.Text[i18n.Default]
+			}
+			if text != "" {
+				v.DecisionReasons = append(v.DecisionReasons, text)
+			}
+		}
+	}
 	rec, pretty := res.Record, res.Pretty
 	if rec == nil {
 		rec, pretty = certs.ReadUnverified(st.Certificate)

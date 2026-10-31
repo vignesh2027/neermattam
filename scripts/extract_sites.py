@@ -3,8 +3,8 @@
 
 Neermattam's "Critical sites" view starts from what OpenStreetMap already
 records. Nothing in the output is typed by hand: every site is an OSM node,
-way or relation with one of the tags below, inside one of the engine's six
-metro boxes (docs/ENGINE.md, Cities).
+way or relation with one of the tags below, inside one of the engine's seven
+city boxes (docs/ENGINE.md, Cities).
 
     data_centre  telecom=data_center|datacenter|data_centre
                  building=data_center|datacenter|data_centre
@@ -42,15 +42,16 @@ from pathlib import Path
 # Geofabrik zone extract each city was cut from. Keep in step with
 # engine/src/city.rs.
 CITIES = {
-    "chennai": ((80.10, 12.85, 80.33, 13.24), "southern"),
+    # Chennai reaches 12.80 N so the Siruseri data centres on the Old
+    # Mahabalipuram Road (about 12.82 to 12.83 N) are covered.
+    "chennai": ((80.10, 12.80, 80.33, 13.24), "southern"),
     "mumbai": ((72.77, 18.88, 73.13, 19.32), "western"),
     "bengaluru": ((77.44, 12.82, 77.80, 13.15), "southern"),
     "hyderabad": ((78.24, 17.22, 78.66, 17.62), "southern"),
     "kolkata": ((88.20, 22.42, 88.52, 22.72), "eastern"),
     "delhi": ((76.84, 28.40, 77.35, 28.89), "northern"),
-    # Not a default engine city: covered only when the engine is started
-    # with it (docs/SITES.md). The box is the bounding box of the
-    # Visakhapatnam District boundary (admin_level 5) in OpenStreetMap.
+    # The box is the bounding box of the Visakhapatnam District boundary
+    # (admin_level 5) in OpenStreetMap.
     "visakhapatnam": ((83.11, 17.55, 83.53, 18.07), "southern"),
 }
 

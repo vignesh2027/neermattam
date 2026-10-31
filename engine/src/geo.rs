@@ -37,7 +37,7 @@ impl BBox {
     /// The default service area: Greater Chennai.
     pub const CHENNAI: BBox = BBox {
         min_lon: 80.10,
-        min_lat: 12.85,
+        min_lat: 12.80,
         max_lon: 80.33,
         max_lat: 13.24,
     };
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn bbox_parses_and_validates() {
-        let b: BBox = "80.10,12.85,80.33,13.24".parse().unwrap();
+        let b: BBox = "80.10,12.80,80.33,13.24".parse().unwrap();
         assert_eq!(b, BBox::CHENNAI);
         assert!(b.contains(13.0, 80.2));
         assert!(!b.contains(13.3, 80.2));

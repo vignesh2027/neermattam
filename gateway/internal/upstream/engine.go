@@ -411,3 +411,21 @@ func ParseSSE(r io.Reader, fn func(Event)) error {
 	}
 	return io.EOF
 }
+
+// IsTimeout reports whether err is a request that ran out of time (a
+// context deadline, a client timeout or a network read timeout), as
+// opposed to a refused connection or an error status.
+func IsTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var ne interface{ Timeout() bool }
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "Client.Timeout") || strings.Contains(msg, "i/o timeout")
+}

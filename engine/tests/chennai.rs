@@ -27,7 +27,7 @@ fn extract() -> Option<PathBuf> {
         return Some(p);
     }
     let msg = format!(
-        "Chennai extract not found at {}. Build it with: osmium tags-filter <tamil-nadu.osm.pbf> w/highway -o data/osm/chennai-roads.osm.pbf (clipped to 80.06,12.79,80.34,13.28).",
+        "Chennai extract not found at {}. Build it with: osmium tags-filter <tamil-nadu.osm.pbf> w/highway -o data/osm/chennai-roads.osm.pbf (cut from the southern zone with -b 80.06,12.77,80.36,13.28; see docs/ENGINE.md).",
         p.display()
     );
     assert!(
