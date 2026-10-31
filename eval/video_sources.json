@@ -1,0 +1,80 @@
+{
+  "note": "Wikimedia Commons flood videos used for the real-video flow speed evaluation (eval/real_videos.py). The videos are not stored in git: the script downloads the originals into eval/videos/ (gitignored), checks each file's SHA-1 against the one Commons publishes, and cuts the segment below with ffmpeg (H.264, no audio, no metadata). Segments were chosen by looking at the footage before any run, for a camera that holds still and water with something on it, and were not changed after seeing results. Nobody measured the water speed in any of these videos, so there is no ground truth.",
+  "videos": [
+    {
+      "id": "gera",
+      "title": "Unwetter und Überschwemmung in Gera (1).webm",
+      "page": "https://commons.wikimedia.org/wiki/File:Unwetter_und_%C3%9Cberschwemmung_in_Gera_(1).webm",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/4/41/Unwetter_und_%C3%9Cberschwemmung_in_Gera_%281%29.webm",
+      "sha1": "225f377a1d8d67b0d271750c12546b350865a91f",
+      "author": "Felix Hahm",
+      "licence": "CC BY 3.0",
+      "licence_url": "https://creativecommons.org/licenses/by/3.0",
+      "date": "2012-07-05",
+      "place": "Heinrichstrasse at the Gera-Sued station underpass, Gera, Germany",
+      "start_s": 5.0,
+      "duration_s": 8.0,
+      "why": "filmed from a window above the street, camera nearly still; leaves and twigs drift on water running through the underpass; a tram and a parked car are the only vehicles"
+    },
+    {
+      "id": "zhengzhou-a",
+      "title": "Zhengzhou streets during the flood 2021-07-20.webm",
+      "page": "https://commons.wikimedia.org/wiki/File:Zhengzhou_streets_during_the_flood_2021-07-20.webm",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/4/4b/Zhengzhou_streets_during_the_flood_2021-07-20.webm",
+      "sha1": "6b24a4d0783e86ff47e04c57eaed27ce9ca3c6c2",
+      "author": "China News Service, reporter Li Chaoqing, producer Wang Jiayi",
+      "licence": "CC BY 3.0",
+      "licence_url": "https://creativecommons.org/licenses/by/3.0",
+      "date": "2021-07-20",
+      "place": "Zhengzhou, Henan, China",
+      "start_s": 0.0,
+      "duration_s": 2.45,
+      "why": "first shot of the report (it cuts at 2.53 s): a fixed camera on fast brown water carrying debris past a shop front, with yellow barriers washed against it"
+    },
+    {
+      "id": "zhengzhou-b",
+      "title": "Zhengzhou streets during the flood 2021-07-20.webm",
+      "page": "https://commons.wikimedia.org/wiki/File:Zhengzhou_streets_during_the_flood_2021-07-20.webm",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/4/4b/Zhengzhou_streets_during_the_flood_2021-07-20.webm",
+      "sha1": "6b24a4d0783e86ff47e04c57eaed27ce9ca3c6c2",
+      "author": "China News Service, reporter Li Chaoqing, producer Wang Jiayi",
+      "licence": "CC BY 3.0",
+      "licence_url": "https://creativecommons.org/licenses/by/3.0",
+      "date": "2021-07-20",
+      "place": "Zhengzhou, Henan, China",
+      "start_s": 2.6,
+      "duration_s": 2.75,
+      "why": "second shot (2.53 s to 5.41 s): adults wading towards a nearly fixed camera, a possible person reference"
+    },
+    {
+      "id": "friburgo",
+      "title": "Presidente Getúlio Vargas alagada em chuva fortes.webm",
+      "page": "https://commons.wikimedia.org/wiki/File:Presidente_Get%C3%BAlio_Vargas_alagada_em_chuva_fortes.webm",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/0/02/Presidente_Get%C3%BAlio_Vargas_alagada_em_chuva_fortes.webm",
+      "sha1": "04244c9b4f7e538f44e59aad62416dd08e52f48b",
+      "author": "Vitorperrut555",
+      "licence": "CC BY-SA 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "date": "2023-02-15",
+      "place": "Rua Presidente Getulio Vargas, Nova Friburgo, Rio de Janeiro, Brazil",
+      "start_s": 0.0,
+      "duration_s": 3.0,
+      "why": "a motorcycle and a pickup with wheels in brown water carrying leaves; filmed from inside a moving bus, so a hard case for camera motion"
+    },
+    {
+      "id": "obiwali",
+      "title": "Flooded Street of Obiwali road in Rumuigbo Rivers State after a heavy down pour.webm",
+      "page": "https://commons.wikimedia.org/wiki/File:Flooded_Street_of_Obiwali_road_in_Rumuigbo_Rivers_State_after_a_heavy_down_pour.webm",
+      "download": "https://upload.wikimedia.org/wikipedia/commons/9/92/Flooded_Street_of_Obiwali_road_in_Rumuigbo_Rivers_State_after_a_heavy_down_pour.webm",
+      "sha1": "eacfea35742ea0cbf1b9bd5a7a880a8dd3007d6f",
+      "author": "Ayaosigodfrey",
+      "licence": "CC BY-SA 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "date": "2023-05-16",
+      "place": "Obiwali Road, Rumuigbo, Port Harcourt, Rivers State, Nigeria",
+      "start_s": 38.0,
+      "duration_s": 7.0,
+      "why": "a person wading away from a handheld camera, parked cars behind, rippled water with small floating bits"
+    }
+  ]
+}

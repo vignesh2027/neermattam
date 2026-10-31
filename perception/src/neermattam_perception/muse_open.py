@@ -338,6 +338,20 @@ Return one JSON object, nothing else:
 }"""
 
 
+DEBRIS_PROMPT = """This is one frame of a short video of a flooded street. A segmentation model will follow objects through the video to measure how fast the water flows, so it needs things that float and drift with the current.
+
+Coordinates: integers on a 0-1000 grid over this image, x from the left edge, y from the top edge. A box is [x_min, y_min, x_max, y_max]. A point is [x, y].
+
+Return one JSON object, nothing else:
+{
+  "debris": up to 8 separate objects floating on the water surface that will drift with the flow: leaves, twigs, plastic, bottles, foam patches, rubbish. Not people, animals or vehicles, not anything fixed (poles, kerbs, signs, walls, parked or stuck objects), not reflections, ripples, waves or rain splashes. Prefer objects with a clear outline against the water, spread over the water rather than in one clump. Each:
+    {"box": [..] a tight box around this one object, "point": [..] a point on the object itself, "what": one or two words},
+  "anchor": one small, sharp, high-contrast detail of something fixed that stays in view and is not on the water (a sign, a pole base, a window corner, a painted road marking on dry ground, a kerb corner): {"box": [..], "point": [..], "what": one or two words}, or null,
+  "flow": one short sentence: which way the water moves in the image, or "not visible"
+}
+Boxes must be tight and must not include neighbouring objects. Omit what you cannot see; never invent objects. If nothing floats, return "debris": []."""
+
+
 # --------------------------------------------------------------------------- prompt versions
 
 
@@ -368,6 +382,7 @@ PROMPT_PARTS: dict[str, tuple[str, ...]] = {
     "scene": (SCENE_PROMPT,),
     "verify-wheel": _verify_wheel_parts(),
     "verify-water": (_WATER_VERIFY_PROMPT,),
+    "locate-debris": (DEBRIS_PROMPT,),
     "transcribe": (TRANSCRIBE_PROMPT,),
 }
 PROMPT_VERSIONS: dict[str, str] = {n: prompt_version(n, *p) for n, p in PROMPT_PARTS.items()}
@@ -375,6 +390,7 @@ SCENE_PROMPT_VERSION = PROMPT_VERSIONS["scene"]
 VERIFY_WHEEL_VERSION = PROMPT_VERSIONS["verify-wheel"]
 VERIFY_WATER_VERSION = PROMPT_VERSIONS["verify-water"]
 TRANSCRIBE_VERSION = PROMPT_VERSIONS["transcribe"]
+DEBRIS_VERSION = PROMPT_VERSIONS["locate-debris"]
 
 
 def prompt_digest(version: str) -> str | None:
@@ -991,6 +1007,18 @@ class MuseSparkOpenAdapter:
             what=what,
             effort=self.verify_effort,
             attempt_timeout_s=self.verify_attempt_timeout_s,
+            retries=self.critical_retries,
+        )
+
+    async def locate_debris_json(self, image: ImageInput) -> JsonReply:
+        """Boxes on the floating objects and one fixed anchor in a video's key frame."""
+        jpeg = jpeg_for_model(image, self.max_image_side)
+        return await self.chat_json(
+            [self._image_part(jpeg), {"type": "text", "text": DEBRIS_PROMPT}],
+            max_tokens=self.verify_max_tokens,
+            what="debris locator",
+            effort=self.scene_effort,
+            attempt_timeout_s=self.scene_attempt_timeout_s,
             retries=self.critical_retries,
         )
 

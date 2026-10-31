@@ -23,6 +23,7 @@ import hashlib
 import os
 import resource
 import sys
+import tempfile
 import threading
 import time
 from collections import OrderedDict
@@ -146,6 +147,11 @@ class Sam21LocalAdapter:
     _processor: Any = field(default=None, repr=False)
     _cache: OrderedDict[str, Any] = field(default_factory=OrderedDict, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    # Precision of the video predictor; None: float16 on MPS or CUDA (faster than
+    # float32 on an 8 GB M1 in a quick profile), float32 on the CPU.
+    video_dtype: str | None = None
+    _video_model: Any = field(default=None, repr=False)
+    _video_processor: Any = field(default=None, repr=False)
     load_ms: int | None = None
     last_embed_ms: int | None = None
     last_embed_cached: bool = False
@@ -486,8 +492,248 @@ class Sam21LocalAdapter:
         return await asyncio.to_thread(self._candidates_sync, image.rgb, box, points, key)
 
     async def track(self, video: VideoInput, concept: str) -> TrackResult:
-        # SAM 2.1 tracks objects from prompts on a frame, not from a noun phrase.
+        # SAM 2.1 tracks objects from prompts on a frame, not from a noun phrase:
+        # see track_boxes, which the pipeline uses with boxes from the scene model.
         raise ModelError("video tracking by noun phrase needs SAM 3.1")
+
+    # ------------------------------------------------------------------ video
+
+    def _load_video_model(self) -> None:
+        """The same checkpoint as a video model, with SAM 2's memory, loaded once."""
+        if self._video_model is not None:
+            return
+        try:
+            import torch
+            from transformers import Sam2VideoModel, Sam2VideoProcessor
+        except ImportError as exc:
+            raise ModelError(
+                "SAM 2.1 needs torch, torchvision and transformers (uv sync --extra local)"
+            ) from exc
+        if self.device is None:
+            if torch.backends.mps.is_available():
+                self.device = "mps"
+            elif torch.cuda.is_available():
+                self.device = "cuda"
+            else:
+                self.device = "cpu"
+        local = self._local_dir()
+        source = str(local) if local is not None else self.model_id
+        try:
+            proc = Sam2VideoProcessor.from_pretrained(source, local_files_only=True)
+            model = Sam2VideoModel.from_pretrained(source, local_files_only=True)
+        except OSError:
+            proc = Sam2VideoProcessor.from_pretrained(self.model_id)
+            model = Sam2VideoModel.from_pretrained(self.model_id)
+        if self.video_dtype is None:
+            self.video_dtype = "float32" if self.device == "cpu" else "float16"
+        if self.video_dtype == "float16":
+            model = model.half()  # type: ignore[no-untyped-call]
+        self._video_processor = proc
+        self._video_model = model.to(self.device).eval()  # type: ignore[arg-type]
+
+    def _track_boxes_sync(
+        self,
+        video: VideoInput,
+        start: int,
+        boxes: Sequence[tuple[int, int, int, int]],
+        points: Sequence[tuple[int, int] | None],
+        stride: int,
+        max_frames: int,
+    ) -> BoxTracks:
+        import cv2
+        import torch
+
+        t0 = time.perf_counter()
+        with self._lock:
+            self._load_video_model()
+        load_ms = round(1000 * (time.perf_counter() - t0))
+        proc, model = self._video_processor, self._video_model
+        dtype = torch.float16 if self.video_dtype == "float16" else torch.float32
+        h, w = video.height, video.width
+        out = BoxTracks(start=start, stride=stride, load_ms=load_ms)
+        for i, b in enumerate(boxes):
+            out.objects[str(i + 1)] = ObjectTrack(str(i + 1), b)
+        if not boxes:
+            return out
+        # Floating debris is small: SAM sees only the region around the prompts,
+        # so each object gets more of its 1024 px input (as the photo path zooms).
+        x0, y0, x1, y1 = track_region(boxes, w, h)
+        out.region = (x0, y0, x1, y1)
+        cw, ch = x1 - x0, y1 - y0
+        local_boxes = [[float(b[0] - x0), float(b[1] - y0), float(b[2] - x0), float(b[3] - y0)]
+                       for b in boxes]  # fmt: skip
+        local_points = []
+        for b, p in zip(boxes, points, strict=True):
+            px, py = p if p is not None else ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+            local_points.append([[float(px - x0), float(py - y0)]])
+        fd, path = tempfile.mkstemp(suffix=".mov" if "quicktime" in video.media_type else ".mp4")
+        t1 = time.perf_counter()
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(video.data)
+            cap = cv2.VideoCapture(path)
+            if not cap.isOpened():
+                raise ModelError("video could not be decoded for tracking")
+            with self._lock, torch.no_grad():
+                session = proc.init_video_session(inference_device=self.device, dtype=dtype)
+                frame_no, step = -1, 0
+                while step < max_frames:
+                    ok, bgr = cap.read()
+                    if not ok:
+                        break
+                    frame_no += 1
+                    if frame_no < start or (frame_no - start) % stride:
+                        continue
+                    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                    crop = np.ascontiguousarray(rgb[y0:y1, x0:x1])
+                    inputs = proc(images=crop, device=self.device, return_tensors="pt")
+                    if step == 0:
+                        # The box with one positive point on the object itself.
+                        proc.add_inputs_to_inference_session(
+                            inference_session=session,
+                            frame_idx=0,
+                            obj_ids=list(range(1, len(boxes) + 1)),
+                            input_boxes=[local_boxes],
+                            input_points=[local_points],
+                            input_labels=[[[1] for _ in boxes]],
+                            original_size=inputs.original_sizes[0],
+                        )
+                    res = model(
+                        inference_session=session,
+                        frame=inputs.pixel_values[0].to(dtype),
+                        frame_idx=step,
+                    )
+                    masks = proc.post_process_masks(
+                        [res.pred_masks.float()], original_sizes=[[ch, cw]], binarize=True
+                    )[0]
+                    logits = res.object_score_logits.float().reshape(-1).cpu().numpy()
+                    for k, oid in enumerate(res.object_ids):
+                        m = np.asarray(masks[k, 0].cpu().numpy(), dtype=bool)
+                        out.objects[str(oid)].add(frame_no, m, float(logits[k]), (x0, y0))
+                    _forget_old_frames(session, step, keep=_MEMORY_FRAMES)
+                    step += 1
+                    out.frames.append(frame_no)
+                cap.release()
+                if self.device == "mps":
+                    torch.mps.empty_cache()
+        finally:
+            os.unlink(path)
+        out.track_ms = round(1000 * (time.perf_counter() - t1))
+        return out
+
+    async def track_boxes(
+        self,
+        video: VideoInput,
+        start: int,
+        boxes: Sequence[tuple[int, int, int, int]],
+        *,
+        points: Sequence[tuple[int, int] | None] | None = None,
+        stride: int = 1,
+        max_frames: int = 150,
+    ) -> BoxTracks:
+        """Track each box from frame ``start`` forward with SAM 2.1's video memory.
+
+        Boxes, and one point on each object (the box centre when None), are in
+        video pixels on frame ``start``; SAM segments the region around them
+        (:func:`track_region`). Every ``stride``-th frame
+        is segmented, at most ``max_frames`` of them; frame numbers in the
+        result are the video's own, so time is ``frame / fps``. Frames already
+        behind SAM's memory window are dropped from the session as it goes, so
+        memory does not grow with the clip.
+        """
+        if stride < 1 or max_frames < 1:
+            raise ValueError("stride and max_frames must be at least 1")
+        return await asyncio.to_thread(
+            self._track_boxes_sync,
+            video,
+            start,
+            boxes,
+            list(points) if points is not None else [None] * len(boxes),
+            stride,
+            max_frames,
+        )
+
+
+def track_region(
+    boxes: Sequence[tuple[int, int, int, int]], w: int, h: int, margin: float = 0.15
+) -> tuple[int, int, int, int]:
+    """The part of the frame tracked: every prompt box, plus ``margin`` of the
+    frame's longer side (at least 64 px) on each side for the objects to move into."""
+    m = max(64, round(margin * max(w, h)))
+    return (
+        max(0, min(b[0] for b in boxes) - m),
+        max(0, min(b[1] for b in boxes) - m),
+        min(w, max(b[2] for b in boxes) + m),
+        min(h, max(b[3] for b in boxes) + m),
+    )
+
+
+# SAM 2 conditions each frame on the prompted frame, the six frames before it
+# and up to 16 object pointers (Ravi et al. 2024, SAM 2 paper, section 4); older
+# frames are never read again.
+_MEMORY_FRAMES = 16
+
+
+def _forget_old_frames(session: Any, step: int, keep: int) -> None:
+    """Drop the pixels of this frame and the outputs of frames SAM will not read again."""
+    frames = getattr(session, "processed_frames", None)
+    if isinstance(frames, dict):
+        frames.pop(step, None)
+    old = step - keep
+    if old < 1:
+        return
+    for per_obj in getattr(session, "output_dict_per_obj", {}).values():
+        per_obj.get("non_cond_frame_outputs", {}).pop(old, None)
+
+
+@dataclass
+class ObjectTrack:
+    """One prompted object through the clip: per frame, its centroid and mask box.
+
+    A frame where SAM says the object is absent (object score below zero) or the
+    mask is empty is recorded as lost, not as a position.
+    """
+
+    object_id: str
+    prompt_box: tuple[int, int, int, int]
+    points: list[tuple[int, float, float]] = field(default_factory=list)
+    areas: list[int] = field(default_factory=list)
+    boxes: list[tuple[int, int, int, int]] = field(default_factory=list)
+    lost: list[int] = field(default_factory=list)
+
+    def add(
+        self,
+        frame: int,
+        mask: NDArray[np.bool_],
+        score_logit: float,
+        offset: tuple[int, int] = (0, 0),
+    ) -> None:
+        """Record a frame's mask; ``offset`` places a mask of a crop back in the frame."""
+        ys, xs = np.nonzero(mask)
+        if score_logit <= 0.0 or xs.size == 0:
+            self.lost.append(frame)
+            return
+        xs = xs + offset[0]
+        ys = ys + offset[1]
+        self.points.append((frame, float(xs.mean()), float(ys.mean())))
+        self.areas.append(int(xs.size))
+        self.boxes.append((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1))
+
+
+@dataclass
+class BoxTracks:
+    """What :meth:`Sam21LocalAdapter.track_boxes` returns."""
+
+    start: int
+    stride: int
+    objects: dict[str, ObjectTrack] = field(default_factory=dict)
+    frames: list[int] = field(default_factory=list)
+    region: tuple[int, int, int, int] | None = None  # the part of the frame segmented
+    load_ms: int = 0
+    track_ms: int = 0
+
+    def tracks(self) -> dict[str, list[tuple[int, float, float]]]:
+        return {k: list(v.points) for k, v in self.objects.items()}
 
 
 @dataclass

@@ -347,7 +347,13 @@ def test_dropped_scene_fields_become_a_validate_step(easy_case) -> None:  # type
 
 
 def test_prompt_versions_are_stable_ids() -> None:
-    assert set(PROMPT_VERSIONS) == {"scene", "verify-wheel", "verify-water", "transcribe"}
+    assert set(PROMPT_VERSIONS) == {
+        "scene",
+        "verify-wheel",
+        "verify-water",
+        "locate-debris",
+        "transcribe",
+    }
     for name, v in PROMPT_VERSIONS.items():
         assert re.fullmatch(rf"{name}@[0-9a-f]{{12}}", v)
         digest = prompt_digest(v)

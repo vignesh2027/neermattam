@@ -15,8 +15,10 @@ Steps:
   5. When no wheel can be measured, the scene model's own estimate is returned
      as ``method: model_estimate`` with a wide sigma. When both exist, both are
      reported and the geometry is used.
-  6. With a video, SAM 3.1 tracks the floating debris and the wheel's scale
-     turns the tracks into a surface velocity.
+  6. With a video, Muse Spark Open boxes the floating debris on the key frame,
+     SAM 2.1's video predictor tracks it (SAM 3.1: the noun phrase), and the
+     wheel's or the person's scale turns the tracks into a surface velocity
+     (flow.py).
 """
 
 from __future__ import annotations
@@ -45,6 +47,15 @@ from .adapters import (
 )
 from .agent import TraceStep, VerifyRefineAgent
 from .certificate import FORMAT, Signer, utc_now
+from .flow import (
+    BoxTracker,
+    DebrisLocator,
+    FlowResult,
+    FlowScale,
+    measure_flow,
+    person_scale,
+    wheel_scale,
+)
 from .geometry import (
     DepthFailure,
     DepthMeasurement,
@@ -126,6 +137,10 @@ class PipelineConfig:
     # returned, labelled. None: no budget. The last FINISH_RESERVE_S are kept for
     # the steps after the checks (geometry, people, overlay).
     budget_s: float | None = 55.0
+    # With a video: seconds of it tracked from the key frame, and the rate frames
+    # are sampled at (flow.py). SAM 2.1 on a laptop takes seconds per frame.
+    flow_window_s: float = 4.0
+    flow_fps: float = 10.0
 
 
 @dataclass
@@ -351,6 +366,21 @@ class _Record:
     wheel: dict[str, Any] | None = None
     person: dict[str, Any] | None = None
     estimate: dict[str, Any] | None = None
+
+
+# Receives the full flow result of a video (tracks, verdicts) when set; the
+# response itself carries only the velocity, its sigma and the trace steps.
+_FLOW_SINK: ContextVar[Callable[[FlowResult], None] | None] = ContextVar("flow_sink", default=None)
+
+
+def _box_tracker(masks: Any) -> BoxTracker | None:
+    """The SAM 2.1 video predictor behind a mask model, when it has one."""
+    if callable(getattr(masks, "track_boxes", None)):
+        return cast(BoxTracker, masks)
+    fb = getattr(masks, "fallback", None)
+    if callable(getattr(fb, "track_boxes", None)):
+        return cast(BoxTracker, fb)
+    return None
 
 
 # The record of the request being measured. Pipeline.measure sets a fresh one for
@@ -671,6 +701,7 @@ class Pipeline:
         hint_reference: str | None = None,
         hint_diameter_cm: float | None = None,
         on_step: Callable[[TraceStep], None] | None = None,
+        on_flow: Callable[[FlowResult], None] | None = None,
     ) -> MeasureResponse:
         """Measure one photo (or a video's key frame).
 
@@ -690,6 +721,7 @@ class Pipeline:
                 "height": key.height,
             }
         token = _RECORD.set(rec)
+        flow_token = _FLOW_SINK.set(on_flow)
         try:
             return await self._measure(
                 image=image,
@@ -699,6 +731,7 @@ class Pipeline:
                 on_step=on_step,
             )
         finally:
+            _FLOW_SINK.reset(flow_token)
             _RECORD.reset(token)
 
     async def _measure(
@@ -954,18 +987,23 @@ class Pipeline:
             )
             found = await self._measure_persons(key, persons, empty, trace, failures, faces)
             if found is not None:
+                reasons.append("the water surface as a whole could not be verified")
+                pvel, vcost = await self._person_velocity(
+                    video, reading, found, trace, timings, reasons
+                )
                 return self._person_result(
                     key,
-                    [*reasons, "the water surface as a whole could not be verified"],
+                    reasons,
                     failures,
                     trace,
                     timings,
-                    cost,
+                    cost + vcost,
                     est,
                     q.score,
                     found,
                     None,
                     faces,
+                    velocity=pvel,
                 )
         if water is None or water.area == 0:
             if est is not None:
@@ -1064,6 +1102,10 @@ class Pipeline:
                 best = (res, cand, ref)
         timings["geometry"] = _ms(t0)
         if best is None and person_best is not None:
+            pvel, vcost = await self._person_velocity(
+                video, reading, person_best, trace, timings, reasons
+            )
+            cost += vcost
             return self._person_result(
                 key,
                 reasons,
@@ -1076,6 +1118,7 @@ class Pipeline:
                 person_best,
                 water,
                 faces,
+                velocity=pvel,
             )
         if best is None:
             if est is not None:
@@ -1222,11 +1265,11 @@ class Pipeline:
         velocity: VelocityEstimate | None = None
         if video is not None:
             t0 = time.perf_counter()
-            velocity, why = await self._velocity(video, reading, m, ref)
+            velocity, why, vcost = await self._velocity(video, reading, wheel_scale(ref, m), trace)
             timings["velocity"] = _ms(t0)
-            cost += why[1]
-            if why[0]:
-                reasons.append(why[0])
+            cost += vcost
+            if why:
+                reasons.append(why)
 
         label = f"depth {depth_cm:.1f} cm, sigma {sigma:.1f} cm"
         overlay = png_b64(
@@ -1652,6 +1695,7 @@ class Pipeline:
         person: _PersonBest,
         water: ObjectMask | None,
         faces: Sequence[tuple[int, int, int, int]],
+        velocity: VelocityEstimate | None = None,
     ) -> MeasureResponse:
         """No wheel measured, a person was: depth against the adult stature prior."""
         pm, _p, mask, target = person
@@ -1726,25 +1770,78 @@ class Pipeline:
                 y_px=round(pm.waterline_y, 1),
                 agreement_cm=None if agreement is None else round(agreement, 1),
             ),
+            velocity_mps=None if velocity is None else round(velocity.mean_mps, 2),
+            velocity_sigma_mps=None if velocity is None else round(velocity.mean_sigma_mps, 2),
             confidence=confidence,
             overlay_png_b64=overlay,
             method="person_reference",
             model_estimate=self._estimate_out(est),
         )
 
+    async def _person_velocity(
+        self,
+        video: VideoInput | None,
+        reading: SceneReading,
+        person: _PersonBest,
+        trace: list[TraceStep],
+        timings: dict[str, int],
+        reasons: list[str],
+    ) -> tuple[VelocityEstimate | None, float]:
+        """With a video, the velocity scaled by the measured person; (estimate, cost)."""
+        if video is None:
+            return None, 0.0
+        t0 = time.perf_counter()
+        pscale = person_scale(person[0])
+        vel, cost = None, 0.0
+        if pscale is None:
+            reasons.append("velocity unavailable: the person gives no scale")
+        else:
+            vel, why, cost = await self._velocity(video, reading, pscale, trace)
+            if why:
+                reasons.append(why)
+        timings["velocity"] = _ms(t0)
+        return vel, cost
+
     async def _velocity(
-        self, video: VideoInput, reading: SceneReading, m: DepthMeasurement, ref: ReferenceChoice
-    ) -> tuple[VelocityEstimate | None, tuple[str, float]]:
+        self,
+        video: VideoInput,
+        reading: SceneReading,
+        scale: FlowScale,
+        trace: list[TraceStep],
+    ) -> tuple[VelocityEstimate | None, str, float]:
+        """Surface velocity from the clip: (estimate or None, reason, cost in USD).
+
+        With SAM 2.1 (local, or the local fallback behind Modal), Muse Spark
+        Open boxes the floating debris on the key frame and SAM 2.1's video
+        predictor tracks the boxes (flow.py). Otherwise the mask model tracks
+        the scene reading's noun phrase (SAM 3.1).
+        """
+        tracker = _box_tracker(self.masks)
+        if tracker is not None and callable(getattr(self.scene, "locate_debris_json", None)):
+            res = await measure_flow(
+                video,
+                cast(DebrisLocator, self.scene),
+                tracker,
+                scale,
+                window_s=self.config.flow_window_s,
+                target_fps=self.config.flow_fps,
+                scene_model=self.model_names.scene,
+            )
+            for st in res.steps:
+                trace.append(st)
+            sink = _FLOW_SINK.get()
+            if sink is not None:
+                sink(res)
+            return res.estimate, res.reason, res.cost_usd
         concept = reading.floating_debris or "floating debris"
         try:
             tr = await self.masks.track(video, concept)
         except (ModelError, NotImplementedError) as exc:
-            return None, (f"velocity unavailable: {exc}", 0.0)
-        # Tracks are in video pixels; the wheel scale is in key-frame pixels.
+            return None, f"velocity unavailable: {exc}", 0.0
+        # Tracks are in video pixels; the scale is in key-frame pixels.
         k = video.key_frame.width / video.width
         tracks = {tid: [(f, x * k, y * k) for f, x, y in pts] for tid, pts in tr.tracks.items()}
-        scale_rel = math.hypot(ref.diameter_sigma_cm / ref.diameter_cm, 0.03)
-        est = surface_velocity(tracks, video.fps, m.cm_per_px, scale_rel_sigma=scale_rel)
+        est = surface_velocity(tracks, video.fps, scale.cm_per_px, scale_rel_sigma=scale.rel_sigma)
         if isinstance(est, VelocityEstimate):
-            return est, (f"surface velocity from {est.n_used} tracked objects", tr.cost_usd)
-        return None, (f"velocity unavailable: {est.reason}", tr.cost_usd)
+            return est, f"surface velocity from {est.n_used} tracked objects", tr.cost_usd
+        return None, f"velocity unavailable: {est.reason}", tr.cost_usd

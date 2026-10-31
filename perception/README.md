@@ -28,6 +28,7 @@ uv run python ../eval/sigma_methods.py --cases 40 --workers 1           # batche
 uv run python ../eval/person_synth.py --n 400 --seed 11                  # synthetic check of the person method
 uv run --extra local python ../eval/real_photos.py                      # real Commons photos, live
 uv run --extra local python ../eval/sam_ab.py                           # SAM sizes on the real photos, live
+uv run --extra local python ../eval/real_videos.py                       # flow speed on real Commons flood videos, live
 uv run python -m neermattam_perception.replay <certificate.json>    # check a certificate's signature, recompute its depth
 uv run python ../eval/gate.py                                       # eval gate against eval/baseline.json (about 90 s)
 ```
@@ -37,10 +38,11 @@ uv run python ../eval/gate.py                                       # eval gate 
 | `geometry.py` | ellipse and tyre-outline fitting, waterline, depth, Monte Carlo sigma, typed failures |
 | `references.py` | tyre-code diameters and the vehicle catalogue, with sources |
 | `velocity.py` | surface and depth-averaged velocity from debris tracks |
+| `flow.py` | flow speed from a video: Muse Spark Open boxes the floating debris and a fixed anchor, SAM 2.1's video predictor tracks them, tracks are checked, camera motion removed, then `velocity.py`; scale from the wheel or the person |
 | `sam.py` | SAM 3.1 requests, prompt grammar, stream parsing (official `meta-sam-parser`), mask placement |
 | `adapters.py` | `SceneModel` and `MaskModel`; Meta Model API adapter |
 | `muse_open.py` | Muse Spark Open on Baseten: scene reading, mask checks, voice notes; JSON extraction and repair, retries, token cost |
-| `sam_local.py` | SAM 2.1 run locally (loaded once, embedding reused, small objects segmented zoomed in, all proposals per prompt); SAM 3.1 adapter slots |
+| `sam_local.py` | SAM 2.1 run locally (loaded once, embedding reused, small objects segmented zoomed in, all proposals per prompt; box-prompted video tracking with SAM 2.1's memory); SAM 3.1 adapter slots |
 | `modal_sam.py` | SAM 2.1 on the Modal service, and the fallback to the local model |
 | `voice.py` | depth words in Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Marathi, Gujarati, Punjabi, Odia, Urdu and English, mapped to depth ranges (the documented phrase table) |
 | `wheel_finder.py` | finds a vehicle's wheels inside its box: SAM from a grid of points and from dark elliptical blobs, ranked by wheel shape, tyre darkness and size |
