@@ -119,6 +119,6 @@
 {{end}}
 {{end}}
 
-{{define "reason_text"}}{{.Text}}{{if .Quote}} {{template "model_quote" .Quote}}{{end}}{{end}}
+{{define "reason_text"}}{{.Text}}{{if .Quote}} <span class="model-quote"><span class="mq-label">{{.QuoteLabel}}</span> <q lang="en">{{.Quote}}</q></span>{{end}}{{end}}
 
 {{define "model_quote"}}<span class="model-quote"><span class="mq-label">{{t "rc.model_said"}}</span> <q lang="en">{{.}}</q></span>{{end}}

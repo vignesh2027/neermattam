@@ -263,9 +263,105 @@ func TestTarget(t *testing.T) {
 	if got := Target("ta", "person 2"); got == "person 2" || !strings.Contains(got, "2") {
 		t.Errorf("got %q", got)
 	}
-	for _, raw := range []string{"car 1 wheel", "water", "photo", ""} {
+	if got := Target("en", "two wheeler 1 wheel"); got != "two-wheeler wheel 1" {
+		t.Errorf("vehicle wheel: got %q", got)
+	}
+	if got := Target("te", "car 2 wheel"); got == "car 2 wheel" || !strings.Contains(got, "2") {
+		t.Errorf("vehicle wheel in Telugu: got %q", got)
+	}
+	for _, raw := range []string{"truck 1 wheel", "water", "photo", ""} {
 		if got := Target("ta", raw); got != raw {
 			t.Errorf("%q became %q", raw, got)
 		}
+	}
+}
+
+// The pipeline's own fixed details are translated, never attributed to the
+// model; a model's verdict is quoted as its words; a tool's error gets a
+// neutral label.
+func TestDetailsAreAttributedCorrectly(t *testing.T) {
+	r := Reason("ta", "two wheeler 2 wheel: the scene model did not confirm the mask (time budget reached)",
+		code("wheel_not_confirmed", map[string]any{"target": "two wheeler 2 wheel", "detail": "time budget reached"}))
+	if r.Quote != "" || !strings.Contains(r.Text, i18n.T("ta", "rc.detail.time_budget_reached")) || strings.Contains(r.Text, "wheeler") {
+		t.Errorf("fixed detail: %+v", r)
+	}
+	r = Reason("en", "x", code("wheel_not_confirmed", map[string]any{"target": "car wheel 1", "detail": "no wheel-like proposal in the vehicle box"}))
+	if r.Text != "Car wheel 1: the scene model did not confirm the outline (no wheel-like outline was found in the vehicle's box)" {
+		t.Errorf("got %q", r.Text)
+	}
+	r = Reason("en", "x", code("wheel_not_confirmed", map[string]any{"target": "car wheel 1", "detail": "this is the mudguard"}))
+	if r.Quote != "this is the mudguard" || r.QuoteLabel != "In the model's words:" {
+		t.Errorf("model verdict: %+v", r)
+	}
+	r = Reason("en", "x", code("flow_tracking_failed", map[string]any{"detail": "CUDA out of memory"}))
+	if r.Quote != "CUDA out of memory" || r.QuoteLabel != "Details:" {
+		t.Errorf("tool error: %+v", r)
+	}
+	d, _ := StepDecision("hi", code("give_up_reason", map[string]any{"detail": "time budget reached"}))
+	if d.Quote != "" || d.Detail != i18n.T("hi", "rc.detail.time_budget_reached") {
+		t.Errorf("give up on the budget: %+v", d)
+	}
+	for _, l := range i18n.Languages {
+		for _, id := range fixedDetails {
+			if _, ok := i18n.Catalogs[l.Code]["rc.detail."+id]; !ok {
+				t.Errorf("%s lacks rc.detail.%s", l.Code, id)
+			}
+		}
+	}
+}
+
+func TestDecisionFromEnglishMatchesPerceptionsCatalogue(t *testing.T) {
+	cases := map[string]string{
+		"segment and verify 2 wheels and the water":                                   "scene_verify_wheels",
+		"search 2 vehicle boxes for wheels, check 1 wheel and segment the water":      "scene_search_vehicles",
+		"refine with box [1,2,3,4] px + points [5,6], [7,8]":                          "refine",
+		"give up: tyre seen head-on":                                                  "give_up_reason",
+		"verify the best two":                                                         "verify_best",
+		"no speed (3 tracks rejected)":                                                "no_speed_rejected",
+		"report model estimate":                                                       "report_estimate",
+		"no wheel: measure 2 persons against the stature prior and segment the water": "scene_measure_persons",
+	}
+	for text, want := range cases {
+		c := DecisionFromEnglish(text)
+		if c == nil || c.Code != want {
+			t.Errorf("%q: got %+v, want %s", text, c, want)
+			continue
+		}
+		if _, ok := StepDecision("ta", c); !ok {
+			t.Errorf("%q does not render", text)
+		}
+	}
+	c := DecisionFromEnglish("search 2 vehicle boxes for wheels, check 1 wheel and segment the water")
+	if c.Args["vehicles"] != 2.0 || c.Args["wheels"] != 1.0 {
+		t.Errorf("args %v", c.Args)
+	}
+	if c := DecisionFromEnglish("refine with box [1,2,3,4] px"); c.Args["box"] != "[1,2,3,4]" {
+		t.Errorf("box %v", c.Args)
+	}
+	if DecisionFromEnglish("report measurement") != nil || DecisionFromEnglish("") != nil {
+		t.Error("text outside the catalogue must give nil")
+	}
+	// Every decision code in the contract has a pattern here.
+	tables := contractTables(t)
+	have := map[string]bool{}
+	for _, p := range decisionPatterns {
+		have[p.code] = true
+	}
+	for _, c := range tables["dc."] {
+		if !have[c] {
+			t.Errorf("no English pattern for decision %s", c)
+		}
+	}
+}
+
+func TestCheckNames(t *testing.T) {
+	if got := Check("en", "inside image"); got != "inside the image" {
+		t.Errorf("got %q", got)
+	}
+	if got := Check("ta", "allowed values"); got == "allowed values" {
+		t.Error("check name not translated")
+	}
+	if got := Check("ta", "a new check"); got != "a new check" {
+		t.Errorf("unknown check: %q", got)
 	}
 }

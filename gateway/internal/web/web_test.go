@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"neermattam/gateway/internal/i18n"
 	"neermattam/gateway/internal/report"
 	"neermattam/gateway/internal/upstream"
 	"neermattam/gateway/internal/verify"
@@ -80,9 +81,9 @@ func TestTraceStepClassification(t *testing.T) {
 		{"scene", "segment and verify 2 wheels and the water", "scene", "neutral", "Read the scene", ""},
 		{"segment", "verify", "segment", "neutral", "Segment", ""},
 		{"verify", "accept", "verify", "ok", "Verify", ""},
-		{"confirm", "accept (coverage partial)", "confirm", "ok", "Confirm", "coverage partial"},
-		{"verify", "refine with box [1402,636,1519,813] px", "refine", "refine", "Refine", "with box [1402,636,1519,813] px"},
-		{"verify", "give up: tyre seen head-on, its outline cannot be measured", "giveup", "stop", "Give up", "tyre seen head-on, its outline cannot be measured"},
+		{"confirm", "accept (coverage partial)", "confirm", "ok", "Confirm", ""},
+		{"verify", "refine with box [1402,636,1519,813] px", "refine", "refine", "Refine", "[1402,636,1519,813] px"},
+		{"verify", "give up: tyre seen head-on, its outline cannot be measured", "giveup", "stop", "Give up", ""},
 		{"geometry", "report measurement", "geometry", "neutral", "Geometry", ""},
 		{"estimate", "report model estimate", "estimate", "neutral", "Estimate", ""},
 		{"mystery", "", "other", "neutral", "Mystery", ""},
@@ -96,6 +97,25 @@ func TestTraceStepClassification(t *testing.T) {
 		if v.Latency != "11.4 s" || !v.Slow {
 			t.Errorf("latency %q slow %v", v.Latency, v.Slow)
 		}
+	}
+	// A trace recorded without codes (the landing page's sample run) is
+	// read through perception's decision catalogue, so it is translated too;
+	// a model's reason for giving up stays as it wrote it.
+	v := NewTraceStep("ta", 0, upstream.AgentStep{Step: "verify", Decision: "give up: tyre seen head-on, its outline cannot be measured"})
+	if v.Quote != "tyre seen head-on, its outline cannot be measured" || v.Decision == "Give up" {
+		t.Errorf("give up in Tamil: %+v", v)
+	}
+	v = NewTraceStep("ta", 0, upstream.AgentStep{Step: "estimate", Decision: "report model estimate"})
+	if v.Decision != i18n.T("ta", "dc.report_estimate") {
+		t.Errorf("estimate in Tamil: %q", v.Decision)
+	}
+	v = NewTraceStep("en", 0, upstream.AgentStep{Step: "confirm", Decision: "accept (coverage partial)"})
+	if v.Decision != "Accept (partial coverage)" {
+		t.Errorf("partial: %q", v.Decision)
+	}
+	v = NewTraceStep("en", 0, upstream.AgentStep{Step: "scene", Decision: "something new"})
+	if v.Decision != "Next: something new" {
+		t.Errorf("unknown decision: %q", v.Decision)
 	}
 	tv := NewTraceView("en", []upstream.AgentStep{
 		{Step: "scene", Target: "photo", Model: "muse-spark-open", LatencyMs: 15000},
