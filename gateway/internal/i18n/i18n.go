@@ -41,9 +41,9 @@ var Languages = []Lang{
 
 // Catalogs maps a language code to its messages.
 var Catalogs = map[string]map[string]string{
-	"en": merge(enPages, enOps, enVerify, enSites, enFixes, enCodes, enLanding, enLanding2), "ta": merge(ta, taOps, taVerify, taSites, taFixes, taCodes, taLanding, landingExtra["ta"]), "hi": merge(hi, hiOps, hiVerify, hiSites, hiFixes, hiCodes, hiLanding, landingExtra["hi"]),
-	"te": merge(te, teOps, teVerify, teSites, teFixes, teCodes, teLanding, landingExtra["te"]), "kn": merge(kn, knOps, knVerify, knSites, knFixes, knCodes, knLanding, landingExtra["kn"]), "ml": merge(ml, mlOps, mlVerify, mlSites, mlFixes, mlCodes, mlLanding, landingExtra["ml"]),
-	"bn": merge(bn, bnOps, bnVerify, bnSites, bnFixes, bnCodes, bnLanding, landingExtra["bn"]), "mr": merge(mr, mrOps, mrVerify, mrSites, mrFixes, mrCodes, mrLanding, landingExtra["mr"]),
+	"en": merge(enPages, enOps, enVerify, enSites, enFixes, enCodes, enDetail, enChecks, enLanding, enLanding2), "ta": merge(ta, taOps, taVerify, taSites, taFixes, taCodes, taDetail, taChecks, taLanding, landingExtra["ta"]), "hi": merge(hi, hiOps, hiVerify, hiSites, hiFixes, hiCodes, hiDetail, hiChecks, hiLanding, landingExtra["hi"]),
+	"te": merge(te, teOps, teVerify, teSites, teFixes, teCodes, teDetail, teChecks, teLanding, landingExtra["te"]), "kn": merge(kn, knOps, knVerify, knSites, knFixes, knCodes, knDetail, knChecks, knLanding, landingExtra["kn"]), "ml": merge(ml, mlOps, mlVerify, mlSites, mlFixes, mlCodes, mlDetail, mlChecks, mlLanding, landingExtra["ml"]),
+	"bn": merge(bn, bnOps, bnVerify, bnSites, bnFixes, bnCodes, bnDetail, bnChecks, bnLanding, landingExtra["bn"]), "mr": merge(mr, mrOps, mrVerify, mrSites, mrFixes, mrCodes, mrDetail, mrChecks, mrLanding, landingExtra["mr"]),
 }
 
 // merge joins a language's message files: the pages (messages_<code>.go),
@@ -52,9 +52,11 @@ var Catalogs = map[string]map[string]string{
 // (messages_verify.go, every language in one file) and the Critical sites
 // page and its alerts (messages_<code>_sites.go), the review fixes
 // (messages_fixes.go, every language in one file), and perception's reason
-// and decision codes (messages_codes_<code>.go), and the landing page
-// rewrite (messages_landing.go and messages_landing_<code>.go), which comes
-// last so its new wording of older keys wins.
+// and decision codes (messages_codes_<code>.go, and messages_codes_detail.go
+// for the pipeline's fixed detail texts), and the landing page rewrite
+// (messages_landing.go, messages_landing_<code>.go and
+// messages_landing_extra.go), which comes last so its new wording of older
+// keys wins.
 func merge(parts ...map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, p := range parts {

@@ -203,7 +203,7 @@ Visakhapatnam's extract is cut the same way with `-b 83.08,17.52,83.56,18.10` (d
 
 Before the re-cut and the road names, the same six cities took 215.5 MiB (Chennai 316,734 nodes and 17.6 MiB); the road names add about 4 bytes a segment plus the distinct names, 19 MiB over the seven cities, and the wider Chennai extract the rest.
 
-**Memory with seven cities**, release build on an 8 GB M1 MacBook Air, 31 October 2026, one start each, other work running: peak resident memory while the seven graphs load in parallel 684 MiB (`/usr/bin/time -l`, maximum resident set size 717,619,200 bytes), and 438 MiB resident once they are loaded (`ps -o rss`), against 369 MiB for six cities on 28 October. The peak is the decode's temporary node tables, freed once each graph is built. The deployed container has 4 GiB (docs/DEPLOY.md), so this leaves the same room as before.
+**Memory with seven cities**, release build on an 8 GB M1 MacBook Air, 31 October 2026, one start each, other work running: peak resident memory while the seven graphs load in parallel 684 MiB (`/usr/bin/time -l`, maximum resident set size 717,619,200 bytes), and 438 MiB resident once they are loaded (`ps -o rss`), against 369 MiB for six cities on 28 October. The peak is the decode's temporary node tables, freed once each graph is built. The deployed container asks for 5 GiB (docs/DEPLOY.md), so this leaves the same room as before.
 
 A city is added without code: list it in `ENGINE_CITIES` and give it `ENGINE_CITY_<ID>_BBOX` (and optionally `_NAME` and `_OSM_PATH`).
 

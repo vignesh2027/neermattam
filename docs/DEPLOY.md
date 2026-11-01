@@ -4,7 +4,7 @@ The public demo runs on Modal as one app, `neermattam-web`, with all three servi
 
 https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run
 
-**Deployed now:** commit `18feddc` ("Perception: vehicle-box wheel search, rim rejection, close-up evaluation"), built on 29 October 2026 from a clean worktree, with the deploy-file changes described here not yet committed. The container's `/opt/neermattam/BUILD_INFO` says the same.
+**Deployed now:** `main` as of 1 November 2026 (critical sites, seven cities, reason codes in eight languages, video speed), built from a clean worktree with no uncommitted changes. The About page shows the exact commit, read from the container's `/opt/neermattam/BUILD_INFO`.
 
 This page explains how the image is built, how the container is configured, how to update it, and the guards that keep its running cost bounded. A Hugging Face Space recipe is kept beside it (see [Hugging Face Space](#hugging-face-space)); both build the same image.
 
@@ -39,7 +39,7 @@ The seven road extracts, `<city>-roads.osm.pbf` for Chennai, Mumbai, Bengaluru, 
 
 ## What runs in the container
 
-`app.py` defines one class, `Web`, with `min_containers=1` and `max_containers=1`, so one container is always warm and visitors never wait for a cold start. It asks for 2 CPU cores and 4 GiB of memory, with a hard limit of 6 GiB, and accepts up to 400 concurrent requests (`@modal.concurrent`), since every open map holds a live stream. On start it runs the launcher, which starts:
+`app.py` defines one class, `Web`, with `min_containers=1` and `max_containers=1`, so one container is always warm and visitors never wait for a cold start. It asks for 2 CPU cores and 5 GiB of memory, with a hard limit of 8 GiB, and accepts up to 400 concurrent requests (`@modal.concurrent`), since every open map holds a live stream. On start it runs the launcher, which starts:
 
 | Process | Address | Notes |
 |---|---|---|
@@ -95,7 +95,7 @@ Settings read by `app.py` when you run `modal deploy` (export them first to chan
 | Variable | Default | Meaning |
 |---|---|---|
 | `NEERMATTAM_WEB_CPU` | `2` | CPU cores for the container |
-| `NEERMATTAM_WEB_MEMORY_MB`, `NEERMATTAM_WEB_MEMORY_LIMIT_MB` | `4096`, `6144` | Memory request and hard limit |
+| `NEERMATTAM_WEB_MEMORY_MB`, `NEERMATTAM_WEB_MEMORY_LIMIT_MB` | `5120`, `8192` | Memory request and hard limit |
 | `NEERMATTAM_WEB_PROXY_HOPS` | `1` | Trusted `X-Forwarded-For` entries, counted from the right |
 | `NEERMATTAM_WEB_DAILY_CAP` | `150` | Perception calls per day across all visitors |
 | `NEERMATTAM_WEB_PUBLIC_URL` | the Modal URL above | `PUBLIC_URL`: Open Graph tags, the API terms link, the VAPID contact |
@@ -138,9 +138,8 @@ When a visitor leaves, or the gateway's perception timeout expires, the gateway 
 ### Other limits
 
 - The site is served from Modal's `us-east` region.
-- Modal bills a container for the larger of what it asks for and what it uses. At the rates Modal published on 28 October 2026 ($0.0473 per core hour and $0.008 per GiB hour), 2 cores and 4 GiB held all day come to 24 x (2 x 0.0473 + 4 x 0.008) = $3.04 a day, before Baseten. One core would bring it to about $1.90 a day, with slower SAM passes. The Volume holds a few MB, which costs nothing worth counting at $0.09 per GiB a month.
-- Memory, measured in the container on 29 October 2026 with all six graphs loaded: 2.2 GiB idle (engine 0.5 GiB, perception 1.6 GiB, gateway 0.1 GiB), 2.6 GiB after a photo report (perception 2.0 GiB). The 4 GiB request leaves room for the second report that may run at the same time; the hard limit is 6 GiB. Baseten is billed separately; its cost per report is in each response's `cost_usd`, and the daily cap bounds it.
-- **Seven cities (not yet deployed).** Visakhapatnam and the wider Chennai extract add graph memory: the seven graphs hold 254.1 MiB against 215.5 MiB for six, and the release engine measured 438 MiB resident once loaded and 684 MiB at its peak while the graphs load in parallel (docs/ENGINE.md, Cities; local, 31 October 2026), against 369 MiB resident for six. Adding the difference in the engine's resident memory (about 70 MiB, about 0.3 GiB at the load peak, which comes before perception has loaded SAM) to the container figures above gives about 2.3 GiB idle and 2.7 GiB after a photo report, inside the 4 GiB request and the 6 GiB limit. This is an estimate from local measurements; measure in the container after the next deploy.
+- Modal bills a container for the larger of what it asks for and what it uses. At the rates Modal published on 28 October 2026 ($0.0473 per core hour and $0.008 per GiB hour), 2 cores and 5 GiB held all day come to 24 x (2 x 0.0473 + 5 x 0.008) = $3.23 a day, before Baseten (the 4 GiB request used until 1 November cost $3.04). One core would bring it to about $2.10 a day, with slower SAM passes. The Volume holds a few MB, which costs nothing worth counting at $0.09 per GiB a month.
+- Memory, measured in the container on 1 November 2026 with all seven graphs loaded (`/proc/<pid>/status` and the memory cgroup, through `modal container exec`): 2.1 GiB idle (2173 MB: engine 631 MB, perception 1450 MB, gateway 111 MB), and 3.0 GiB after one real photo report (3117 MB: perception 2396 MB, gateway 141 MB, engine 632 MB). On 29 October, with six graphs, it was 2.2 GiB idle and 2.6 GiB after a report; perception now grows more during a report. The gateway lets two reports run at once; if a second grew perception by as much as this one did (0.9 GiB, an estimate from the one report measured), the container would pass 4 GiB, so the request was raised from 4 GiB to 5 GiB and the hard limit from 6 GiB to 8 GiB on 1 November 2026. Baseten is billed separately; its cost per report is in each response's `cost_usd`, and the daily cap bounds it.
 
 ## Updating
 

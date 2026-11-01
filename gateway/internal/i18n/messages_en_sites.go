@@ -108,7 +108,7 @@ var enSites = map[string]string{
 	"sites.recession_none":                 "not seen yet",
 	"sites.open_now":                       "%d wet now",
 	"sites.unresolved":                     "%d never seen to end",
-	"sites.readings":                       "%d reports, %d wet",
+	"sites.readings":                       "%d report(s), %d wet",
 	"sites.ledger_note":                    "This record holds only what people have reported since %s. It builds up over a monsoon; an area with no reports is unknown, not dry.",
 	"sites.advisory":                       "Advisory only. Depths come from public reports with stated uncertainty; unknown is never safe, and no route here is a guarantee.",
 
