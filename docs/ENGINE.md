@@ -148,6 +148,10 @@ No Indian government or Indian Roads Congress figure for a safe crossing depth w
 
 Speeds used for `eta_min` (pedestrian 4, two-wheeler 20, auto 18, car 20, bus 15, truck 15 km/h) are rough assumptions, not measured city values. The same limits and speeds apply in every city.
 
+## Replay layer
+
+Besides the live map, the engine holds a second map, the replay layer, for the gateway's labelled simulated replay of Cyclone Michaung. Every map endpoint takes `layer=replay` (default `layer=live`) and answers with `"layer"`. The replay map has its own cells, change stream, reading ids, routes, hotspots, summary, recession and export; it is kept in memory only (never in the snapshot), forgets old cells like the live map, and never feeds the risk ledger or the critical sites. `tests/http.rs` (`replay_layer_never_reaches_the_live_map`) checks that a deep simulated reading changes nothing on the live map, its summary, hotspots, routes or ledger, and that the replay map routes around it.
+
 ## Cities
 
 The engine covers a list of cities, each with an id, a display name, a metro bounding box and a road extract. The H3 grid is global, so readings from every city share one map; a city scopes queries and chooses the road graph.
@@ -203,7 +207,7 @@ Visakhapatnam's extract is cut the same way with `-b 83.08,17.52,83.56,18.10` (d
 
 Before the re-cut and the road names, the same six cities took 215.5 MiB (Chennai 316,734 nodes and 17.6 MiB); the road names add about 4 bytes a segment plus the distinct names, 19 MiB over the seven cities, and the wider Chennai extract the rest.
 
-**Memory with seven cities**, release build on an 8 GB M1 MacBook Air, 31 October 2026, one start each, other work running: peak resident memory while the seven graphs load in parallel 684 MiB (`/usr/bin/time -l`, maximum resident set size 717,619,200 bytes), and 438 MiB resident once they are loaded (`ps -o rss`), against 369 MiB for six cities on 28 October. The peak is the decode's temporary node tables, freed once each graph is built. The deployed container has 4 GiB (docs/DEPLOY.md), so this leaves the same room as before.
+**Memory with seven cities**, release build on an 8 GB M1 MacBook Air, 31 October 2026, one start each, other work running: peak resident memory while the seven graphs load in parallel 684 MiB (`/usr/bin/time -l`, maximum resident set size 717,619,200 bytes), and 438 MiB resident once they are loaded (`ps -o rss`), against 369 MiB for six cities on 28 October. The peak is the decode's temporary node tables, freed once each graph is built. The deployed container asks for 5 GiB (docs/DEPLOY.md), so this leaves the same room as before.
 
 A city is added without code: list it in `ENGINE_CITIES` and give it `ENGINE_CITY_<ID>_BBOX` (and optionally `_NAME` and `_OSM_PATH`).
 

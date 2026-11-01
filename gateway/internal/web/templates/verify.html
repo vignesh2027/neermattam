@@ -29,7 +29,7 @@
       <ul class="vfy-checks">
         <li class="c-{{if eq .Status "verified"}}ok{{else}}bad{{end}}">{{if eq .Status "verified"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>Ed25519 · <code>{{.KeyID}}</code>{{if ne .Status "verified"}} · {{.Reason}}{{end}}</span></li>
         <li class="c-{{if eq .Upload "match"}}ok{{else if eq .Upload "mismatch"}}bad{{else}}none{{end}}">{{if eq .Upload "match"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>{{if eq .Upload "match"}}{{t "vfy.upload_match"}}{{else if eq .Upload "mismatch"}}{{t "vfy.upload_mismatch"}}{{else}}{{t "vfy.upload_unknown"}}{{end}}</span></li>
-        {{if ne .Decision "unknown"}}<li class="c-{{if eq .Decision "fused"}}ok{{else}}warn{{end}}">{{if eq .Decision "fused"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>{{if eq .Decision "fused"}}{{t "vfy.dec_fused" .DecisionTrust}}{{else if eq .Decision "rejected"}}{{t "result.title_rejected"}}{{else if eq .Decision "archival"}}{{t "vfy.dec_chip_archival"}}{{else}}{{t "vfy.dec_unusable"}}{{end}}</span></li>{{end}}
+        {{if ne .Decision "unknown"}}<li class="c-{{if eq .Decision "fused"}}ok{{else}}warn{{end}}">{{if eq .Decision "fused"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>{{if eq .Decision "fused"}}{{t "vfy.dec_fused" .DecisionTrust}}{{else if eq .Decision "rejected"}}{{t "result.title_rejected"}}{{else if eq .Decision "sample"}}{{t "lp.vfy_chip_sample"}}{{else if eq .Decision "archival"}}{{t "vfy.dec_chip_archival"}}{{else}}{{t "vfy.dec_unusable"}}{{end}}</span></li>{{end}}
       </ul>
       {{if and (ne .Status "verified") .HasRecord}}<p class="vfy-claims">{{t "vfy.unverified_note"}}</p>{{end}}
     </div>
@@ -38,13 +38,14 @@
   <section class="card panel vfy-decision d-{{.Decision}}" aria-labelledby="vfy-d" id="decision">
     <div class="vfy-dec-head">
       <h2 id="vfy-d">{{t "vfy.decision_title"}}</h2>
-      {{if eq .Decision "fused"}}<span class="chip chip-ok">{{t "vfy.dec_chip_fused"}}</span>{{else if eq .Decision "rejected"}}<span class="chip chip-amber">{{t "vfy.dec_chip_rejected"}}</span>{{else if eq .Decision "unusable"}}<span class="chip chip-grey">{{t "vfy.dec_chip_unusable"}}</span>{{else if eq .Decision "archival"}}<span class="chip chip-violet">{{t "vfy.dec_chip_archival"}}</span>{{end}}
+      {{if eq .Decision "fused"}}<span class="chip chip-ok">{{t "vfy.dec_chip_fused"}}</span>{{else if eq .Decision "rejected"}}<span class="chip chip-amber">{{t "vfy.dec_chip_rejected"}}</span>{{else if eq .Decision "unusable"}}<span class="chip chip-grey">{{t "vfy.dec_chip_unusable"}}</span>{{else if eq .Decision "sample"}}<span class="chip chip-violet">{{t "lp.vfy_chip_sample"}}</span>{{else if eq .Decision "archival"}}<span class="chip chip-violet">{{t "vfy.dec_chip_archival"}}</span>{{end}}
     </div>
     {{if eq .Decision "fused"}}<p>{{t "vfy.dec_fused" .DecisionTrust}}</p>
     {{else if eq .Decision "rejected"}}<p>{{t "vfy.dec_rejected"}}</p>
     {{if .DecisionReasons}}<p class="section-title">{{t "vfy.dec_why"}}</p>
     <ul class="reasons">{{range .DecisionReasons}}<li>{{template "reason_text" .}}</li>{{end}}</ul>{{end}}
     <p class="small muted">{{t "result.trust_rejected" .DecisionTrust}}</p>
+    {{else if eq .Decision "sample"}}<p>{{t "lp.vfy_dec_sample"}}</p>
     {{else if eq .Decision "unusable"}}<p>{{t "vfy.dec_unusable"}}</p>
     {{if .DecisionReasons}}<ul class="reasons notes">{{range .DecisionReasons}}<li>{{template "reason_text" .}}</li>{{end}}</ul>{{end}}
     {{else if eq .Decision "archival"}}{{with .Archival}}<p><strong>{{t "photos.label" .Year .MeasuredOn}}</strong></p>

@@ -2,7 +2,7 @@
 
 **Street-level flood depth from one phone photo, measured with a wheel or a person as the ruler, fused into a live map that routes each kind of vehicle around water it cannot cross.**
 
-![Neermattam landing page: the live Chennai depth map beside the headline "Forecasts say where Chennai will flood. Neermattam measures how deep it is on your street."](docs/img/gateway-home.png)
+![Neermattam landing page: the headline "Forecasts say where India will flood. Neermattam measures how deep, street by street." beside one recorded measurement of a flooded Chennai street, 46 cm plus or minus 13, with Muse Spark Open's verdicts on each outline](docs/img/gateway-home.png)
 
 **Live site:** https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run
 
@@ -86,7 +86,9 @@ Every number below is copied from the linked file and comes from a script anyone
 
 **Real photos** ([eval/RESULTS_REAL.md](eval/RESULTS_REAL.md)): there is no ground truth. Nobody measured the water in these eleven street photos, so nothing here is accuracy. In the run recorded at the end of the file, two photos were answered by a person measurement and nine by the labelled model estimate. No wheel measurement survived the checks. The file shows every agent step and its reasons.
 
-**Latency and cost** (same run): 7.2 to 50.2 s per photo, median 31.3 s, of which the scene reading took 7.2 to 14.2 s. Baseten cost USD 0.003 to 0.040 per photo.
+**Photos across India** ([eval/RESULTS_INDIA.md](eval/RESULTS_INDIA.md), list in [eval/india_photos.json](eval/india_photos.json)): fourteen archival street flood photos from Wikimedia Commons, from 2006 to 2024, in Chennai (4), Mumbai (2), Bengaluru (3), Hyderabad (2) and Kolkata (3), each placed by its camera geotag or a named locality, measured once on 1 November 2026 by the perception service in its deployed configuration. All fourteen were answered by the labelled model estimate (8 to 45 cm, sigma 20 to 30 cm); none produced a wheel or person measurement, and most runs reached the 55 s time budget on this Mac. There is no ground truth. Model cost for the run: USD 0.41. No suitable photo with a known place was found for Delhi or Visakhapatnam. The map shows these as a separate "Measured photos" layer, labelled "Photo from <year>, measured by Neermattam on <date>", each with its signed certificate; they never enter the live map.
+
+**Latency and cost** (the run in eval/RESULTS_REAL.md): 7.2 to 50.2 s per photo, median 31.3 s, of which the scene reading took 7.2 to 14.2 s. Baseten cost USD 0.003 to 0.040 per photo.
 
 **Engine** ([docs/ENGINE.md](docs/ENGINE.md), Benchmarks), on an 8 GB M1 MacBook Air: fusing one reading into a cell and its six neighbours takes 1.11 µs, or 46 µs through the full HTTP router. A 3.5 km car route from Velachery to Guindy takes 0.28 ms on a dry map, 1.3 ms with 200 readings and 29 ms with 2,000. These were measured at commit f8e8fb6 and not refreshed since, as the doc explains. All six city road graphs (8,721,153 directed edges, 215.5 MiB) load in parallel in 2.2 s.
 
@@ -111,7 +113,7 @@ cd perception && uv sync --extra local && uv run --extra local neermattam-percep
 cd gateway && DEMO=1 go run ./cmd/neermattam-gateway                 # http://localhost:8080
 ```
 
-`DEMO=1` adds a labelled, simulated Cyclone Michaung scenario so the map has water on it; real reports are outlined next to it. Tests and the eval gate:
+The map opens on real data only: live reports, Open-Meteo rainfall for every city and the measured archival photos. `DEMO=1` also seeds a simulated Cyclone Michaung scenario onto the engine's separate replay layer, which a visitor switches on in Chennai ("Replay a past flood: Cyclone Michaung, December 2023, simulated") and which the public control room demo uses. It never reaches the live map, its numbers or `/api/india`. Tests and the eval gate:
 
 ```sh
 cd engine && cargo test
@@ -131,6 +133,7 @@ Third-party pieces I did not write:
 |---|---|---|
 | MapLibre GL JS 5.6.0 | Vendored in `gateway/internal/web/static/vendor/` | BSD 3-Clause ([LICENSE.txt](gateway/internal/web/static/vendor/maplibre-gl-5.6.0/LICENSE.txt)) |
 | Inter typeface | Vendored | SIL Open Font License 1.1 ([licence](gateway/internal/web/static/fonts/LICENSE-Inter.txt)) |
+| Plus Jakarta Sans typeface, for headings | Vendored | SIL Open Font License 1.1 ([licence](gateway/internal/web/static/fonts/LICENSE-PlusJakartaSans.txt)) |
 | Noto Sans for Indic scripts | Loaded from Google Fonts | SIL Open Font License 1.1 |
 | OpenStreetMap road extracts, seven cities | Cut from Geofabrik extracts, not in git | ODbL 1.0 |
 | OpenFreeMap base map tiles | Loaded by the map | OpenStreetMap and OpenMapTiles attribution |
@@ -138,12 +141,15 @@ Third-party pieces I did not write:
 | SAM 2.1 hiera-small weights | Downloaded at build time | Apache 2.0 |
 | Muse Spark Open | Called through Baseten; no weights in this repository | Meta's terms for the model |
 | Evaluation photos | Downloaded by `eval/real_photos.py`, not in git | CC0, CC BY 2.0, CC BY 3.0, CC BY-SA 4.0 and Unsplash License, credited per photo |
+| Sample and showcase photos on the site | Four evaluation photos, faces and plates blurred, in `gateway/internal/samples` and `static/showcase` | CC0 1.0, CC BY 2.0, CC BY 3.0 and Unsplash License, credited on the page and in `samples.json` |
 
 Library dependencies are pinned in `engine/Cargo.lock` and `perception/uv.lock`. The gateway uses only Go's standard library.
 
 ## Languages and cities
 
 Every page, message and result card is available in English, Tamil, Hindi, Telugu, Kannada, Malayalam, Bengali and Marathi ([docs/GATEWAY.md](docs/GATEWAY.md)). The engine covers seven cities by default (`ENGINE_CITIES`): Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata, Delhi and Visakhapatnam, each with its own road graph. Another city needs only configuration.
+
+The live map opens on real data in every city. Each city shows its modelled rainfall for the last hour and the last 24 hours from Open-Meteo, read every 10 minutes and shown with the time it was read (or "rain data unavailable", never zero), and a strip of all seven cities with their real reports, rainfall and measured photos, one tap apart. A city with no reports says so and points to the cities that have reports or rain. `GET /api/india` gives the same numbers as JSON ([docs/CONTRACTS.md](docs/CONTRACTS.md), section 3).
 
 ## Limits and what's next
 

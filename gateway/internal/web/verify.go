@@ -93,7 +93,7 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 	v.Decision = "unknown"
 	if d := st.Decision; d != nil {
 		switch d.Status {
-		case certs.DecisionFused, certs.DecisionRejected, certs.DecisionUnusable, certs.DecisionArchival:
+		case certs.DecisionFused, certs.DecisionRejected, certs.DecisionUnusable, certs.DecisionSample, certs.DecisionArchival:
 			v.Decision = d.Status
 		}
 		v.DecisionTrust = fmt.Sprintf("%.2f", d.Trust)
@@ -181,8 +181,12 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 		}
 		ts := NewTraceStep(lang, i, step)
 		vs := VerifyStep{Index: i + 1, Kind: ts.Kind, Label: ts.Label, Target: ts.Target, Model: s.Model, Decision: s.Decision, Latency: ts.Latency, Tone: ts.Tone}
-		if step.DecisionCode != nil {
-			if d, ok := reasons.StepDecision(lang, step.DecisionCode); ok {
+		code := step.DecisionCode
+		if code == nil {
+			code = reasons.DecisionFromEnglish(s.Decision)
+		}
+		if code != nil {
+			if d, ok := reasons.StepDecision(lang, code); ok {
 				vs.Decision, vs.Detail, vs.Quote = d.Text, d.Detail, d.Quote
 			}
 		}
@@ -191,7 +195,9 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 		}
 		v.Steps = append(v.Steps, vs)
 	}
-	v.Rules = rec.Checks.Rules
+	for _, r := range rec.Checks.Rules {
+		v.Rules = append(v.Rules, reasons.Check(lang, r))
+	}
 	v.Failures = rec.Checks.Failures
 	v.Numbers = verifyNumbers(lang, rec)
 	return v

@@ -42,6 +42,9 @@ const (
 	StatusFused    = "fused"
 	StatusUnusable = "unusable"
 	StatusRejected = "rejected"
+	// StatusSample is a sample photo, measured live but never fused: the
+	// water in it is years old.
+	StatusSample = "sample"
 )
 
 // Error is a report that could not be processed, with an HTTP status and a
@@ -100,6 +103,17 @@ type Submission struct {
 	HasLocation    bool
 	HintReference  string
 	HintDiameterCm *float64
+	// Sample marks one of the gateway's own sample photos. It is measured
+	// like any photo, but not checked against duplicates, not verified and
+	// never added to the map.
+	Sample *SampleInfo
+}
+
+// SampleInfo says which sample photo was measured.
+type SampleInfo struct {
+	ID    string `json:"id"`
+	Place string `json:"place"`
+	Taken string `json:"taken,omitempty"` // YYYY-MM-DD, or empty when unknown
 }
 
 // MediaInfo describes the upload that was measured.
@@ -138,10 +152,12 @@ type Outcome struct {
 	CertificateURL string `json:"certificate_url,omitempty"`
 	// CellHasSimulated is true when the fused cell also holds readings from
 	// the simulated demo scenario.
-	CellHasSimulated bool      `json:"cell_has_simulated,omitempty"`
-	Advisory         string    `json:"advisory"`
-	ProcessedMs      int64     `json:"processed_ms"`
-	ReceivedAt       time.Time `json:"received_at"`
+	CellHasSimulated bool `json:"cell_has_simulated,omitempty"`
+	// Sample is set when the photo was one of the gateway's samples.
+	Sample      *SampleInfo `json:"sample,omitempty"`
+	Advisory    string      `json:"advisory"`
+	ProcessedMs int64       `json:"processed_ms"`
+	ReceivedAt  time.Time   `json:"received_at"`
 }
 
 // Advisory is attached to every result.
@@ -338,7 +354,8 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 		p.count(sub.Channel, "invalid")
 		return nil, err
 	}
-	if m, dup := p.Dedupe.Check(c.sum, c.dhash, c.hasHash); dup {
+	sample := sub.Sample != nil
+	if m, dup := p.Dedupe.Check(c.sum, c.dhash, c.hasHash); dup && !sample {
 		p.count(sub.Channel, "duplicate")
 		if m.Exact {
 			e := fail(http.StatusConflict, "duplicate", "This exact file was already reported %s ago, so it is not counted twice.", ago(m.Ago))
@@ -363,6 +380,11 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 	out := &Outcome{
 		Channel: sub.Channel, Lat: sub.Lat, Lon: sub.Lon, Place: places.Near(sub.Lat, sub.Lon),
 		Media: c.info, Advisory: Advisory, ReceivedAt: start.UTC(),
+	}
+	if sample {
+		info := *sub.Sample
+		out.Sample = &info
+		out.Place = info.Place
 	}
 	progress(Event{Stage: StageScene})
 
@@ -399,7 +421,20 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 			out.Status = StatusUnusable
 			out.Summary = "The photo could not be measured."
 			p.recordDecision(out, verify.Result{})
-			p.Dedupe.Remember(c.sum, c.dhash, c.hasHash)
+			if !sample {
+				p.Dedupe.Remember(c.sum, c.dhash, c.hasHash)
+			}
+			p.finish(out, start)
+			return out, nil
+		}
+		if sample && m.DepthCm != nil && m.DepthSigmaCm != nil {
+			// Measured live, but the water is years old: no checks against
+			// today's map and no fusing.
+			depth, sigma := *m.DepthCm, *m.DepthSigmaCm
+			out.DepthCm, out.DepthSigmaCm = &depth, &sigma
+			out.Status = StatusSample
+			out.Summary = fmt.Sprintf("Measured live: about %.0f cm of water, plus or minus %.0f cm. A sample photo is not added to the map.", depth, sigma)
+			p.recordDecision(out, verify.Result{})
 			p.finish(out, start)
 			return out, nil
 		}

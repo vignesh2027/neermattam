@@ -45,6 +45,9 @@ const (
 	// DecisionArchival is an archival photo measured for the "Measured
 	// photos" layer: shown as such, never added to the live map.
 	DecisionArchival = "archival"
+	// DecisionSample is one of the gateway's sample photos: measured live,
+	// never added to the map.
+	DecisionSample = "sample"
 )
 
 // Decision is the gateway's verdict on a measured report.

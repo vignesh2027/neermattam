@@ -22,6 +22,7 @@
 <meta name="twitter:image" content="{{.PublicURL}}/static/brand/og-card.png">
 {{range .LangLinks}}<link rel="alternate" hreflang="{{.Code}}" href="{{$.PublicURL}}{{.Href}}">
 {{end}}<link rel="preload" href="{{asset "fonts/inter-latin-wght-normal.woff2"}}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{asset "fonts/plus-jakarta-sans-latin-wght-normal.woff2"}}" as="font" type="font/woff2" crossorigin>
 {{if .LangFont}}<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="{{.LangFontURL}}">{{end}}

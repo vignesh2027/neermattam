@@ -44,7 +44,7 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 	if err != nil {
 		return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_multipart", Key: "bad_multipart", Message: "The upload could not be read."}
 	}
-	var latS, lonS string
+	var latS, lonS, sampleID string
 	for parts := 0; ; parts++ {
 		if parts > 12 {
 			return sub, &report.Error{Status: http.StatusBadRequest, Code: "too_many_parts", Key: "too_many_parts", Message: "The form has too many parts."}
@@ -86,6 +86,8 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 			latS, lonS, _ = strings.Cut(v, ",")
 		case "city":
 			sub.City = strings.ToLower(v)
+		case "sample":
+			sampleID = v
 		case "hint_reference":
 			if v != "" {
 				if !hintReferences[v] {
@@ -110,6 +112,12 @@ func (a *App) parseSubmission(w http.ResponseWriter, r *http.Request, channel st
 			return sub, &report.Error{Status: http.StatusBadRequest, Code: "bad_location", Key: "bad_location", Message: "Latitude and longitude must be decimal numbers, such as 12.9791 and 80.2209."}
 		}
 		sub.Lat, sub.Lon, sub.HasLocation = lat, lon, true
+	}
+	if sampleID != "" {
+		// One of the gateway's own sample photos (landing.go).
+		if e := applySample(&sub, sampleID); e != nil {
+			return sub, e
+		}
 	}
 	return sub, nil
 }

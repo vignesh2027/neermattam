@@ -59,7 +59,12 @@ func NewTraceStep(lang string, i int, s upstream.AgentStep) TraceStepView {
 		Prompt: s.PromptVersion,
 	}
 	kind := strings.ToLower(strings.TrimSpace(s.Step))
-	if d, ok := reasons.StepDecision(lang, s.DecisionCode); ok {
+	code := s.DecisionCode
+	if code == nil {
+		// A trace recorded without codes: read the English decision.
+		code = reasons.DecisionFromEnglish(s.Decision)
+	}
+	if d, ok := reasons.StepDecision(lang, code); ok {
 		// The decision from its code, in the page language.
 		v.Tone, v.Decision, v.Detail, v.Quote = d.Tone, d.Text, d.Detail, d.Quote
 		if kind == "verify" || kind == "confirm" {

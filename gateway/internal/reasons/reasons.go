@@ -27,8 +27,11 @@ type View struct {
 	// Text is the reason in the page language, or perception's English
 	// sentence when its code is unknown here.
 	Text string
-	// Quote is text a model or a tool wrote, shown as it is, in quotes.
-	Quote string
+	// Quote is text a model or a tool wrote, shown as it is, in quotes,
+	// after QuoteLabel ("In the model's words:", or "Details:" for a
+	// tool's error text).
+	Quote      string
+	QuoteLabel string
 }
 
 // Decision is one step decision ready to show. Code is empty when it
@@ -115,7 +118,53 @@ func Reason(lang, english string, c *upstream.Code) View {
 	if !ok {
 		return fallback
 	}
-	return View{Text: capitalise(text), Quote: quote}
+	v := View{Text: capitalise(text), Quote: quote}
+	if d, ok := fixedDetail(lang, quote); ok {
+		// The pipeline's own words, not a model's: translated.
+		v.Text, v.Quote = v.Text+" ("+d+")", ""
+	}
+	if v.Quote != "" {
+		label := "rc.model_said"
+		if toolDetail[c.Code] {
+			label = "rc.details"
+		}
+		v.QuoteLabel, _ = i18n.Lookup(lang, label)
+	}
+	return v
+}
+
+// toolDetail lists the codes whose detail is an error from a tool or a
+// check, not a model's words.
+var toolDetail = map[string]bool{
+	"scene_answer_rejected": true, "flow_locator_failed": true, "flow_tracking_failed": true, "velocity_unavailable": true,
+}
+
+// fixedDetails are the texts perception's pipeline itself writes into a
+// detail (agent.py), with their catalogue keys. Anything else in a detail
+// was written by a model, or is an error, and is shown as it is.
+var fixedDetails = map[string]string{
+	"time budget reached":                                      "time_budget_reached",
+	"partial (time budget reached)":                            "partial_time_budget_reached",
+	"the scene model's answers failed their checks":            "answers_failed_checks",
+	"verification failed":                                      "verification_failed",
+	"confirmation failed":                                      "confirmation_failed",
+	"no wheel-like proposal in the vehicle box":                "no_wheel_proposal",
+	"no prompt on the water":                                   "no_prompt_on_water",
+	"outline and the tyre's box disagree":                      "outline_box_disagree",
+	"outline follows the rim, inside the tyre":                 "outline_inside_rim",
+	"outline is not the tyre's outer edge":                     "outline_not_outer_edge",
+	"outline accepted by the scene model but not wheel-shaped": "accepted_not_wheel_shaped",
+	"not the named object":                                     "not_the_named_object",
+	"not water":                                                "not_water",
+	"no mask":                                                  "no_mask",
+}
+
+func fixedDetail(lang, detail string) (string, bool) {
+	id, ok := fixedDetails[detail]
+	if !ok {
+		return "", false
+	}
+	return i18n.Lookup(lang, "rc.detail."+id)
 }
 
 // StepDecision renders one step decision from its code. ok is false when
@@ -144,7 +193,11 @@ func StepDecision(lang string, c *upstream.Code) (Decision, bool) {
 		d.Tone = "stop"
 	case "give_up_reason":
 		d.Tone = "stop"
-		d.Quote = args["detail"]
+		if t, ok := fixedDetail(lang, args["detail"]); ok {
+			d.Detail = t
+		} else {
+			d.Quote = args["detail"]
+		}
 	case "verify_best":
 		switch args["n"] {
 		case "one":
@@ -166,8 +219,12 @@ func StepDecision(lang string, c *upstream.Code) (Decision, bool) {
 }
 
 // targetRe matches a trace target such as "two-wheeler wheel 1" or
-// "two wheeler wheel 1" (the agent writes the kind with spaces).
-var targetRe = regexp.MustCompile(`^(two[ -]wheeler wheel|car wheel|auto(?:-rickshaw)? wheel|bus wheel|kerb|person) (\d+)$`)
+// "two wheeler wheel 1" (the agent writes the kind with spaces), and
+// vehicleWheelRe a wheel found in a vehicle's box, "two wheeler 1 wheel".
+var (
+	targetRe       = regexp.MustCompile(`^(two[ -]wheeler wheel|car wheel|auto(?:-rickshaw)? wheel|bus wheel|kerb|person) (\d+)$`)
+	vehicleWheelRe = regexp.MustCompile(`^(two[ -]wheeler|car|auto(?:-rickshaw)?|bus) (\d+) wheel$`)
+)
 
 var targetKinds = map[string]string{
 	"two-wheeler wheel": "two_wheeler_wheel", "two wheeler wheel": "two_wheeler_wheel",
@@ -175,12 +232,16 @@ var targetKinds = map[string]string{
 	"bus wheel": "bus_wheel", "kerb": "kerb", "person": "person",
 }
 
-// Target translates a trace target of the form "<kind> <n>"; any other
-// target (such as "car 1 wheel" or "water") is returned as it is.
+// Target translates a trace target of the form "<kind> <n>" or
+// "<vehicle> <n> wheel"; any other target (such as "water") is returned as
+// it is.
 func Target(lang, target string) string {
 	m := targetRe.FindStringSubmatch(target)
 	if m == nil {
-		return target
+		if m = vehicleWheelRe.FindStringSubmatch(target); m == nil {
+			return target
+		}
+		m[1] += " wheel"
 	}
 	kind, ok := word(lang, "rc.kind.", targetKinds[m[1]])
 	if !ok {
@@ -264,4 +325,104 @@ func capitalise(s string) string {
 	}
 	r := []rune(s)
 	return strings.ToUpper(string(r[:1])) + string(r[1:])
+}
+
+// Check names a certificate lists (CONTRACTS.md 1.1), in the page language;
+// a name this gateway does not know is returned as it is.
+func Check(lang, name string) string {
+	if t, ok := word(lang, "rc.check.", name); ok {
+		return t
+	}
+	return name
+}
+
+// decisionPatterns is perception's decision catalogue (codes.py DECISIONS),
+// for traces recorded without codes: the landing page's sample run and
+// certificates kept before codes were. Named groups become arguments; the
+// first full match wins.
+var decisionPatterns = func() []struct {
+	code string
+	re   *regexp.Regexp
+} {
+	table := [][2]string{
+		{"accept", `accept`},
+		{"accept_partial", `accept \(coverage partial\)`},
+		{"refine", `refine with box (?P<box>\[[-\d, ]+\]) px(?: \+ (?P<points>.+))?`},
+		{"give_up", `give up`},
+		{"give_up_reason", `give up: (?P<detail>.+)`},
+		{"verify", `verify`},
+		{"verify_best", `verify the best (?P<n>one|two)`},
+		{"measure", `measure`},
+		{"candidate", `candidate`},
+		{"declined", `declined`},
+		{"rejected", `rejected`},
+		{"retry", `retry`},
+		{"drop", `drop`},
+		{"drop_fields", `drop (?P<n>\d+) fields? that failed, use the rest`},
+		{"snap", `snap`},
+		{"scene_stop_no_water", `stop: no water`},
+		{"scene_stop_no_wheel", `stop: no wheel`},
+		{"scene_stop_unchecked", `stop: no checked scene reading`},
+		{"scene_report_estimate", `no wheel: report own estimate`},
+		{"scene_measure_persons", `no wheel: measure (?P<n>\d+) persons? against the stature prior and segment the water`},
+		{"scene_verify_wheels", `segment and verify (?P<n>\d+) wheels? and the water`},
+		{"scene_search_vehicles", `search (?P<vehicles>\d+) vehicle box(?:es)? for wheels(?:, check (?P<wheels>\d+) wheels?)? and segment the water`},
+		{"join_water", `join to the verified water`},
+		{"check_water_below", `check that each outline ends at water`},
+		{"measure_people", `measure each against the stature prior`},
+		{"use_measurement", `use the measurement`},
+		{"use_wheel", `use the wheel`},
+		{"use_person", `use the person`},
+		{"use_person_n", `use person (?P<person>\d+)`},
+		{"combine_people", `combine the people who agree`},
+		{"report_estimate", `report model estimate`},
+		{"shallow_not_trusted", `shallow reading not trusted: report the estimate`},
+		{"person_not_published", `do not publish a person measurement`},
+		{"budget_answer", `answer with what was verified in time`},
+		{"budget_skip_people", `skip the people`},
+		{"budget_keep_water", `keep the verified water as it is`},
+		{"budget_verified_water_only", `use the verified water only`},
+		{"track", `track`},
+		{"flow_stop_nothing_floating", `stop: nothing floating to track`},
+		{"check_tracks", `check the tracks`},
+		{"subtract_camera_motion", `subtract its motion from every track`},
+		{"camera_motion_kept", `camera motion not removed`},
+		{"report_velocity", `report velocity`},
+		{"no_speed", `no speed`},
+		{"no_speed_rejected", `no speed \((?P<rejected>\d+) tracks rejected\)`},
+	}
+	out := make([]struct {
+		code string
+		re   *regexp.Regexp
+	}, len(table))
+	for i, t := range table {
+		out[i].code, out[i].re = t[0], regexp.MustCompile("^(?:"+t[1]+")$")
+	}
+	return out
+}()
+
+// DecisionFromEnglish reads a step decision perception wrote in English
+// into its code, as perception's own catalogue would; nil when it matches
+// none (the decision is then shown as it is).
+func DecisionFromEnglish(text string) *upstream.Code {
+	text = strings.TrimSpace(text)
+	for _, p := range decisionPatterns {
+		m := p.re.FindStringSubmatch(text)
+		if m == nil {
+			continue
+		}
+		args := map[string]any{}
+		for i, name := range p.re.SubexpNames() {
+			if name == "" || m[i] == "" {
+				continue
+			}
+			if f, err := strconv.ParseFloat(m[i], 64); err == nil && !strings.HasPrefix(m[i], "[") {
+				args[name] = f
+			} else {
+				args[name] = m[i]
+			}
+		}
+		return &upstream.Code{Code: p.code, Args: args}
+	}
+	return nil
 }

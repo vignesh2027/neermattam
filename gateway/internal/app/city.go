@@ -198,3 +198,8 @@ func (a *App) engineRouteError(err error, city string) *routeError {
 func (a *App) citiesRefresh(ctx context.Context) {
 	a.Cities.Run(ctx, a.Engine, 30*time.Second)
 }
+
+// simulatedIn says whether a city's live map holds simulated water. It never
+// does: the simulated replay lives on the engine's replay layer and is shown
+// only when a visitor switches it on (replayOn).
+func (a *App) simulatedIn(string) bool { return false }

@@ -1,0 +1,65 @@
+{
+  "note": "Real flood photos a visitor can send through the live pipeline in one tap. None has a measured water depth. Made by gateway/brand-src/make_landing_media.py from eval/photos: faces and number plates blurred, resized to 1600 px, metadata removed. Credits as in eval/commons_photos.json and eval/unsplash_photos.json. A sample is measured live but never added to the map, because the water in it is years old.",
+  "samples": [
+    {
+      "id": "nandanam",
+      "eval_id": "c1",
+      "city": "chennai",
+      "place": "Nandanam, Chennai",
+      "lat": 13.0298,
+      "lon": 80.2405,
+      "taken": "2015-12-03",
+      "kind": "person",
+      "title": "Chennai flood water logging near ofice nandanam4.jpg",
+      "author": "Vijayingarsal",
+      "licence": "CC0 1.0",
+      "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Chennai_flood_water_logging_near_ofice_nandanam4.jpg"
+    },
+    {
+      "id": "chennai-bike",
+      "eval_id": "x2",
+      "city": "chennai",
+      "place": "Chennai",
+      "lat": 13.0604,
+      "lon": 80.2496,
+      "taken": "2008-10-22",
+      "kind": "wheel",
+      "title": "India - Chennai - Monsoon - 02 (3059047958).jpg",
+      "author": "McKay Savage",
+      "licence": "CC BY 2.0",
+      "licence_url": "https://creativecommons.org/licenses/by/2.0/",
+      "source_url": "https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_02_(3059047958).jpg"
+    },
+    {
+      "id": "kolkata-car",
+      "eval_id": "u_aby-GGLtD-A",
+      "city": "kolkata",
+      "place": "Kolkata",
+      "lat": 22.5726,
+      "lon": 88.3639,
+      "taken": "",
+      "kind": "car",
+      "title": "A couple of people standing next to a car in a flooded street",
+      "author": "Dibakar Roy",
+      "licence": "Unsplash License",
+      "licence_url": "https://unsplash.com/license",
+      "source_url": "https://unsplash.com/photos/aby-GGLtD-A"
+    },
+    {
+      "id": "chennai-street",
+      "eval_id": "c3",
+      "city": "chennai",
+      "place": "Chennai",
+      "lat": 13.0418,
+      "lon": 80.2341,
+      "taken": "2015-12-02",
+      "kind": "person",
+      "title": "Inundation of Chennai in 2017-3.jpg",
+      "author": "Kaitha Poo Manam",
+      "licence": "CC BY 3.0",
+      "licence_url": "https://creativecommons.org/licenses/by/3.0/",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Inundation_of_Chennai_in_2017-3.jpg"
+    }
+  ]
+}

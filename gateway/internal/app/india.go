@@ -64,11 +64,11 @@ type IndiaPhoto struct {
 	SourceURL string `json:"source_url"`
 }
 
-// indiaTTL bounds how often /api/india and the map's city strip ask the
+// indiaDocTTL bounds how often /api/india and the map's city strip ask the
 // engine for every city's cells.
-const indiaTTL = 15 * time.Second
+const indiaDocTTL = 15 * time.Second
 
-type indiaCache struct {
+type indiaDocCache struct {
 	mu    sync.Mutex
 	at    time.Time
 	doc   *IndiaDoc
@@ -76,18 +76,33 @@ type indiaCache struct {
 	siteT map[string]time.Time
 }
 
-// India builds (or returns the cached) document.
+// India returns the cached document, or builds a fresh one. A caller whose
+// context ends first (the landing page, which asks in process with a short
+// deadline) gets the in-memory part with the engine's numbers null, and the
+// build carries on for the next caller.
 func (a *App) India(ctx context.Context) *IndiaDoc {
-	c := &a.india
+	done := make(chan *IndiaDoc, 1)
+	go func() { done <- a.buildIndia() }()
+	select {
+	case d := <-done:
+		return d
+	case <-ctx.Done():
+		return a.indiaBase(time.Now())
+	}
+}
+
+// buildIndia builds (or returns the cached) document; one build at a time.
+func (a *App) buildIndia() *IndiaDoc {
+	c := &a.indiaDoc
 	c.mu.Lock()
 	if c.sites == nil {
 		c.sites, c.siteT = map[string]int{}, map[string]time.Time{}
 	}
 	defer c.mu.Unlock()
-	if c.doc != nil && time.Since(c.at) < indiaTTL {
+	if c.doc != nil && time.Since(c.at) < indiaDocTTL {
 		return c.doc
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	doc := a.indiaBase(time.Now())
 	all := a.Cities.All()
@@ -176,7 +191,7 @@ func (a *App) indiaBase(now time.Time) *IndiaDoc {
 // part alone (rainfall, real reports and photos), and asks for a fresh one
 // in the background.
 func (a *App) indiaCached() *IndiaDoc {
-	c := &a.india
+	c := &a.indiaDoc
 	if c.mu.TryLock() {
 		doc, age := c.doc, time.Since(c.at)
 		c.mu.Unlock()
