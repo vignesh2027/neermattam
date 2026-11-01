@@ -35,13 +35,13 @@
   "photo": "showcase/c1-photo.webp",
   "measured": "showcase/c1-measured.webp",
   "person": "showcase/c1-person.webp",
-  "width": 1024,
-  "height": 576,
+  "width": 860,
+  "height": 644,
   "person_box": [
-   0.0215,
-   0.4583,
-   0.0566,
-   0.6545
+   0.0512,
+   0.4255,
+   0.1349,
+   0.7764
   ]
  },
  "steps": [

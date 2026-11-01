@@ -43,6 +43,8 @@ SHOW_JSON = GW / "internal" / "web" / "showcase.json"
 RUN = "c1"
 RUN_DATE = "2026-10-30"
 # Verifier images for each verify step, in trace order.
+# The part of the photo the hero shows, as fractions (x0, y0, x1, y1), 4:3.
+CROP = (0.0, 0.22, 0.42, 0.78)
 RUN_THUMBS = ["water_try0", "water_try1", "two_wheeler_1_wheel_try0", "two_wheeler_1_wheel_try1", "two_wheeler_1_wheel_try2"]
 
 # Extra regions to pixelate, as fractions of the photo (x0, y0, x1, y1):
@@ -163,6 +165,11 @@ def showcase():
         x1 = min(w, xs.max() + 4)
         m[:80, :x1] = o[:80, :x1]
     measured = Image.fromarray(m)
+    # Crop to the street around the measured man, so he is large enough to
+    # see on the page, and upscale the crop for sharp display.
+    cx0, cy0, cx1, cy1 = (round(CROP[0] * w), round(CROP[1] * h), round(CROP[2] * w), round(CROP[3] * h))
+    photo = photo.crop((cx0, cy0, cx1, cy1)).resize(((cx1 - cx0) * 2, (cy1 - cy0) * 2), Image.LANCZOS)
+    measured = measured.crop((cx0, cy0, cx1, cy1)).resize(((cx1 - cx0) * 2, (cy1 - cy0) * 2), Image.LANCZOS)
     SHOW_OUT.mkdir(parents=True, exist_ok=True)
     photo.save(SHOW_OUT / f"{RUN}-photo.webp", "WEBP", quality=80, method=6)
     measured.save(SHOW_OUT / f"{RUN}-measured.webp", "WEBP", quality=80, method=6)
@@ -175,7 +182,7 @@ def showcase():
     pad = 0.6 * (py1 - py0)
     cx = (px0 + px1) / 2
     box = (int(max(0, cx - pad)), int(max(0, py0 - pad * 0.35)), int(min(w, cx + pad)), int(min(h, py1 + pad * 0.35)))
-    loupe = measured.crop(box)
+    loupe = Image.fromarray(m).crop(box)
     loupe = loupe.resize((loupe.width * 3, loupe.height * 3), Image.LANCZOS)
     loupe.save(SHOW_OUT / f"{RUN}-person.webp", "WEBP", quality=82, method=6)
 
@@ -217,8 +224,9 @@ def showcase():
         },
         "images": {
             "photo": f"showcase/{RUN}-photo.webp", "measured": f"showcase/{RUN}-measured.webp",
-            "person": f"showcase/{RUN}-person.webp", "width": w, "height": h,
-            "person_box": [round(px0 / w, 4), round(py0 / h, 4), round(px1 / w, 4), round(py1 / h, 4)],
+            "person": f"showcase/{RUN}-person.webp", "width": photo.width, "height": photo.height,
+            "person_box": [round((px0 - cx0) / (cx1 - cx0), 4), round((py0 - cy0) / (cy1 - cy0), 4),
+                           round((px1 - cx0) / (cx1 - cx0), 4), round((py1 - cy0) / (cy1 - cy0), 4)],
         },
         "steps": steps,
     }
