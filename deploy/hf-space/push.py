@@ -68,7 +68,7 @@ def tracked_files(sub: str) -> list[str]:
 
 def stage(dest: Path, osm: Path) -> None:
     for sub, keep in (
-        ("engine", ("Cargo.toml", "Cargo.lock", "src/", "benches/", "tests/")),
+        ("engine", ("Cargo.toml", "Cargo.lock", "src/", "assets/", "benches/", "tests/")),
         ("gateway", ("",)),
         ("perception", ("pyproject.toml", "uv.lock", "README.md", "src/")),
     ):

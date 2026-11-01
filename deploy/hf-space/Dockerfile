@@ -11,6 +11,7 @@ FROM rust:1.97-bookworm AS engine
 WORKDIR /src
 COPY engine/Cargo.toml engine/Cargo.lock ./
 COPY engine/src ./src
+COPY engine/assets ./assets
 COPY engine/benches ./benches
 COPY engine/tests ./tests
 RUN cargo build --release --locked --bin neermattam-engine \
