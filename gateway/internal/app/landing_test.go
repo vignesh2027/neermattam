@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A sample photo goes through the real measuring service every time, is
@@ -114,5 +115,25 @@ func TestLandingWithoutIndiaNumbers(t *testing.T) {
 	}
 	if strings.Contains(body, "Rain, last 24 h") {
 		t.Error("rain row shown without live numbers")
+	}
+}
+
+// Without a registered /api/india route the mux falls through to "/", the
+// landing page, which asks for the same cache again. That must fail fast,
+// not wait on the cache's lock forever (it took the live site down once).
+func TestIndiaWithoutTheRouteDoesNotDeadlock(t *testing.T) {
+	a := &App{mux: http.NewServeMux()}
+	a.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = a.india(r.Context())
+	})
+	done := make(chan error, 1)
+	go func() { _, err := a.india(context.Background()); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("no /api/india route, yet the landing got numbers")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("india() deadlocked on its own cache")
 	}
 }

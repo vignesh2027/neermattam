@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,6 +88,12 @@ func (a *App) fetchIndia(ctx context.Context) (*web.India, error) {
 	}
 	req.RemoteAddr = "127.0.0.1:0"
 	req.Header.Set("Accept", "application/json")
+	// Only the real route may answer. If /api/india is not registered the
+	// mux falls through to "/", the landing page itself, which would wait on
+	// this cache's lock forever.
+	if _, pattern := a.mux.Handler(req); !strings.HasSuffix(pattern, "/api/india") {
+		return nil, errNoIndia
+	}
 	rec := &indiaRecorder{h: http.Header{}}
 	a.mux.ServeHTTP(rec, req)
 	if rec.status != http.StatusOK || rec.h.Get("Content-Encoding") != "" {
