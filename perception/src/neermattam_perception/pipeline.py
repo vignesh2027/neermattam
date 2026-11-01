@@ -95,6 +95,7 @@ from .person import (
 )
 from .references import WHEEL_KINDS, ReferenceChoice, RefKind, resolve_reference
 from .sam import MAX_PROMPTED_OBJECTS, ObjectMask, ObjectPrompt, PointPrompt
+from .sam_local import box_iou
 from .validate import RULES
 from .velocity import VelocityEstimate, surface_velocity
 
@@ -505,6 +506,20 @@ def truck_wheels_dropped(
             continue
         kept.append(w)
     return kept, list(dict.fromkeys(why))
+
+
+def matching_hint(
+    box: tuple[int, int, int, int], hints: Sequence[SceneObject], min_iou: float = 0.3
+) -> SceneObject | None:
+    """The scene model's wheel whose box best overlaps ``box`` (IoU at least ``min_iou``)."""
+    best, best_iou = None, min_iou
+    for h in hints:
+        if h.box is None:
+            continue
+        iou = box_iou(box, h.box)
+        if iou >= best_iou:
+            best, best_iou = h, iou
+    return best
 
 
 def _inside(p: tuple[int, int], box: tuple[int, int, int, int]) -> bool:
@@ -1704,6 +1719,17 @@ class Pipeline:
                 continue
             c.wheel = out.mask
             c.waterline_points = out.waterline_points
+            hint = matching_hint(out.mask.box, c.hints)
+            if hint is not None:
+                # The wheel found in the vehicle's box is one the scene model named:
+                # its position picks the catalogue tyre (front and rear differ on
+                # two-wheelers) and its depth there is the estimate at that wheel.
+                c.obj = replace(
+                    c.obj,
+                    position=hint.position,
+                    depth_cm=hint.depth_cm,
+                    depth_reason=hint.depth_reason,
+                )
         water = water_out.mask if water_out.accepted else None
         if water is not None and "time budget" in water_out.verdict:
             failures.append("water: only the part confirmed before the time budget ran out is used")
