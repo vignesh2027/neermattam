@@ -154,3 +154,21 @@ func TestResultCardLinksTheCertificateAndTraceShowsPromptVersions(t *testing.T) 
 		t.Errorf("trace: kind %s label %s", tv.Steps[1].Kind, tv.Steps[1].Label)
 	}
 }
+
+// Every map is built by mapcore's create(), which must resize the map when
+// its container's size settles: MapLibre skips its observer's first size
+// report, and a map built before the layout settled drew in part of its box.
+func TestMapsResizeToTheirSettledContainer(t *testing.T) {
+	b, err := templateFS.ReadFile("templates/mapcore.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	create := src[strings.Index(src, "function create("):]
+	create = create[:strings.Index(create, "return m;")]
+	for _, want := range []string{"new ResizeObserver(", ".observe(m.getContainer())", "m.resize()", `m.once("load", fit)`} {
+		if !strings.Contains(create, want) {
+			t.Errorf("create() lacks %q", want)
+		}
+	}
+}

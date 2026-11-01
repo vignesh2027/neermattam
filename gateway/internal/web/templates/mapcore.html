@@ -126,6 +126,20 @@ window.NM = (function () {
     }
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     m.touchZoomRotate.disableRotation();
+    // MapLibre watches its container too, but skips the first size report,
+    // so a map built before the layout settled (fonts, grid columns) kept
+    // its first, smaller canvas and drew tiles in part of the box only.
+    // Resize whenever the container's size differs from the canvas.
+    function fit() {
+      var c = m.getContainer(), cv = m.getCanvas();
+      if (!c || !cv || m._removed) return;
+      if (Math.abs(c.clientWidth - cv.clientWidth) > 1 || Math.abs(c.clientHeight - cv.clientHeight) > 1) m.resize();
+    }
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () { requestAnimationFrame(fit); }).observe(m.getContainer());
+    }
+    m.once("load", fit);
+    window.addEventListener("load", fit);
     m.on("style.load", function () { tint(m); });
     // A quiet loading veil until the first frame with data is drawn.
     var veil = el("div", "map-loading");
