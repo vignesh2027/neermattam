@@ -32,6 +32,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -45,7 +46,7 @@ from neermattam_perception.certificate import Signer
 from neermattam_perception.media import load_image
 from neermattam_perception.modal_sam import ModalSamAdapter
 from neermattam_perception.muse_open import MuseSparkOpenAdapter
-from neermattam_perception.pipeline import Pipeline
+from neermattam_perception.pipeline import Pipeline, PipelineConfig
 from neermattam_perception.sam_local import Sam21LocalAdapter
 
 HERE = Path(__file__).resolve().parent
@@ -53,7 +54,12 @@ PHOTOS = HERE / "photos"
 OUT = HERE / "out"
 RESULTS = HERE / "RESULTS_REAL.md"
 CLOSE_DIR = Path.home() / "neermattam-data" / "probe" / "close"
-SETS = {"commons": "commons_photos.json", "close": "unsplash_photos.json"}
+SETS = {
+    "commons": "commons_photos.json",
+    "close": "unsplash_photos.json",
+    # Photos chosen for the wheel method: side-on tyres in shallow to moderate water.
+    "wheel": "wheel_photos.json",
+}
 UA = "neermattam-eval/0.2 (https://github.com/vignesh2027; flood depth research)"
 
 
@@ -70,8 +76,17 @@ def fetch(meta: dict[str, object]) -> Path:
     transport = httpx.HTTPTransport(local_address="0.0.0.0", retries=2)
     with httpx.Client(transport=transport, timeout=120.0, headers={"User-Agent": UA}) as c:
         r = c.get(str(meta["download"]), follow_redirects=True)
-        r.raise_for_status()
-        path.write_bytes(r.content)
+    if r.status_code == 403 and shutil.which("curl"):
+        # Unsplash's download links answer 403 to this client but not to curl.
+        tmp = path.with_suffix(".part")
+        subprocess.run(
+            ["curl", "-4", "-sSfL", "-m", "120", "-A", UA, "-o", str(tmp), str(meta["download"])],
+            check=True,
+        )
+        tmp.replace(path)
+        return path
+    r.raise_for_status()
+    path.write_bytes(r.content)
     return path
 
 
@@ -82,6 +97,7 @@ def summarise(
         "brief": "Commons, named in the brief",
         "extra": "Commons, side-on wheels",
         "close": "Unsplash close-up",
+        "wheel": f"{str(meta.get('source', '')).capitalize()}, chosen for the wheel method",
     }.get(str(meta.get("set")), str(meta.get("set")))
     lines = [f"### {pid}: {meta['title']} ({kind})", ""]
     lines.append(
@@ -127,15 +143,18 @@ def summarise(
     return "\n".join(lines)
 
 
-def write_results(sections: list[str], header: str) -> None:
-    begin, end = "<!-- real-eval:begin -->", "<!-- real-eval:end -->"
+def write_results(sections: list[str], header: str, marker: str = "real-eval") -> None:
+    begin, end = f"<!-- {marker}:begin -->", f"<!-- {marker}:end -->"
     body = header + "\n\n" + "\n".join(sections)
     if RESULTS.exists():
         text = RESULTS.read_text(encoding="utf-8")
         if begin in text and end in text:
             pat = re.compile(re.escape(begin) + ".*?" + re.escape(end), re.DOTALL)
-            RESULTS.write_text(pat.sub(f"{begin}\n{body}\n{end}", text), encoding="utf-8")
+            RESULTS.write_text(pat.sub(lambda _: f"{begin}\n{body}\n{end}", text), encoding="utf-8")
             return
+        # A new block goes at the end, after the blocks already there.
+        RESULTS.write_text(text.rstrip("\n") + f"\n\n{begin}\n{body}\n{end}\n", encoding="utf-8")
+        return
     RESULTS.write_text(f"# Real-photo evaluation\n\n{begin}\n{body}\n{end}\n", encoding="utf-8")
 
 
@@ -194,6 +213,8 @@ async def run(args: argparse.Namespace) -> int:
         scene_cache_dir=Path(args.scene_cache) if args.scene_cache else None,
         scene_effort=None if args.scene_effort == "default" else args.scene_effort,
     )
+    if args.verify_timeout is not None:
+        muse.verify_attempt_timeout_s = args.verify_timeout if args.verify_timeout > 0 else None
     if not muse.api_key:
         sys.stderr.write("BASETEN_API_KEY is not set (see the repository .env)\n")
         return 2
@@ -214,7 +235,7 @@ async def run(args: argparse.Namespace) -> int:
     # (docs/VERIFY.md); replay one with
     #   uv run python -m neermattam_perception.replay ../eval/out/<id>.certificate.json
     signer = Signer.from_env()
-    out = Path(args.out)
+    out = Path(args.out).resolve()  # so the report can give paths from the repository root
     out.mkdir(parents=True, exist_ok=True)
     sections = []
     stats: dict[str, Any] = {}
@@ -224,7 +245,8 @@ async def run(args: argparse.Namespace) -> int:
         agent = VerifyRefineAgent(
             muse, sam, debug_dir=out / f"{m['id']}_agent", confirm=args.confirm
         )
-        pipe = Pipeline(muse, sam, agent=agent, signer=signer)
+        cfg = PipelineConfig(budget_s=None if args.budget <= 0 else args.budget)
+        pipe = Pipeline(muse, sam, agent=agent, signer=signer, config=cfg)
         for attempt in range(3):  # a network outage should not end a long run
             t1 = time.perf_counter()
             try:
@@ -261,6 +283,8 @@ async def run(args: argparse.Namespace) -> int:
         "memory": process_memory() if args.modal else sam.memory(),
         "scene_effort": muse.scene_effort or "default",
         "confirm": args.confirm,
+        "budget_s": args.budget if args.budget > 0 else None,
+        "verify_timeout_s": args.verify_timeout,
         "photos": stats,
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
@@ -268,11 +292,13 @@ async def run(args: argparse.Namespace) -> int:
         f"Generated by `uv run --extra local python ../eval/real_photos.py` on "
         f"{time.strftime('%Y-%m-%d')} with {muse.scene_model_name} ({muse.model} on Baseten, "
         f"scene reasoning effort {muse.scene_effort or 'default'}) and "
-        f"{sam.mask_model_name} on {summary['device']} (ready in {load_s:.1f} s). "
-        "No ground truth exists for these photos; only qualitative behaviour is shown."
+        f"{sam.mask_model_name} on {summary['device']} (ready in {load_s:.1f} s), "
+        + (f"time budget {args.budget:.0f} s per photo" if args.budget > 0 else "no time budget")
+        + (f", each check cut after {args.verify_timeout:.0f} s. " if args.verify_timeout else ". ")
+        + "No ground truth exists for these photos; only qualitative behaviour is shown."
     )
     if not args.only and args.write_results:
-        write_results(sections, header)
+        write_results(sections, header, args.marker)
     return 0
 
 
@@ -284,9 +310,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--modal", action="store_true", help="SAM on the Modal service (MODAL_SAM_*)")
     ap.add_argument("--scene-effort", default="low", help="low, medium, high, xhigh or default")
     ap.add_argument("--confirm", action="store_true", help="full-reasoning re-check of accepts")
+    ap.add_argument(
+        "--budget",
+        type=float,
+        default=55.0,
+        help="the request's time budget in seconds, as in the service; 0 for none (diagnosis only)",
+    )
+    ap.add_argument(
+        "--verify-timeout",
+        type=float,
+        default=None,
+        help="seconds before a check is cut and asked again (the service uses 20); diagnosis only",
+    )
     ap.add_argument("--scene-cache", default=None, help="folder to keep scene readings in")
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--sets", nargs="*", default=["close", "commons"], choices=list(SETS))
+    ap.add_argument(
+        "--marker",
+        default="real-eval",
+        help="the generated block of RESULTS_REAL.md to rewrite (wheel-eval for --sets wheel)",
+    )
     ap.add_argument(
         "--no-write-results",
         dest="write_results",

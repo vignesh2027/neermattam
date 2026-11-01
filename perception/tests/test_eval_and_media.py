@@ -118,6 +118,43 @@ def test_real_photo_report_and_commons_metadata(tmp_path: Path, monkeypatch) -> 
     assert out.count("<!-- real-eval:begin -->") == 1 and "header 2" in out and "31.0" in out
 
 
+def test_wheel_photo_set_is_credited_and_in_its_own_block(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """eval/wheel_photos.json: permissive licences only, every photo credited; its
+    generated block sits beside the main one without replacing it."""
+    import importlib.util
+    import json
+
+    root = Path(__file__).resolve().parents[2] / "eval"
+    meta = json.loads((root / "wheel_photos.json").read_text())["photos"]
+    assert 15 <= len(meta) <= 25 and {m["set"] for m in meta} == {"wheel"}
+    assert len({m["id"] for m in meta}) == len(meta)
+    allowed = {
+        "commons": ("CC0", "CC BY", "CC BY-SA"),
+        "unsplash": ("Unsplash License",),
+        "pexels": ("Pexels License",),
+    }
+    for m in meta:
+        assert m["licence"].startswith(allowed[m["source"]]), m["id"]
+        assert m["author"] and m["page"].startswith("https://") and m["licence_url"]
+        assert m["download"].startswith("https://")
+    spec = importlib.util.spec_from_file_location("real_photos", root / "real_photos.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.SETS["wheel"] == "wheel_photos.json"
+    doc = tmp_path / "R.md"
+    doc.write_text("# R\n\n<!-- real-eval:begin -->\nold\n<!-- real-eval:end -->\n")
+    monkeypatch.setattr(mod, "RESULTS", doc)
+    mod.write_results(["wheel one"], "wheel header", "wheel-eval")
+    mod.write_results(["wheel two"], "wheel header 2", "wheel-eval")
+    out = doc.read_text()
+    assert "old" in out and out.count("<!-- wheel-eval:begin -->") == 1
+    assert "wheel two" in out and "wheel one" not in out
+    assert out.index("real-eval:end") < out.index("wheel-eval:begin")
+    text = mod.summarise("x", meta[0], {"usable": False, "reasons": []}, 1.0)
+    assert "chosen for the wheel method" in text
+
+
 def test_eval_gate_compares_against_the_committed_baseline() -> None:
     """eval/gate.py: the committed baseline matches its settings, and worse numbers fail."""
     import importlib.util

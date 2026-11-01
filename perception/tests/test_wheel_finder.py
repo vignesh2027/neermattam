@@ -80,6 +80,7 @@ class RegionSam:
 
     async def region_candidates(self, image, region, prompts):  # type: ignore[no-untyped-def]
         self.regions.append((region, len(prompts)))
+        self.prompts = list(prompts)
         body = np.zeros_like(self.wheel)
         body[160:250, 300:520] = True
         return [
@@ -110,6 +111,66 @@ def test_agent_finds_and_accepts_a_vehicle_wheel() -> None:
     assert out.trace[0].target == "car 1 wheel"
     inter = np.logical_and(out.mask.mask, wheel).sum() / wheel.sum()
     assert inter > 0.9  # the tyre, not the body patch, was shown first and accepted
+
+
+def test_scene_model_wheels_inside_a_vehicle_are_prompted_in_its_search() -> None:
+    """A close-up cut by the frame: the tyre sits above the lower part of the car's
+    box, so the scene model's own wheel box is prompted and the region grows to it."""
+    from neermattam_perception.adapters import SceneObject
+    from neermattam_perception.wheel_finder import grow_region
+
+    rgb, wheel, _ = car_scene()
+    sam = RegionSam(wheel)
+    ver = ScriptedVerifier(lambda what, n: {**GOOD, "choice": "A"})
+    agent = VerifyRefineAgent(ver, sam)
+    vbox = (0, 200, 640, 480)  # a car filling the bottom of the frame
+    hint = SceneObject(
+        RefKind.CAR_WHEEL,
+        (200, 300),
+        (140, 270, 260, 360),
+        tyre_points=((150, 320), (200, 272), (250, 320)),
+        rim_point=(200, 330),
+    )
+    vehicle = VehicleObject("car", vbox)
+    out = asyncio.run(
+        agent.find_vehicle_wheel(
+            image_from_rgb(rgb), vehicle, RefKind.CAR_WHEEL, 1, 1, hints=(hint,)
+        )
+    )
+    region = sam.regions[0][0]
+    lower = wheel_region(vbox, 640, 480)
+    assert lower[1] > 270 and region[1] <= 270 - 9  # grown above the lower part, with room
+    scene = [p for p in sam.prompts if p[0] == "scene wheel"]
+    assert [p[1] for p in scene] == [hint.box, hint.box]
+    assert len(scene[1][2]) == 4 and not scene[1][2][-1].positive  # the ring and the hub
+    assert "1 scene model wheel box" in out.trace[0].output
+    assert grow_region((10, 10, 20, 20), [], 100, 100) == (10, 10, 20, 20)
+    assert grow_region((10, 10, 20, 20), [(0, 50, 100, 90)], 100, 100) == (0, 10, 100, 94)
+
+
+def test_pipeline_passes_the_scene_wheels_inside_a_vehicle_to_its_search(easy_case) -> None:  # type: ignore[no-untyped-def]
+    from dataclasses import replace
+
+    from .conftest import case_image
+    from .test_agent import agent_pipeline, open_reading
+
+    base = open_reading(easy_case)
+    wref = replace(base.references[0], kind=RefKind.CAR_WHEEL)
+    bike = replace(base.references[0], kind=RefKind.TWO_WHEELER_WHEEL)
+    ys, xs = np.nonzero(easy_case.wheel_mask)
+    car_box = (int(xs.min()) - 40, int(ys.min()) - 120, int(xs.max()) + 200, int(ys.max()) + 5)
+    reading = replace(base, vehicles=(VehicleObject("car", car_box),))
+    p, _, _ = agent_pipeline(easy_case, replace(reading, references=(wref, bike)))
+    seen: list[Any] = []
+    real = p.agent.find_vehicle_wheel  # type: ignore[union-attr]
+
+    async def spy(*a: Any, **kw: Any) -> Any:
+        seen.append(kw.get("hints"))
+        return await real(*a, **kw)
+
+    p.agent.find_vehicle_wheel = spy  # type: ignore[union-attr,method-assign]
+    asyncio.run(p.measure(image=case_image(easy_case)))
+    assert seen == [(wref,)]  # the car wheel only, not a two-wheeler's
 
 
 def test_vehicles_are_parsed_from_the_scene_answer() -> None:
@@ -168,6 +229,29 @@ def test_light_truck_on_car_wheels_is_searched_and_other_trucks_are_not(easy_cas
     r2 = asyncio.run(p2.measure(image=case_image(easy_case)))
     assert "no wheel size is known for a truck" in r2.reasons
     assert not any(t.target == "truck 1 wheel" for t in r2.agent_trace)
+    # The scene model's "bus wheel" on that truck is not measured against a bus
+    # tyre either (w_chennai01: 106 cm assumed for a light truck's tyre).
+    assert r2.method != "wheel_geometry"
+    assert not any(t.target.startswith("bus wheel") for t in r2.agent_trace)
+    assert r2.reasons.count("no wheel size is known for a truck") == 1
+
+
+def test_truck_wheels_dropped_keeps_real_buses_cars_and_two_wheelers() -> None:
+    from neermattam_perception.adapters import SceneObject
+    from neermattam_perception.pipeline import truck_wheels_dropped
+
+    truck = VehicleObject("truck", (100, 100, 500, 300))
+    bus = VehicleObject("bus", (300, 100, 700, 300))
+    on_truck = SceneObject(RefKind.BUS_WHEEL, (200, 250), (180, 230, 220, 270))
+    on_both = SceneObject(RefKind.BUS_WHEEL, (400, 250), (380, 230, 420, 270))
+    auto = SceneObject(RefKind.AUTO_WHEEL, (150, 250), (130, 230, 170, 270))
+    car = SceneObject(RefKind.CAR_WHEEL, (250, 250), (230, 230, 270, 270))
+    bike = SceneObject(RefKind.TWO_WHEELER_WHEEL, (260, 280), (240, 260, 280, 300))
+    free = SceneObject(RefKind.BUS_WHEEL, (900, 250), (880, 230, 920, 270))
+    kept, why = truck_wheels_dropped([on_truck, on_both, auto, car, bike, free], [truck, bus])
+    assert kept == [on_both, car, bike, free]
+    assert why == ["no wheel size is known for a truck"]
+    assert truck_wheels_dropped([on_truck], [bus]) == ([on_truck], [])
 
 
 def test_an_outline_on_the_rim_is_darker_outside_than_inside() -> None:
@@ -214,3 +298,46 @@ def test_tyre_points_outside_the_outline_are_counted() -> None:
     yy, xx = np.mgrid[0:480, 0:640]
     rim = ((xx - 200) ** 2 + (yy - 330) ** 2) <= 33**2
     assert points_outside(rim, on_rubber) == 3
+
+
+def test_a_wheel_found_in_a_vehicle_box_takes_the_scene_models_position_and_estimate(
+    easy_case,
+) -> None:  # type: ignore[no-untyped-def]
+    from dataclasses import replace
+
+    from neermattam_perception.adapters import SceneObject
+    from neermattam_perception.agent import RefOutcome, WaterOutcome
+    from neermattam_perception.pipeline import _Candidate, matching_hint
+    from neermattam_perception.sam import ObjectMask
+    from neermattam_perception.sam_local import mask_box
+
+    from .conftest import case_image
+    from .test_agent import agent_pipeline, open_reading
+
+    base = open_reading(easy_case)
+    wheel = easy_case.wheel_mask
+    wb = mask_box(wheel)
+    assert wb is not None
+    hint = replace(base.references[0], box=wb, position="rear", depth_cm=17.0)
+    other = replace(hint, box=(0, 0, 10, 10), position="front", depth_cm=40.0)
+    bike = VehicleObject("two_wheeler", (wb[0] - 10, wb[1] - 60, wb[2] + 60, wb[3] + 5))
+    p, _, _ = agent_pipeline(easy_case, base)
+    obj = SceneObject(RefKind.TWO_WHEELER_WHEEL, (0, 0), bike.box)
+    cand = _Candidate(obj, 1, 1, None, False, vehicle=bike, hints=(other, hint))
+
+    async def run(*a, **kw):  # type: ignore[no-untyped-def]
+        assert kw["vehicle_hints"] == {1: (other, hint)}
+        water = ObjectMask("w", 0, easy_case.water_mask, (0, 0, 1, 1), None)
+        out = RefOutcome(1, obj, True, ObjectMask("1", 0, wheel, wb, 0.9), wb, 0)
+        return WaterOutcome(True, water, 0, "good"), [out]
+
+    p.agent.run = run  # type: ignore[union-attr,method-assign]
+    asyncio.run(p._agent_masks(case_image(easy_case), base, [cand], 16, []))
+    assert cand.obj.position == "rear" and cand.obj.depth_cm == 17.0
+    assert cand.obj.kind == RefKind.TWO_WHEELER_WHEEL
+
+    a = SceneObject(RefKind.CAR_WHEEL, (50, 50), (0, 0, 100, 100))
+    b = SceneObject(RefKind.CAR_WHEEL, (250, 50), (200, 0, 300, 100))
+    assert matching_hint((10, 10, 100, 100), [a, b]) is a
+    assert matching_hint((90, 0, 210, 100), [a, b]) is None  # overlaps neither enough
+    assert matching_hint((10, 10, 100, 100), []) is None

@@ -95,6 +95,7 @@ from .person import (
 )
 from .references import WHEEL_KINDS, ReferenceChoice, RefKind, resolve_reference
 from .sam import MAX_PROMPTED_OBJECTS, ObjectMask, ObjectPrompt, PointPrompt
+from .sam_local import box_iou
 from .validate import RULES
 from .velocity import VelocityEstimate, surface_velocity
 
@@ -160,6 +161,8 @@ class _Candidate:
     rim: ObjectMask | None = None
     waterline_points: tuple[tuple[int, int], ...] = ()
     vehicle: VehicleObject | None = None  # its wheel is searched for inside the box
+    # The scene model's own wheels inside that box: prompted in the search too.
+    hints: tuple[SceneObject, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -474,6 +477,49 @@ VEHICLE_WHEEL: dict[str, RefKind] = {
     "auto_rickshaw": RefKind.AUTO_WHEEL,
     "bus": RefKind.BUS_WHEEL,
 }
+
+
+def truck_wheels_dropped(
+    wheels: Sequence[SceneObject], vehicles: Sequence[VehicleObject]
+) -> tuple[list[SceneObject], list[str]]:
+    """Bus and auto-rickshaw wheels the scene model placed on a truck are not measured.
+
+    The scene model has no truck wheel to choose, so it names a truck's tyre a bus
+    wheel; measured against the 106 cm bus tyre, a light truck's 75 to 85 cm tyre
+    gives a wrong depth (a real Chennai photo, w_chennai01). Such a wheel is kept
+    only when it also lies in a bus or auto-rickshaw box. Car wheels on a truck are
+    handled by the light-truck rule, and two-wheelers parked in front of a truck
+    are left alone."""
+    trucks = [v.box for v in vehicles if v.kind == "truck"]
+    own = {RefKind.BUS_WHEEL: "bus", RefKind.AUTO_WHEEL: "auto_rickshaw"}
+    kept: list[SceneObject] = []
+    why: list[str] = []
+    for w in wheels:
+        kind = own.get(w.kind)
+        if (
+            kind is not None
+            and any(_inside(w.point, b) for b in trucks)
+            and not any(v.kind == kind and _inside(w.point, v.box) for v in vehicles)
+        ):
+            # The same sentence (and reason code) as for a truck's own box.
+            why.append("no wheel size is known for a truck")
+            continue
+        kept.append(w)
+    return kept, list(dict.fromkeys(why))
+
+
+def matching_hint(
+    box: tuple[int, int, int, int], hints: Sequence[SceneObject], min_iou: float = 0.3
+) -> SceneObject | None:
+    """The scene model's wheel whose box best overlaps ``box`` (IoU at least ``min_iou``)."""
+    best, best_iou = None, min_iou
+    for h in hints:
+        if h.box is None:
+            continue
+        iou = box_iou(box, h.box)
+        if iou >= best_iou:
+            best, best_iou = h, iou
+    return best
 
 
 def _inside(p: tuple[int, int], box: tuple[int, int, int, int]) -> bool:
@@ -1161,7 +1207,13 @@ class Pipeline:
                     continue
                 vehicle_jobs.append((v, vkind))
             boxes = [v.box for v, _ in vehicle_jobs]
+            hints = {
+                id(v): tuple(w for w in wheels if w.kind == vk and _inside(w.point, v.box))
+                for v, vk in vehicle_jobs
+            }
             wheels = [w for w in wheels if not any(_inside(w.point, b) for b in boxes)]
+        wheels, dropped = truck_wheels_dropped(wheels, reading.vehicles)
+        reasons += [r for r in dropped if r not in reasons]
         wheels = wheels[: max(0, cfg.max_wheels - len(vehicle_jobs))]
         if hint_kind == RefKind.PERSON:
             wheels, vehicle_jobs = [], []
@@ -1202,7 +1254,9 @@ class Pipeline:
             i = len(cands)
             centre = ((v.box[0] + v.box[2]) // 2, (v.box[1] + v.box[3]) // 2)
             obj = SceneObject(vkind, centre, v.box, vehicle=v.vehicle)
-            cands.append(_Candidate(obj, i + 1, 1 + 2 * i, None, False, vehicle=v))
+            cands.append(
+                _Candidate(obj, i + 1, 1 + 2 * i, None, False, vehicle=v, hints=hints[id(v)])
+            )
         for wref in wheels:
             i = len(cands)
             rid = None
@@ -1646,6 +1700,7 @@ class Pipeline:
             emit=trace.append,
             vehicles=vjobs,
             deadline=deadline,
+            vehicle_hints={c.index: c.hints for c in cands if c.vehicle is not None},
         )
         # The agent returns vehicles first, then references; restore the order of cands.
         by_index = {o.index: o for o in outs}
@@ -1664,6 +1719,17 @@ class Pipeline:
                 continue
             c.wheel = out.mask
             c.waterline_points = out.waterline_points
+            hint = matching_hint(out.mask.box, c.hints)
+            if hint is not None:
+                # The wheel found in the vehicle's box is one the scene model named:
+                # its position picks the catalogue tyre (front and rear differ on
+                # two-wheelers) and its depth there is the estimate at that wheel.
+                c.obj = replace(
+                    c.obj,
+                    position=hint.position,
+                    depth_cm=hint.depth_cm,
+                    depth_reason=hint.depth_reason,
+                )
         water = water_out.mask if water_out.accepted else None
         if water is not None and "time budget" in water_out.verdict:
             failures.append("water: only the part confirmed before the time budget ran out is used")

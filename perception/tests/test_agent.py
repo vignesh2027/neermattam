@@ -238,6 +238,51 @@ def test_water_is_refined_with_a_corrected_box(easy_case) -> None:  # type: igno
     assert [t.decision.split(" ")[0] for t in out.trace] == ["verify", "refine", "verify", "accept"]
 
 
+def test_confirmed_water_is_kept_when_the_refinement_check_fails(easy_case) -> None:  # type: ignore[no-untyped-def]
+    """u_w8MXURXvqjQ: the first check confirmed water with partial coverage; the
+    check of the refined region timed out, and the confirmed water was thrown away
+    along with an accepted wheel. It is now used, as a partial region would be."""
+    img = case_image(easy_case)
+    shape = easy_case.water_mask.shape
+    sam = BoxSam({16: easy_case.water_mask}, shape)
+    wb = box_of(easy_case.water_mask)
+
+    @dataclass
+    class TimesOut:
+        scene_model_name: str = "muse-spark-open"
+        calls: int = 0
+
+        async def ask_image(self, jpeg: bytes, prompt: str, *, what: str) -> JsonReply:
+            self.calls += 1
+            if self.calls == 1:
+                partial = {
+                    "is_water": True,
+                    "coverage": "partial",
+                    "corrected_box": [0, 0, 999, 999],
+                }
+                return JsonReply(partial, Usage(1000, 500), 1234, "")
+            raise ModelError("verify water gave no answer within 20 s")
+
+    out = asyncio.run(VerifyRefineAgent(TimesOut(), sam).refine_water(img, wb, [], 16))
+    assert out.accepted and out.mask is not None
+    assert np.array_equal(out.mask.mask, easy_case.water_mask)
+    assert out.verdict == "partial (a later check failed)"
+    assert out.trace[-1].decision == (
+        "give up: the region an earlier check confirmed as water is used"
+    )
+
+    # With nothing confirmed before the failure, there is still no water.
+    @dataclass
+    class Fails:
+        scene_model_name: str = "muse-spark-open"
+
+        async def ask_image(self, jpeg: bytes, prompt: str, *, what: str) -> JsonReply:
+            raise ModelError("verify water gave no answer within 20 s")
+
+    none = asyncio.run(VerifyRefineAgent(Fails(), sam).refine_water(img, wb, [], 16))
+    assert not none.accepted and none.mask is None and none.trace[-1].decision == "give up"
+
+
 def test_verifier_failure_is_a_traced_give_up(easy_case) -> None:  # type: ignore[no-untyped-def]
     @dataclass
     class Broken:
@@ -517,3 +562,38 @@ def test_sam_work_stops_at_the_deadline(easy_case) -> None:  # type: ignore[no-u
     assert time.perf_counter() - t0 < 2.0
     assert not water.accepted and water.verdict == "time budget reached"
     assert len(outs) == 1 and not outs[0].accepted and outs[0].verdict == "time budget reached"
+
+
+def test_a_proposal_far_larger_than_its_tyre_box_is_not_shown(easy_case) -> None:  # type: ignore[no-untyped-def]
+    """p_26202090: a box around the tyre above the water gave the side of the car as
+    a second proposal; it is dropped before the verifier sees it."""
+    from neermattam_perception.agent import SPILL_AREA, spills_far_beyond
+
+    shape = easy_case.wheel_mask.shape
+    box = box_of(easy_case.wheel_mask)
+    w, h = box[2] - box[0], box[3] - box[1]
+    assert not spills_far_beyond(easy_case.wheel_mask, box)
+    car = (max(0, box[0] - 2 * w), max(0, box[1] - 2 * h), box[2] + 2 * w, box[3])
+    car_mask = rect_mask(shape, car)
+    assert spills_far_beyond(car_mask, box)
+    near = rect_mask(shape, (box[0] - w // 4, box[1] - h // 4, box[2] + w // 4, box[3]))
+    assert not spills_far_beyond(near, box)  # a tyre a little larger than its box stays
+    assert SPILL_AREA == 4.0
+
+    @dataclass
+    class TwoSam:
+        mask_model_name: str = "fake-sam"
+        name: str = "fake-sam"
+
+        async def candidates(self, image, b, points):  # type: ignore[no-untyped-def]
+            from neermattam_perception.sam_local import MaskCandidate
+
+            return [
+                MaskCandidate(easy_case.wheel_mask, 0.9, "box+points", 0),
+                MaskCandidate(car_mask, 0.95, "box+points", 1),
+            ]
+
+    agent = VerifyRefineAgent(ScriptedVerifier(lambda what, n: GOOD), TwoSam())  # type: ignore[arg-type]
+    props, n_raw, _ = asyncio.run(agent._proposals(case_image(easy_case), box, (), 1))
+    assert n_raw == 2 and len(props) == 1
+    assert np.array_equal(props[0].mask, easy_case.wheel_mask)
