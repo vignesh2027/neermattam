@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="page nf">
+  <section class="card panel nf-card" aria-labelledby="nf-title">
+    <img class="nf-mark" src="{{asset "brand/mark-128.png"}}" width="64" height="64" alt="">
+    <p class="eyebrow">{{t "nf.eyebrow"}}</p>
+    <h1 id="nf-title">{{t "nf.title"}}</h1>
+    <p class="nf-body">{{t "nf.body"}}</p>
+    <p class="nf-path"><code>{{.Path}}</code></p>
+    <div class="nf-cta">
+      <a class="btn btn-primary" href="/map">{{t "nav.map"}}</a>
+      <a class="btn btn-ghost" href="/report">{{template "icon-camera"}}{{t "cta.report_water"}}</a>
+    </div>
+    <ul class="nf-links" role="list">
+      <li><a href="/">Neermattam</a></li>
+      <li><a href="/route">{{t "nav.route"}}</a></li>
+      <li><a href="/alerts">{{t "nav.alerts"}}</a></li>
+      <li><a href="/control/demo">{{t "nav.control"}}</a></li>
+      <li><a href="/sites">{{t "nav.sites"}}</a></li>
+      <li><a href="/developers">{{t "nav.developers"}}</a></li>
+      <li><a href="/about">{{t "nav.about"}}</a></li>
+    </ul>
+  </section>
+</div>
+{{end}}

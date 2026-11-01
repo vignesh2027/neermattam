@@ -41,15 +41,17 @@ var Languages = []Lang{
 
 // Catalogs maps a language code to its messages.
 var Catalogs = map[string]map[string]string{
-	"en": merge(enPages, enOps, enVerify), "ta": merge(ta, taOps, taVerify), "hi": merge(hi, hiOps, hiVerify),
-	"te": merge(te, teOps, teVerify), "kn": merge(kn, knOps, knVerify), "ml": merge(ml, mlOps, mlVerify),
-	"bn": merge(bn, bnOps, bnVerify), "mr": merge(mr, mrOps, mrVerify),
+	"en": merge(enPages, enOps, enVerify, enSites, enFixes), "ta": merge(ta, taOps, taVerify, taSites, taFixes), "hi": merge(hi, hiOps, hiVerify, hiSites, hiFixes),
+	"te": merge(te, teOps, teVerify, teSites, teFixes), "kn": merge(kn, knOps, knVerify, knSites, knFixes), "ml": merge(ml, mlOps, mlVerify, mlSites, mlFixes),
+	"bn": merge(bn, bnOps, bnVerify, bnSites, bnFixes), "mr": merge(mr, mrOps, mrVerify, mrSites, mrFixes),
 }
 
 // merge joins a language's message files: the pages (messages_<code>.go),
 // the city, control room, alerts and developer texts
-// (messages_<code>_ops.go), and the measurement certificate page
-// (messages_verify.go, every language in one file).
+// (messages_<code>_ops.go), the measurement certificate page
+// (messages_verify.go, every language in one file) and the Critical sites
+// page and its alerts (messages_<code>_sites.go), and the review fixes
+// (messages_fixes.go, every language in one file).
 func merge(parts ...map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, p := range parts {

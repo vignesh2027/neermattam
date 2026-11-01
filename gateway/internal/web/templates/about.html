@@ -5,10 +5,17 @@
     <p class="eyebrow">{{t "about.eyebrow"}}</p>
     <h1>{{t "hero.line1"}} <em>{{t "hero.line2"}}</em></h1>
     <p>{{t "about.lead"}}</p>
+    <div class="card about-build" id="source">
+      <p class="about-built"><b>{{t "about.built"}}</b></p>
+      <dl class="about-src">
+        <div><dt>{{t "about.repo"}}</dt><dd><a href="{{.Build.Repo}}" rel="noopener">{{.Build.RepoLabel}}</a></dd></div>
+        <div><dt>{{t "about.commit"}}</dt><dd>{{if .Build.Commit}}<a href="{{.Build.URL}}" rel="noopener"><code>{{.Build.Short}}</code></a>{{if .Build.Dirty}} <span class="small muted">({{t "about.commit_dirty"}})</span>{{end}}{{else}}<span class="muted">{{t "about.commit_unknown"}}</span>{{end}}</dd></div>
+      </dl>
+    </div>
   </section>
 
   <div class="how">
-    <article class="card"><span class="n">1</span><h3>{{t "about.how1_title"}}</h3><p>{{t "about.how1"}}</p></article>
+    <article class="card"><span class="n">1</span><h3>{{t "about.how1_title"}}</h3><p>{{if .WhatsApp}}{{t "about.how1_whatsapp"}}{{else}}{{t "about.how1"}}{{end}}</p></article>
     <article class="card"><span class="n">2</span><h3>{{t "about.how2_title"}}</h3><p>{{t "about.how2"}}</p></article>
     <article class="card"><span class="n">3</span><h3>{{t "about.how3_title"}}</h3><p>{{t "about.how3"}}</p></article>
   </div>

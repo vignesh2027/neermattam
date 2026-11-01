@@ -1,0 +1,56 @@
+{
+  "about": "Route quick picks per city, the first two being the route form's default ends. Coordinates are OpenStreetMap nodes for each place (railway stations, bus stations, suburbs). engine/tests/presets.rs checks every one against the real road graphs, and gateway/internal/demo/presets_live_test.go checks the Chennai default against the simulated scenario. docs/GATEWAY.md, Cities.",
+  "cities": {
+    "chennai": [
+      {"id": "kodambakkam", "name": "Kodambakkam station", "lat": 13.0517, "lon": 80.2307},
+      {"id": "guindy", "name": "Guindy station", "lat": 13.0087, "lon": 80.2126},
+      {"id": "velachery", "name": "Velachery station", "lat": 12.9676, "lon": 80.2195},
+      {"id": "central", "name": "Chennai Central", "lat": 13.0827, "lon": 80.2707},
+      {"id": "tambaram", "name": "Tambaram station", "lat": 12.9258, "lon": 80.1179},
+      {"id": "siruseri", "name": "SIPCOT IT Park, Siruseri", "lat": 12.8321, "lon": 80.2292}
+    ],
+    "mumbai": [
+      {"id": "dadar", "name": "Dadar station", "lat": 19.0186, "lon": 72.8424},
+      {"id": "andheri", "name": "Andheri station", "lat": 19.1197, "lon": 72.8464},
+      {"id": "csmt", "name": "CSMT station", "lat": 18.9402, "lon": 72.8353},
+      {"id": "kurla", "name": "Kurla station", "lat": 19.0655, "lon": 72.8794},
+      {"id": "bandra", "name": "Bandra station", "lat": 19.0544, "lon": 72.8406}
+    ],
+    "bengaluru": [
+      {"id": "majestic", "name": "KSR Bengaluru station", "lat": 12.9781, "lon": 77.5697},
+      {"id": "silkboard", "name": "Silk Board junction", "lat": 12.9172, "lon": 77.6227},
+      {"id": "mgroad", "name": "MG Road", "lat": 12.9755, "lon": 77.6068},
+      {"id": "hebbal", "name": "Hebbal", "lat": 13.0358, "lon": 77.5970},
+      {"id": "whitefield", "name": "Whitefield", "lat": 12.9698, "lon": 77.7500}
+    ],
+    "hyderabad": [
+      {"id": "secunderabad", "name": "Secunderabad station", "lat": 17.4337, "lon": 78.5016},
+      {"id": "hitec", "name": "HITEC City", "lat": 17.4474, "lon": 78.3762},
+      {"id": "ameerpet", "name": "Ameerpet", "lat": 17.4375, "lon": 78.4483},
+      {"id": "charminar", "name": "Charminar", "lat": 17.3616, "lon": 78.4747},
+      {"id": "lbnagar", "name": "LB Nagar", "lat": 17.3457, "lon": 78.5522}
+    ],
+    "kolkata": [
+      {"id": "howrah", "name": "Howrah station", "lat": 22.5839, "lon": 88.3426},
+      {"id": "parkstreet", "name": "Park Street", "lat": 22.5535, "lon": 88.3525},
+      {"id": "sealdah", "name": "Sealdah station", "lat": 22.5678, "lon": 88.3707},
+      {"id": "saltlake", "name": "Salt Lake Sector V", "lat": 22.5735, "lon": 88.4331},
+      {"id": "garia", "name": "Garia", "lat": 22.4636, "lon": 88.3946}
+    ],
+    "delhi": [
+      {"id": "ndls", "name": "New Delhi station", "lat": 28.6427, "lon": 77.2197},
+      {"id": "ito", "name": "ITO", "lat": 28.6286, "lon": 77.2410},
+      {"id": "cp", "name": "Connaught Place", "lat": 28.6315, "lon": 77.2167},
+      {"id": "aiims", "name": "AIIMS", "lat": 28.5672, "lon": 77.2100},
+      {"id": "dwarka", "name": "Dwarka Sector 21", "lat": 28.5523, "lon": 77.0583}
+    ],
+    "visakhapatnam": [
+      {"id": "vskp", "name": "Visakhapatnam station", "lat": 17.7214, "lon": 83.2906},
+      {"id": "rkbeach", "name": "RK Beach", "lat": 17.7114, "lon": 83.3182},
+      {"id": "rtccomplex", "name": "RTC Complex, Dwaraka Nagar", "lat": 17.7238, "lon": 83.3073},
+      {"id": "gajuwaka", "name": "Gajuwaka", "lat": 17.6903, "lon": 83.2238},
+      {"id": "mvpcolony", "name": "MVP Colony", "lat": 17.7404, "lon": 83.3362}
+    ]
+  },
+  "order": ["chennai", "mumbai", "bengaluru", "hyderabad", "kolkata", "delhi", "visakhapatnam"]
+}

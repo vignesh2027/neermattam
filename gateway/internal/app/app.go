@@ -13,6 +13,7 @@ import (
 
 	"neermattam/gateway/internal/alerts"
 	"neermattam/gateway/internal/apikeys"
+	"neermattam/gateway/internal/buildinfo"
 	"neermattam/gateway/internal/certs"
 	"neermattam/gateway/internal/cities"
 	"neermattam/gateway/internal/config"
@@ -50,6 +51,12 @@ type App struct {
 	// Certs keeps each report's certificate.
 	CertKeys *certs.KeySet
 	Certs    *certs.Store
+	// Sites is the Critical sites watcher (sites.go).
+	Sites sitesState
+	// Build is the source commit this gateway was built from.
+	Build buildinfo.Info
+
+	ready readiness // /readyz hysteresis (ready.go)
 
 	reportLimit *ratelimit.Limiter
 	apiLimit    *ratelimit.Limiter
@@ -112,6 +119,10 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 		}
 	}
 	a.Facts, _ = facts.Load(cfg.RepoRoot)
+	a.Build = buildinfo.Read(cfg.BuildInfoPath)
+	if a.Build.Commit != "" {
+		log.Info("build", "commit", a.Build.Commit, "from", a.Build.Source, "uncommitted_changes", a.Build.Dirty)
+	}
 	a.Hub = live.NewHub(cfg.MaxSSEClients, a.Origins, log, m)
 	// The ticker shows real reports from before a restart.
 	recs := a.Origins.Records()
@@ -147,6 +158,7 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 		Origins:      a.Origins,
 		Overlays:     a.Overlays,
 		Certificates: a.Certs,
+		ReasonTexts:  web.ReasonTexts,
 		Hub:          a.Hub,
 		Log:          log,
 		Metrics:      m,
@@ -158,6 +170,7 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 	if err := a.setupAlerts(); err != nil {
 		return nil, err
 	}
+	a.setupSites() // Critical sites (sites.go)
 	if cfg.WhatsApp.Enabled() {
 		limits := map[string]int64{"image": cfg.MaxImageBytes, "video": cfg.MaxVideoBytes, "audio": cfg.MaxAudioBytes}
 		a.WhatsApp = whatsapp.New(base, cfg.WhatsApp, cfg.PublicURL, limits, a.Pipeline, log, m)
@@ -209,6 +222,10 @@ func (a *App) Handler() http.Handler {
 	mux.Handle("GET /control", page(a.controlPage))
 	mux.HandleFunc("POST /control/login", a.controlLogin)
 	mux.HandleFunc("POST /control/logout", a.controlLogout)
+	// The key page lives at /control; a bookmarked or typed /control/login
+	// goes there instead of a 404 or a 405.
+	mux.HandleFunc("GET /control/login", toControl)
+	mux.HandleFunc("GET /control/logout", toControl)
 	mux.HandleFunc("GET /control/panel", a.controlPanel)
 	mux.HandleFunc("GET /control/export", a.controlExport)
 	mux.Handle("GET /control/demo", page(a.controlDemoPage))
@@ -224,6 +241,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/route", a.devRoute)
 	mux.HandleFunc("GET /api/v1/cells", a.devCells)
 	mux.HandleFunc("GET /api/v1/usage", a.devUsage)
+
+	a.registerSites(mux) // Critical sites (sites.go)
 
 	mux.HandleFunc("POST /api/report", a.apiReport)
 	mux.HandleFunc("GET /api/cells", a.apiCells)
@@ -254,13 +273,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/static/brand/favicon.ico", http.StatusMovedPermanently)
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if wantsHTML(r) {
-			http.Error(w, "Page not found. Try the live map at /.", http.StatusNotFound)
-			return
-		}
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such endpoint; see docs/CONTRACTS.md section 3"})
-	})
+	mux.HandleFunc("/", a.notFound)
 
 	// secure runs before observe so the request observe sees is the one the
 	// mux annotates with its matched pattern.
@@ -307,6 +320,7 @@ func (a *App) Run(ctx context.Context) {
 	if a.Alerts != nil {
 		go a.Alerts.Run(ctx)
 	}
+	a.runSites(ctx) // Critical sites (sites.go)
 	a.bg.Add(1)
 	go func() {
 		defer a.bg.Done()
@@ -320,6 +334,7 @@ func (a *App) Run(ctx context.Context) {
 			case <-t.C:
 				a.SaveProvenance()
 				a.saveAlerts()
+				a.saveSiteAlerts()
 				if n++; n%10 == 0 {
 					a.saveKeyUsage()
 				}
@@ -350,6 +365,7 @@ func (a *App) Shutdown() {
 	}
 	a.SaveProvenance()
 	a.saveAlerts()
+	a.saveSiteAlerts()
 	a.saveKeyUsage()
 }
 

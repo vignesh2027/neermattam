@@ -1,6 +1,6 @@
 //! Neermattam engine: fuses street-level flood depth reports into a live hex
-//! map of six Indian metros (Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata
-//! and Delhi by default), rates the hazard to people with the UK Defra and
+//! map of seven Indian cities (Chennai, Mumbai, Bengaluru, Hyderabad, Kolkata,
+//! Delhi and Visakhapatnam by default), rates the hazard to people with the UK Defra and
 //! Environment Agency formula, and routes each kind of vehicle around water it
 //! cannot safely cross.
 //!
@@ -14,6 +14,9 @@
 //! - [`routing`]: A* over the road graph, water-aware and baseline.
 //! - [`city`]: the covered cities, their metro boxes and road extracts.
 //! - [`analytics`]: control-room hotspots, summaries and drain rates.
+//! - [`sites`]: critical sites (data centres first), their watch zones and
+//!   access routes; [`sites_api`] serves them.
+//! - [`ledger`]: the long-lived risk record per area, for siting.
 //! - [`api`]: the HTTP service described in `docs/CONTRACTS.md` section 2.
 //! - [`persist`]: atomic snapshots of the cell map, with migration.
 //! - [`config`]: environment configuration.
@@ -32,6 +35,9 @@ pub mod fusion;
 pub mod geo;
 pub mod graph;
 pub mod hazard;
+pub mod ledger;
 pub mod persist;
 pub mod routing;
+pub mod sites;
+pub mod sites_api;
 pub mod vehicle;

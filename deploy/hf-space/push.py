@@ -5,8 +5,8 @@ Run from anywhere:
     uv run --with huggingface_hub python deploy/hf-space/push.py --hf-env PATH
 
 It copies the engine, gateway and perception sources from the working tree,
-the launcher and Space files from deploy/hf-space/, and the Chennai roads
-extract, into a staging folder laid out as the Space's Dockerfile expects. It
+the launcher and Space files from deploy/hf-space/, and the seven cities'
+road extracts, into a staging folder laid out as the Space's Dockerfile expects. It
 then creates the private Space if needed, sets BASETEN_API_KEY as a Space
 secret and the Baseten base URL and model as Space variables (read from the
 repository .env), and uploads the folder as one commit. Files no longer in
@@ -29,7 +29,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 NAMESPACE = "vigneshwar234"
-CITIES = ("chennai", "mumbai", "bengaluru", "hyderabad", "kolkata", "delhi")
+CITIES = ("chennai", "mumbai", "bengaluru", "hyderabad", "kolkata", "delhi", "visakhapatnam")
 # Folders searched for <city>-roads.osm.pbf, first match wins.
 DEFAULT_OSM = [ROOT / "data/osm", Path.home() / "neermattam-data/osm"]
 
@@ -125,7 +125,7 @@ def main() -> int:
         return 2
     osm = find_osm_dir(args.osm)
     if osm is None:
-        print("no folder holds all six city road extracts; pass --osm", file=sys.stderr)
+        print("no folder holds all seven city road extracts; pass --osm", file=sys.stderr)
         return 2
 
     if args.stage_dir:

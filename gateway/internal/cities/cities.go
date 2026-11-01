@@ -48,12 +48,13 @@ func (c City) Contains(lat, lon float64) bool { return c.BBox.Contains(lat, lon)
 // builtIn mirrors the engine's default ENGINE_CITIES (docs/ENGINE.md,
 // Cities). The engine's answer replaces boxes and names when it differs.
 var builtIn = []City{
-	{ID: "chennai", Name: "Chennai", BBox: config.BBox{MinLon: 80.10, MinLat: 12.85, MaxLon: 80.33, MaxLat: 13.24}, CentreLat: 13.045, CentreLon: 80.215},
+	{ID: "chennai", Name: "Chennai", BBox: config.BBox{MinLon: 80.10, MinLat: 12.80, MaxLon: 80.33, MaxLat: 13.24}, CentreLat: 13.02, CentreLon: 80.215},
 	{ID: "mumbai", Name: "Mumbai", BBox: config.BBox{MinLon: 72.77, MinLat: 18.88, MaxLon: 73.13, MaxLat: 19.32}, CentreLat: 19.1, CentreLon: 72.95},
 	{ID: "bengaluru", Name: "Bengaluru", BBox: config.BBox{MinLon: 77.44, MinLat: 12.82, MaxLon: 77.80, MaxLat: 13.15}, CentreLat: 12.985, CentreLon: 77.62},
 	{ID: "hyderabad", Name: "Hyderabad", BBox: config.BBox{MinLon: 78.24, MinLat: 17.22, MaxLon: 78.66, MaxLat: 17.62}, CentreLat: 17.42, CentreLon: 78.45},
 	{ID: "kolkata", Name: "Kolkata", BBox: config.BBox{MinLon: 88.20, MinLat: 22.42, MaxLon: 88.52, MaxLat: 22.72}, CentreLat: 22.57, CentreLon: 88.36},
 	{ID: "delhi", Name: "Delhi", BBox: config.BBox{MinLon: 76.84, MinLat: 28.40, MaxLon: 77.35, MaxLat: 28.89}, CentreLat: 28.645, CentreLon: 77.095},
+	{ID: "visakhapatnam", Name: "Visakhapatnam", BBox: config.BBox{MinLon: 83.11, MinLat: 17.55, MaxLon: 83.53, MaxLat: 18.07}, CentreLat: 17.81, CentreLon: 83.32},
 }
 
 // Registry holds the current list.

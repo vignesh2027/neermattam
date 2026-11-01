@@ -47,6 +47,11 @@ type Page struct {
 	NeedsMap    bool
 	Footer      bool
 	Demo        bool
+	// WhatsApp says the WhatsApp webhook is switched on in this deployment.
+	WhatsApp bool
+	// Build is the source this gateway was built from, for the About page
+	// and the footer.
+	Build BuildView
 
 	Stats     MapStats
 	CellsJSON template.JS // initial cells, inlined so the map paints without a second request
@@ -68,6 +73,19 @@ type Page struct {
 	Alerts  *AlertsView
 	Dev     *DevView
 	Verify  *VerifyView
+
+	// Sites is the Critical sites page (sites.go).
+	Sites *SitesView
+}
+
+// BuildView is the repository and the deployed commit.
+type BuildView struct {
+	Repo      string // https://github.com/...
+	RepoLabel string // github.com/...
+	Commit    string // full hex, or "" when unknown
+	Short     string
+	URL       string // the commit on the repository
+	Dirty     bool   // built with uncommitted changes
 }
 
 // LangLink is one entry of the language menu.
@@ -126,7 +144,7 @@ type Renderer struct {
 }
 
 // Page templates.
-var pageNames = []string{"home", "map", "report", "route", "about", "control", "control_login", "alerts", "developers", "verify"}
+var pageNames = []string{"home", "map", "report", "route", "about", "control", "control_login", "alerts", "developers", "verify", "notfound"}
 
 func langFuncs(a *Assets, lang string) template.FuncMap {
 	f := template.FuncMap{

@@ -107,6 +107,16 @@ type Config struct {
 	// time is used.
 	RepoRoot string
 
+	// BuildInfoPath is the BUILD_INFO file the deployed image carries
+	// (internal/buildinfo); the About page shows its commit.
+	BuildInfoPath string
+
+	// ReadyProbeTimeout bounds each upstream health probe made by /readyz;
+	// ReadyGrace is how long a probe that times out or cannot connect may
+	// lean on the last successful one before /readyz reports not ready.
+	ReadyProbeTimeout time.Duration
+	ReadyGrace        time.Duration
+
 	// ServiceArea is the simulated scenario's area (Chennai). The covered
 	// cities themselves come from the engine's /v1/cities.
 	ServiceArea BBox
@@ -179,6 +189,9 @@ func fromLookup(lookup func(string) (string, bool)) (Config, error) {
 		ReplyDeadline:     r.dur("REPLY_DEADLINE", 270*time.Second),
 		DataDir:           r.str("GATEWAY_DATA_DIR", "../data/gateway"),
 		RepoRoot:          r.str("REPO_ROOT", ".."),
+		BuildInfoPath:     r.str("BUILD_INFO_PATH", "/opt/neermattam/BUILD_INFO"),
+		ReadyProbeTimeout: r.dur("READY_PROBE_TIMEOUT", 5*time.Second),
+		ReadyGrace:        r.dur("READY_GRACE", 30*time.Second),
 		WeatherTimeout:    r.dur("WEATHER_TIMEOUT", 4*time.Second),
 
 		MaxImageBytes:   r.int64("MAX_IMAGE_BYTES", 12<<20),
@@ -223,7 +236,7 @@ func fromLookup(lookup func(string) (string, bool)) (Config, error) {
 			GraphURL:      strings.TrimRight(r.str("WHATSAPP_GRAPH_URL", "https://graph.facebook.com/v23.0"), "/"),
 		},
 	}
-	area := r.str("GATEWAY_BBOX", "80.10,12.85,80.33,13.24")
+	area := r.str("GATEWAY_BBOX", "80.10,12.80,80.33,13.24")
 	if r.err == nil {
 		b, err := ParseBBox(area)
 		if err != nil {

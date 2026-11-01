@@ -13,6 +13,8 @@
 //! - `GET /v1/summary?city=...`: counts for a control room.
 //! - `GET /v1/recession?cell=...`: a cell's depth history and drain rate.
 //! - `GET /v1/export?city=...&format=geojson|csv`: the city's cells.
+//! - `GET|POST /v1/sites`, `GET|DELETE /v1/sites/{id}`, `GET /v1/siting`:
+//!   critical sites and the risk ledger, in [`crate::sites_api`].
 //! - `GET /healthz`, `GET /readyz`.
 //!
 //! Every error is JSON, `{"error": "..."}`, with status 400 for invalid
@@ -144,6 +146,8 @@ pub struct AppState {
     history_dirty: AtomicBool,
     recent_ids: Mutex<RecentIds>,
     shutdown_tx: watch::Sender<bool>,
+    /// Critical sites and the risk ledger.
+    pub sites: crate::sites::SitesState,
 }
 
 impl AppState {
@@ -153,7 +157,12 @@ impl AppState {
         let grid = Grid::new(config.fusion, config.resolution);
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let (shutdown_tx, _) = watch::channel(false);
+        let sites = crate::sites::SitesState::new(&config);
+        if let Some(e) = &sites.registry.load_error {
+            warn!(error = %e, "OpenStreetMap sites not loaded; only operator sites are available");
+        }
         Arc::new(AppState {
+            sites,
             recent_ids: Mutex::new(RecentIds::new(config.dedupe_capacity)),
             graphs: config.cities.iter().map(|_| GraphSlot::default()).collect(),
             config,
@@ -278,6 +287,15 @@ impl AppState {
                 }
                 continue;
             }
+            {
+                let st = Arc::clone(&self);
+                match tokio::task::spawn_blocking(move || crate::sites_api::save_ledger(&st)).await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => warn!(error = %e, "risk ledger not saved"),
+                    Err(e) => warn!(error = %e, "risk ledger task failed"),
+                }
+            }
             let forgotten = self.grid.write().forget_old(Utc::now());
             if forgotten > 0 {
                 info!(
@@ -307,14 +325,22 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    fn bad_request(message: impl Into<String>) -> Self {
+    /// An error with any status.
+    pub(crate) fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        ApiError {
+            status,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         ApiError {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
         }
     }
 
-    fn not_found(message: impl Into<String>) -> Self {
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
         ApiError {
             status: StatusCode::NOT_FOUND,
             message: message.into(),
@@ -712,11 +738,30 @@ async fn post_reading(
                 })
                 .map(Json);
         }
-        let ingested = st
-            .grid
-            .write()
-            .ingest(&obs)
-            .map_err(|e| ApiError::bad_request(e.to_string()))?;
+        let ingested = {
+            let mut g = st.grid.write();
+            let ingested = g
+                .ingest(&obs)
+                .map_err(|e| ApiError::bad_request(e.to_string()))?;
+            // The risk ledger keeps the cell's fused direct level just after
+            // this reading (its history point), or the reading itself when
+            // history is off.
+            let (fused, sigma) = g
+                .state(ingested.cell)
+                .and_then(|s| s.history.iter().rev().find(|p| p.at == obs.observed_at))
+                .map_or((obs.depth_cm, obs.depth_sigma_cm), |p| {
+                    (p.fused_cm, p.fused_sigma_cm)
+                });
+            st.sites.ledger.lock().record(
+                ingested.cell,
+                obs.observed_at,
+                fused,
+                sigma,
+                r.source.is_some(),
+            );
+            st.sites.ledger_dirty.store(true, Ordering::SeqCst);
+            ingested
+        };
         if let Some(id) = &r.reading_id {
             ids.insert(id, ingested.cell);
         }
@@ -756,7 +801,7 @@ async fn post_reading(
 /// Run CPU-heavy work (building views of a whole city, scoring, exporting)
 /// on the blocking pool, so a large map never stalls the async workers that
 /// serve readings and routes.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(f).await.map_err(|e| ApiError {
@@ -766,7 +811,7 @@ async fn blocking<T: Send + 'static>(
 }
 
 /// The optional `city` query parameter, checked against the configuration.
-fn city_param<'a>(
+pub(crate) fn city_param<'a>(
     q: &HashMap<String, String>,
     cfg: &'a Config,
 ) -> Result<Option<&'a City>, ApiError> {
@@ -782,7 +827,10 @@ fn city_param<'a>(
 }
 
 /// A required `city` query parameter.
-fn required_city<'a>(q: &HashMap<String, String>, cfg: &'a Config) -> Result<&'a City, ApiError> {
+pub(crate) fn required_city<'a>(
+    q: &HashMap<String, String>,
+    cfg: &'a Config,
+) -> Result<&'a City, ApiError> {
     city_param(q, cfg)?.ok_or_else(|| {
         ApiError::bad_request(format!(
             "city is required; covered cities are {}",
@@ -928,7 +976,9 @@ async fn get_route(
     let vehicle: Vehicle = q
         .get("vehicle")
         .ok_or_else(|| {
-            ApiError::bad_request("vehicle is required: pedestrian, two_wheeler, auto, car or bus")
+            ApiError::bad_request(
+                "vehicle is required: pedestrian, two_wheeler, auto, car, bus or truck",
+            )
         })?
         .parse()
         .map_err(ApiError::bad_request)?;
@@ -1114,7 +1164,9 @@ async fn get_hotspots(
         blocking(move || {
             let views = city_views(&st, city.as_ref(), now);
             let cfg = &st.config;
-            analytics::hotspots(views, &cfg.policy, &cfg.fusion, now, limit)
+            let mut ranked = analytics::hotspots(views, &cfg.policy, &cfg.fusion, now, limit);
+            name_hotspots(&st, &mut ranked);
+            ranked
         })
         .await?
     };
@@ -1122,10 +1174,30 @@ async fn get_hotspots(
         "city": city.map(|c| &c.id),
         "generated_at": now,
         "advisory": true,
-        "score": "depth 40 x min(depth_block / 60 cm, 1) + hazard 0, 10, 20 or 30 by class at depth_block + freshness 20 x (1 - age_h / 12) + reports 10 x min(independent reports / 5, 1)",
+        "score": "depth 40 x min(depth_block / 150 cm, 1) + hazard 30 x min(HR / 3, 1) with HR the Defra rating at depth_block + freshness 20 x (1 - age_h / 12) + reports 10 x min(ln(1 + n) / ln(31), 1) with n the readings in force",
         "count": ranked.len(),
         "hotspots": ranked,
     })))
+}
+
+/// Name each hotspot after the nearest named road in its city's graph. A
+/// city whose graph is not loaded leaves its hotspots unnamed.
+fn name_hotspots(st: &AppState, ranked: &mut [analytics::Hotspot]) {
+    for h in ranked {
+        let Some(city) = st.config.city_at(h.lat, h.lon) else {
+            continue;
+        };
+        let Some(g) = st.graph(&city.id) else {
+            continue;
+        };
+        if let Some((name, d)) = g.nearest_road_name(h.lat, h.lon, analytics::PLACE_MAX_M) {
+            h.place = Some(analytics::PlaceName {
+                name: name.to_string(),
+                distance_m: d.round(),
+                source: "osm_road",
+            });
+        }
+    }
 }
 
 async fn get_summary(
@@ -1449,6 +1521,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/export", get(get_export))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .merge(crate::sites_api::routes())
         .layer(TimeoutLayer::with_status_code(
             StatusCode::SERVICE_UNAVAILABLE,
             cfg.request_timeout,

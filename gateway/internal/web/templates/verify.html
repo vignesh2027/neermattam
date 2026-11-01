@@ -13,11 +13,11 @@
     <p class="small muted"><code>{{.ID}}</code></p>
   </section>
   {{else}}
-  <section class="card panel vfy-verdict v-{{.Status}}" aria-labelledby="vfy-v">
-    <span class="vfy-ic" aria-hidden="true">{{if eq .Status "verified"}}{{template "icon-shield"}}{{else}}{{template "icon-alert"}}{{end}}</span>
+  <section class="card panel vfy-verdict v-{{.Status}}{{if ne .Decision "fused"}}{{if ne .Decision "unknown"}} not-used{{end}}{{end}}" aria-labelledby="vfy-v">
+    <span class="vfy-ic" aria-hidden="true">{{if and (eq .Status "verified") (or (eq .Decision "fused") (eq .Decision "unknown"))}}{{template "icon-shield"}}{{else}}{{template "icon-alert"}}{{end}}</span>
     <div>
       {{if eq .Status "verified"}}
-      <h2 id="vfy-v">{{t "vfy.ok_title"}}</h2>
+      <h2 id="vfy-v">{{if or (eq .Decision "rejected") (eq .Decision "unusable")}}{{t "vfy.ok_title_rejected"}}{{else}}{{t "vfy.ok_title"}}{{end}}</h2>
       <p>{{t "vfy.ok_body" .KeyID}}</p>
       {{else if eq .Status "unknown_key"}}
       <h2 id="vfy-v">{{t "vfy.unknown_title"}}</h2>
@@ -29,15 +29,32 @@
       <ul class="vfy-checks">
         <li class="c-{{if eq .Status "verified"}}ok{{else}}bad{{end}}">{{if eq .Status "verified"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>Ed25519 · <code>{{.KeyID}}</code>{{if ne .Status "verified"}} · {{.Reason}}{{end}}</span></li>
         <li class="c-{{if eq .Upload "match"}}ok{{else if eq .Upload "mismatch"}}bad{{else}}none{{end}}">{{if eq .Upload "match"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>{{if eq .Upload "match"}}{{t "vfy.upload_match"}}{{else if eq .Upload "mismatch"}}{{t "vfy.upload_mismatch"}}{{else}}{{t "vfy.upload_unknown"}}{{end}}</span></li>
+        {{if ne .Decision "unknown"}}<li class="c-{{if eq .Decision "fused"}}ok{{else}}warn{{end}}">{{if eq .Decision "fused"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>{{if eq .Decision "fused"}}{{t "vfy.dec_fused" .DecisionTrust}}{{else if eq .Decision "rejected"}}{{t "result.title_rejected"}}{{else}}{{t "vfy.dec_unusable"}}{{end}}</span></li>{{end}}
       </ul>
       {{if and (ne .Status "verified") .HasRecord}}<p class="vfy-claims">{{t "vfy.unverified_note"}}</p>{{end}}
     </div>
   </section>
 
+  <section class="card panel vfy-decision d-{{.Decision}}" aria-labelledby="vfy-d" id="decision">
+    <div class="vfy-dec-head">
+      <h2 id="vfy-d">{{t "vfy.decision_title"}}</h2>
+      {{if eq .Decision "fused"}}<span class="chip chip-ok">{{t "vfy.dec_chip_fused"}}</span>{{else if eq .Decision "rejected"}}<span class="chip chip-amber">{{t "vfy.dec_chip_rejected"}}</span>{{else if eq .Decision "unusable"}}<span class="chip chip-grey">{{t "vfy.dec_chip_unusable"}}</span>{{end}}
+    </div>
+    {{if eq .Decision "fused"}}<p>{{t "vfy.dec_fused" .DecisionTrust}}</p>
+    {{else if eq .Decision "rejected"}}<p>{{t "vfy.dec_rejected"}}</p>
+    {{if .DecisionReasons}}<p class="section-title">{{t "vfy.dec_why"}}</p>
+    <ul class="reasons">{{range .DecisionReasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    <p class="small muted">{{t "result.trust_rejected" .DecisionTrust}}</p>
+    {{else if eq .Decision "unusable"}}<p>{{t "vfy.dec_unusable"}}</p>
+    {{if .DecisionReasons}}<ul class="reasons notes">{{range .DecisionReasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    {{else}}<p>{{t "vfy.dec_unknown"}}</p>{{end}}
+    {{if .DecisionAt}}<p class="small muted">{{t "vfy.dec_at" .DecisionAt}}</p>{{end}}
+  </section>
+
   {{if .HasRecord}}
   <div class="vfy-grid{{if ne .Status "verified"}} is-unverified{{end}}">
     <section class="card panel" aria-labelledby="vfy-result">
-      <h2 id="vfy-result">{{t "vfy.result"}}</h2>
+      <div class="vfy-dec-head"><h2 id="vfy-result">{{t "vfy.result"}}</h2>{{if eq .Decision "rejected"}}<span class="chip chip-amber">{{t "vfy.dec_chip_rejected"}}</span>{{end}}</div>
       {{if .Depth}}
       <p class="vfy-depth"><b>{{.Depth}}<small>cm</small></b><span>± {{.Sigma}} cm</span></p>
       {{else}}

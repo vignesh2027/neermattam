@@ -71,6 +71,15 @@ type Hotspot struct {
 	Unknown            bool         `json:"unknown"`
 	Blocks             []string     `json:"blocks"`
 	Reasons            []string     `json:"reasons"`
+	// Place is the nearest named road in the city's road graph, or nil.
+	Place *HotspotPlace `json:"place"`
+}
+
+// HotspotPlace names a hotspot after the nearest named road.
+type HotspotPlace struct {
+	Name      string  `json:"name"`
+	DistanceM float64 `json:"distance_m"`
+	Source    string  `json:"source"`
 }
 
 // Hotspots is GET /v1/hotspots.
@@ -224,7 +233,8 @@ type Readiness struct {
 
 // Readiness checks /readyz and reads its status. A 503 is an error.
 func (e *Engine) Readiness(ctx context.Context) (Readiness, error) {
-	raw, err := e.do(ctx, http.MethodGet, "/readyz", nil, 2*time.Second)
+	// The caller's context bounds the probe (READY_PROBE_TIMEOUT).
+	raw, err := e.do(ctx, http.MethodGet, "/readyz", nil, time.Minute)
 	if err != nil {
 		return Readiness{}, err
 	}

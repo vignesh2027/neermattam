@@ -21,7 +21,44 @@ type Stored struct {
 	Certificate  json.RawMessage `json:"certificate"`
 	UploadSHA256 string          `json:"upload_sha256"`
 	ReceivedAt   time.Time       `json:"received_at"`
+	// Decision is what the gateway did with the measurement once it had
+	// checked it: added it to the map, refused it, or found no depth. It is
+	// the gateway's own record, outside the signed certificate, and is nil
+	// for certificates kept before decisions were recorded.
+	Decision *Decision `json:"decision,omitempty"`
 }
+
+// Decision statuses.
+const (
+	DecisionFused    = "fused"
+	DecisionRejected = "rejected"
+	DecisionUnusable = "unusable"
+)
+
+// Decision is the gateway's verdict on a measured report.
+type Decision struct {
+	Status    string    `json:"status"`
+	Trust     float64   `json:"trust,omitempty"`
+	ReadingID string    `json:"reading_id,omitempty"`
+	Cell      string    `json:"cell,omitempty"`
+	DecidedAt time.Time `json:"decided_at"`
+	// Reasons are the checks that refused it (status rejected), or
+	// perception's own reasons (status unusable).
+	Reasons []DecisionReason `json:"reasons,omitempty"`
+}
+
+// DecisionReason is one reason, with its text in every page language
+// (English under "en"), written when the decision was made because the
+// arguments behind a translated sentence are not kept.
+type DecisionReason struct {
+	Rule    string            `json:"rule,omitempty"`
+	Outcome string            `json:"outcome,omitempty"`
+	Text    map[string]string `json:"text"`
+}
+
+// ErrNoCertificate is returned when a decision names a certificate the
+// store does not hold.
+var ErrNoCertificate = errors.New("no certificate with that id")
 
 // Store keeps certificates per measurement id: on disk under dir (the
 // newest maxDisk), with the newest maxMem also in memory; in memory only
@@ -85,6 +122,16 @@ func (s *Store) Put(id string, st Stored) error {
 		s.prune()
 	}
 	return nil
+}
+
+// SetDecision records the gateway's decision beside a stored certificate.
+func (s *Store) SetDecision(id string, d Decision) error {
+	st, ok := s.Get(id)
+	if !ok {
+		return ErrNoCertificate
+	}
+	st.Decision = &d
+	return s.Put(id, st)
 }
 
 // Get returns a certificate, from memory or disk.

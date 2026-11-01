@@ -580,8 +580,11 @@ func (a *App) apiStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // readyz reports 200 only when both the engine and perception are ready.
+// A probe that times out or cannot connect does not flip readiness on its
+// own: within READY_GRACE of that service's last successful probe the last
+// answer stands, and the body says so (ready.go).
 func (a *App) readyz(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), a.Cfg.ReadyProbeTimeout)
 	defer cancel()
 	var wg sync.WaitGroup
 	var engErr, perErr error
@@ -590,6 +593,18 @@ func (a *App) readyz(w http.ResponseWriter, r *http.Request) {
 	go func() { defer wg.Done(); eng, engErr = a.Engine.Readiness(ctx) }()
 	go func() { defer wg.Done(); perErr = a.Perception.Ready(ctx) }()
 	wg.Wait()
+	now := time.Now()
+	engNote, perNote := "", ""
+	if engErr == nil {
+		a.ready.ok("engine", now, eng)
+	} else if last, age, ok := a.ready.lean("engine", engErr, now, a.Cfg.ReadyGrace); ok {
+		eng, engNote, engErr = last, staleNote(engErr, age), nil
+	}
+	if perErr == nil {
+		a.ready.ok("perception", now, upstream.Readiness{})
+	} else if _, age, ok := a.ready.lean("perception", perErr, now, a.Cfg.ReadyGrace); ok {
+		perNote, perErr = staleNote(perErr, age), nil
+	}
 	status := func(err error) string {
 		if err == nil {
 			return "ready"
@@ -606,6 +621,12 @@ func (a *App) readyz(w http.ResponseWriter, r *http.Request) {
 		"engine_stream":      a.Hub.UpstreamConnected(),
 		"whatsapp":           whatsapp,
 		"simulated_scenario": a.Cfg.Demo,
+	}
+	if engNote != "" {
+		body["engine_note"] = engNote
+	}
+	if perNote != "" {
+		body["perception_note"] = perNote
 	}
 	code := http.StatusOK
 	body["status"] = "ready"

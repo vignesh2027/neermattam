@@ -75,8 +75,10 @@ RUN uv pip install --python /opt/venv/bin/python --no-deps . \
 COPY --from=weights /models /opt/neermattam/models
 COPY --from=engine /neermattam-engine /opt/neermattam/bin/neermattam-engine
 COPY --from=go /out/neermattam-gateway /out/neermattam-keys /out/neermattam-launcher /opt/neermattam/bin/
-# One road extract per city: chennai, mumbai, bengaluru, hyderabad, kolkata, delhi.
+# One road extract per city: chennai, mumbai, bengaluru, hyderabad, kolkata, delhi, visakhapatnam.
 COPY data/osm/ /opt/neermattam/data/osm/
+# BUILD_INFO names the source commit; the gateway's About page reads it
+# (BUILD_INFO_PATH, internal/buildinfo).
 COPY DATA_LICENSE BUILD_INFO /opt/neermattam/
 
 # Shared configuration. Platform settings (Space variables, Modal

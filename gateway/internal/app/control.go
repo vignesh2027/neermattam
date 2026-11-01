@@ -111,7 +111,8 @@ func (a *App) controlLogout(w http.ResponseWriter, r *http.Request) {
 // simulated Chennai scenario.
 func (a *App) controlDemoPage(w http.ResponseWriter, r *http.Request) {
 	if !a.Cfg.Demo {
-		http.Error(w, "The public control room demo runs only with the simulated scenario (DEMO=1).", http.StatusNotFound)
+		// The public room exists only with the simulated scenario (DEMO=1).
+		a.notFound(w, r)
 		return
 	}
 	q := r.URL.Query()
@@ -154,7 +155,7 @@ func (a *App) controlView(ctx context.Context, lang, city, base string, demo boo
 		go func() { defer wg.Done(); rec, e3 = a.Engine.Recession(ctx, cell) }()
 	}
 	wg.Wait()
-	v := web.NewControlView(lang, city, base, demo, sum, hs, cell)
+	v := web.NewControlView(lang, city, base, demo, sum, hs, cell, a.Origins.Label)
 	if e1 != nil || e2 != nil {
 		v.Error = "ctl.engine_down"
 	}

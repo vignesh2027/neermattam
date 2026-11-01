@@ -556,7 +556,7 @@ func TestPagesRender(t *testing.T) {
 		"/":       {"Forecasts say where Chennai will flood.", "Open the live map", "Built on Meta", "Muse Spark Open", "Who it is for", "Honest numbers", "Advisory, always", "pv-cells", "Watch the models check each other"},
 		"/map":    {"Chennai flood depth, live", "Simulated scenario", "Report water here", "Advisory only", "maplibre-gl-5.6.0/maplibre-gl"},
 		"/report": {"Measure the water from one photo", "Use my location", "12 MB", "30 seconds"},
-		"/route":  {"Route around the water", "Velachery station", "Chennai Central", "Two-wheeler"},
+		"/route":  {"Route around the water", "Kodambakkam station", "Guindy station", "SIPCOT IT Park, Siruseri", "Two-wheeler"},
 		"/route?from=12.9791,80.2209&to=13.0067,80.2206&vehicle=car": {"Water-aware route · Car", "4.2 km", "37 of 37", "Simulated scenario", `id="route-data"`},
 		"/about": {"Muse Spark Open", "SAM 3.1", "Voice reports", "ODbL", "OpenFreeMap", "Limitations"},
 	}

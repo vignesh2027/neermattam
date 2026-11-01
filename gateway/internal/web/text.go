@@ -112,3 +112,13 @@ func ErrorText(lang string, e *report.Error) string {
 	}
 	return i18n.T(lang, "err."+e.Key, localArgs(lang, e.Args)...)
 }
+
+// ReasonTexts is a check's reason in every page language, keyed by
+// language code, for the decision kept beside a certificate.
+func ReasonTexts(r verify.RuleResult) map[string]string {
+	out := make(map[string]string, len(i18n.Languages))
+	for _, l := range i18n.Languages {
+		out[l.Code] = ReasonText(l.Code, r)
+	}
+	return out
+}

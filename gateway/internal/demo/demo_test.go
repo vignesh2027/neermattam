@@ -9,7 +9,7 @@ import (
 )
 
 func TestPlanIsLabelledAndInsideTheServiceArea(t *testing.T) {
-	area, _ := config.ParseBBox("80.10,12.85,80.33,13.24")
+	area, _ := config.ParseBBox("80.10,12.80,80.33,13.24")
 	now := time.Now()
 	plan := (&Seeder{}).Plan(now)
 	if len(plan) < 300 {
