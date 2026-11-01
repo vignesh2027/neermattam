@@ -1,5 +1,8 @@
-// Package demo seeds the engine with a SIMULATED flood scenario so the map
-// is alive before any real report arrives. The places are low points that
+// Package demo seeds the engine's separate replay map with a SIMULATED flood
+// scenario, "Replay a past flood: Cyclone Michaung, December 2023,
+// simulated", which a visitor switches on. It never touches the live map:
+// the seeder only posts through an engine client on the replay layer, and
+// stops if the engine does not confirm that layer. The places are low points that
 // flooded during Cyclone Michaung in December 2023 (Velachery, Pallikaranai,
 // T. Nagar and the Mambalam subways); every depth here is invented for the
 // demonstration. Simulated readings carry reading ids starting with "sim_",
@@ -11,6 +14,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -63,7 +67,11 @@ var vaguePoints = [][2]float64{
 	{13.1240, 80.2120}, {13.1210, 80.2330}, {13.0382, 80.1565}, {12.9171, 80.1923}, {12.9516, 80.1462},
 }
 
-// Seeder posts the scenario and keeps it alive.
+// ErrNotReplay means the engine client or the engine itself is not on the
+// replay layer, so posting would put simulated water on the live map.
+var ErrNotReplay = errors.New("the simulated scenario is only ever posted to the engine's replay layer, and this engine did not confirm it")
+
+// Seeder posts the scenario to the replay map and keeps it alive.
 type Seeder struct {
 	Engine  *upstream.Engine
 	Origins *live.Origins
@@ -181,7 +189,22 @@ func (s *Seeder) Plan(now time.Time) []upstream.Reading {
 // Seed posts the whole scenario with a few workers, then labels every cell
 // it produced as simulated.
 func (s *Seeder) Seed(ctx context.Context, area string) (int, error) {
+	if s.Engine.Layer() != upstream.LayerReplay {
+		return 0, ErrNotReplay
+	}
 	readings := s.Plan(time.Now())
+	// One reading first: an engine that ignores the layer answers without
+	// it, and the rest are not sent.
+	if len(readings) > 0 {
+		res, err := s.Engine.PostReading(ctx, readings[0])
+		if err != nil {
+			return 0, err
+		}
+		if res.Layer != upstream.LayerReplay {
+			return 0, ErrNotReplay
+		}
+		s.Origins.Mark(res.Cell, true)
+	}
 	jobs := make(chan upstream.Reading)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -199,6 +222,10 @@ func (s *Seeder) Seed(ctx context.Context, area string) (int, error) {
 					if firstErr == nil {
 						firstErr = err
 					}
+				} else if res.Layer != upstream.LayerReplay {
+					if firstErr == nil {
+						firstErr = ErrNotReplay
+					}
 				} else {
 					posted++
 					s.Origins.Mark(res.Cell, true)
@@ -207,7 +234,7 @@ func (s *Seeder) Seed(ctx context.Context, area string) (int, error) {
 			}
 		}()
 	}
-	for _, r := range readings {
+	for _, r := range readings[min(1, len(readings)):] {
 		select {
 		case jobs <- r:
 		case <-ctx.Done():
@@ -246,8 +273,12 @@ func (s *Seeder) Run(ctx context.Context, area string) {
 	for {
 		n, err := s.Seed(ctx, area)
 		if err == nil {
-			s.Log.Info("simulated scenario seeded", "readings", n)
+			s.Log.Info("simulated replay seeded on the engine's replay layer", "readings", n)
 			break
+		}
+		if errors.Is(err, ErrNotReplay) {
+			s.Log.Error("simulated replay not seeded: the engine has no replay layer; the live map is untouched", "error", err.Error())
+			return
 		}
 		s.Log.Warn("simulated scenario not seeded yet; retrying", "error", err.Error())
 		select {
@@ -294,10 +325,17 @@ func (s *Seeder) dripOne(ctx context.Context) {
 	if !ok {
 		return
 	}
+	if s.Engine.Layer() != upstream.LayerReplay {
+		return
+	}
 	s.Origins.Expect(lat, lon, true)
 	res, err := s.Engine.PostReading(ctx, r)
 	if err != nil {
 		s.Log.Warn("simulated reading failed", "error", err.Error())
+		return
+	}
+	if res.Layer != upstream.LayerReplay {
+		s.Log.Error("simulated reading answered without the replay layer; drip stopped", "cell", res.Cell)
 		return
 	}
 	s.Origins.Mark(res.Cell, true)

@@ -76,6 +76,16 @@ type Page struct {
 
 	// Sites is the Critical sites page (sites.go).
 	Sites *SitesView
+
+	// Replay is the switch for the simulated Cyclone Michaung replay, on
+	// pages of the city that has it (maplive.go).
+	Replay ReplayView
+	// Overview is every city's real state for the map's city strip, and
+	// Photos the measured archival photos of the page's city (maplive.go).
+	Overview []CityStatus
+	Photos   []MapPhoto
+	// PhotosJSON is the photos layer as GeoJSON for the map glue.
+	PhotosJSON template.JS
 }
 
 // BuildView is the repository and the deployed commit.
@@ -153,6 +163,7 @@ func langFuncs(a *Assets, lang string) template.FuncMap {
 		"asset":      a.URL,
 		"ago":        func(t time.Time) string { return Ago(lang, t) },
 		"place":      func(p string) string { return Place(lang, p) },
+		"pair":       func(a any, b bool) Pair { return Pair{A: a, B: b} },
 	}
 	for k, v := range i18n.Funcs(lang) {
 		f[k] = v

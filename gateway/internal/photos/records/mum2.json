@@ -1,0 +1,336 @@
+{
+ "id": "mum2",
+ "city": "mumbai",
+ "place": "Kharghar, Navi Mumbai",
+ "lat": 19.0256,
+ "lon": 73.0553,
+ "coord_source": "camera_geotag",
+ "photo_date": "2011-07-07",
+ "measured_on": "2026-11-01",
+ "title": "Kharghar Monsoon 2011.jpg",
+ "source_url": "https://commons.wikimedia.org/wiki/File:Kharghar_Monsoon_2011.jpg",
+ "author": "Michael Kohli from Navi Mumbai, India",
+ "licence": "CC BY-SA 2.0",
+ "licence_url": "https://creativecommons.org/licenses/by-sa/2.0",
+ "file_sha256": "251395b6b7f05925842078e3b67ed35f8b8f67bdf0591112fbe11bf71f370c3f",
+ "wall_s": 50.6,
+ "measurement": {
+  "measurement_id": "m_01M6C1PSV2KTNZE0HTVZ95JKH3",
+  "usable": true,
+  "reasons": [
+   "standing water visible",
+   "the time budget of 55 s ran out before every check was done; this is the best answer reached in time",
+   "two wheeler 1 wheel: the scene model did not confirm the mask (time budget reached)",
+   "two wheeler 2 wheel: the scene model did not confirm the mask (time budget reached)",
+   "water: only the part confirmed before the time budget ran out is used",
+   "no wheel could be measured; depth is the scene model's visual estimate, not a measurement",
+   "estimate based on: Water covers road with shallow sheet visible across wheel lower rims"
+  ],
+  "reason_codes": [
+   {
+    "code": "water_visible",
+    "args": {}
+   },
+   {
+    "code": "budget_ran_out",
+    "args": {
+     "budget_s": 55
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "two wheeler 1 wheel",
+     "detail": "time budget reached"
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "two wheeler 2 wheel",
+     "detail": "time budget reached"
+    }
+   },
+   {
+    "code": "water_partial_budget",
+    "args": {}
+   },
+   {
+    "code": "estimate_only",
+    "args": {}
+   },
+   {
+    "code": "estimate_basis",
+    "args": {
+     "basis": "Water covers road with shallow sheet visible across wheel lower rims"
+    }
+   }
+  ],
+  "depth_cm": 13.0,
+  "depth_sigma_cm": 20.0,
+  "reference": null,
+  "waterline": null,
+  "velocity_mps": null,
+  "velocity_sigma_mps": null,
+  "confidence": 0.21,
+  "models": {
+   "scene": "muse-spark-open",
+   "masks": "sam-2.1-hiera-small"
+  },
+  "timings_ms": {
+   "scene": 10615,
+   "agent": 39408,
+   "geometry": 0
+  },
+  "cost_usd": 0.021103,
+  "method": "model_estimate",
+  "model_estimate": {
+   "depth_cm": 13.0,
+   "depth_sigma_cm": 20.0,
+   "basis": "Water covers road with shallow sheet visible across wheel lower rims",
+   "model": "muse-spark-open"
+  },
+  "agent_trace": [
+   {
+    "step": "scene",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "photo 1600x960 px",
+    "output": "water visible; references: two_wheeler_wheel, two_wheeler_wheel, two_wheeler_wheel; own estimate 13 cm",
+    "decision": "search 2 vehicle boxes for wheels, check 3 wheels and segment the water",
+    "latency_ms": 10615,
+    "prompt_version": "scene@cf7a74eb23ee",
+    "decision_code": {
+     "code": "scene_search_vehicles",
+     "args": {
+      "vehicles": 2,
+      "wheels": 3
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [608,461,1089,692] px + points [[832, 576]]",
+    "output": "mask 93174 px (6% of photo)",
+    "decision": "verify",
+    "latency_ms": 9535,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler 1 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [169,696,814,960] px",
+    "output": "75 proposals from 24 grid points and 1 dark blob; best: wheel 0.66 = shape 0.88 (fit 1.00, arc 159 deg, ratio 0.72, spill 0.00, closed ring) x dark 0.50 x size 1.00; wheel 0.34 = shape 0.47 (fit 1.00, arc 84 deg, ratio 0.52, spill 0.00, closed ring) x dark 0.46 x size 1.00",
+    "decision": "verify the best two",
+    "latency_ms": 18554,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler 2 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [1180,505,1376,665] px",
+    "output": "83 proposals from 24 grid points and 4 dark blobs; best: wheel 0.47 = shape 0.48 (fit 1.00, arc 87 deg, ratio 0.85, spill 0.00) x dark 0.94 x size 1.00; wheel 0.17 = shape 0.19 (fit 0.77, arc 57 deg, ratio 0.75, spill 0.00, closed ring) x dark 0.92 x size 0.92",
+    "decision": "verify the best two",
+    "latency_ms": 19946,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the proposed region tinted",
+    "output": "is_water=true, coverage partial; Magenta is water but sits behind the rider and misses the flooded water directly around the motorcycle wheels.",
+    "decision": "refine with box [288,557,832,845] px + point [496, 720]",
+    "latency_ms": 12580,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[288,557,832,845]",
+      "points": "point [496, 720]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [288,557,832,845] px + points [[496, 720]]",
+    "output": "mask 88875 px (6% of photo)",
+    "decision": "verify",
+    "latency_ms": 673,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler 1 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [23,563,598,960] px with 2 outlines A and B",
+    "output": "chose B, shape 0.47 (fit 1.00, arc 84 deg, ratio 0.52, spill 0.00, closed ring), edge ratio 1.85, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.39, is_target=false, outline partial, view head_on, edge visible 0.55, waterline visible; B follows the tyre outer edge on the left and top but its right edge cuts diagonally across the tyre missing the right side, while A includes the mudguard and f",
+    "decision": "refine with box [201,769,408,904] px + points [210,841], [244,787], [354,787], [391,841] - points [302,863], [285,756], [368,821]",
+    "latency_ms": 9115,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[201,769,408,904]",
+      "points": "points [210,841], [244,787], [354,787], [391,841] - points [302,863], [285,756], [368,821]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler 1 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [201,769,408,904] px + points [210,841], [244,787], [354,787], [391,841] - points [302,863], [285,756], [368,821]",
+    "output": "6 proposals, 6 distinct; best shapes 0.45, 0.43",
+    "decision": "verify the best two",
+    "latency_ms": 2148,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the proposed region tinted",
+    "output": "is_water=false, coverage wrong; Magenta mask is on the motorcycle and rider, not the floodwater surface.",
+    "decision": "refine with box [560,461,1120,672] px + point [832, 557]",
+    "latency_ms": 11602,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[560,461,1120,672]",
+      "points": "point [832, 557]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [560,461,1120,672] px + points [[832, 557]]",
+    "output": "mask 91507 px (6% of photo)",
+    "decision": "verify",
+    "latency_ms": 660,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the region tinted",
+    "output": "error: the time budget ran out before this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler 2 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [1100,416,1356,672] px with 2 outlines A and B",
+    "output": "chose A, shape 0.48 (fit 1.00, arc 87 deg, ratio 0.85, spill 0.00), edge ratio 0.91, not a tyre edge: 3 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.55, is_target=true, outline good, view side, edge visible 0.75, waterline visible; A tightly follows the front tyre outer edge above water while B outlines the water reflection",
+    "decision": "refine with box [1219,502,1274,568] px + points [1223,543], [1242,509], [1265,543], [1247,563] - points [1246,540], [1243,499], [1241,575]",
+    "latency_ms": 17825,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[1219,502,1274,568]",
+      "points": "points [1223,543], [1242,509], [1265,543], [1247,563] - points [1246,540], [1243,499], [1241,575]"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler 1 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [0,464,641,960] px",
+    "output": "error: the time budget ran out during this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "budget",
+    "target": "photo",
+    "model": "pipeline",
+    "input": "time budget 55 s",
+    "output": "50 s used; checks still open were stopped",
+    "decision": "answer with what was verified in time",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "budget_answer",
+     "args": {}
+    }
+   },
+   {
+    "step": "estimate",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "no measurable wheel",
+    "output": "13 cm, sigma 20 cm",
+    "decision": "report model estimate",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "report_estimate",
+     "args": {}
+    }
+   }
+  ],
+  "captured_at": "2011-07-07T10:31:01",
+  "input_sha256": "251395b6b7f05925842078e3b67ed35f8b8f67bdf0591112fbe11bf71f370c3f",
+  "certificate": {
+   "format": "neermattam-certificate/1",
+   "alg": "Ed25519",
+   "key_id": "ed25519:5cadd6dd4ddca908",
+   "payload": "{\"checks\":{\"failures\":[],\"rules\":[\"schema\",\"grid\",\"inside image\",\"allowed values\"]},\"decision\":{\"confidence\":0.21,\"depth_cm\":13.0,\"depth_sigma_cm\":20.0,\"method\":\"model_estimate\",\"reasons\":[\"standing water visible\",\"the time budget of 55 s ran out before every check was done; this is the best answer reached in time\",\"two wheeler 1 wheel: the scene model did not confirm the mask (time budget reached)\",\"two wheeler 2 wheel: the scene model did not confirm the mask (time budget reached)\",\"water: only the part confirmed before the time budget ran out is used\",\"no wheel could be measured; depth is the scene model's visual estimate, not a measurement\",\"estimate based on: Water covers road with shallow sheet visible across wheel lower rims\"],\"usable\":true},\"format\":\"neermattam-certificate/1\",\"geometry\":{\"estimate\":{\"basis\":\"Water covers road with shallow sheet visible across wheel lower rims\",\"depth_cm\":13.0,\"high_cm\":18.0,\"low_cm\":8.0,\"sigma_cm\":20.0},\"person\":null,\"wheel\":null},\"input\":{\"height\":960,\"kind\":\"image\",\"sha256\":\"251395b6b7f05925842078e3b67ed35f8b8f67bdf0591112fbe11bf71f370c3f\",\"width\":1600},\"issued_at\":\"2026-11-01T17:14:55Z\",\"measurement_id\":\"m_01M6C1PSV2KTNZE0HTVZ95JKH3\",\"models\":[{\"name\":\"muse-spark-open\",\"role\":\"scene\",\"version\":\"meta-models/muse-spark-open-1026 on Baseten, reasoning effort low (scene), low (checks), temperature 0.0, seed 7\"},{\"name\":\"sam-2.1-hiera-small\",\"role\":\"masks\",\"version\":\"facebook/sam2.1-hiera-small, float32, run locally\"}],\"prompts\":[{\"id\":\"scene@cf7a74eb23ee\",\"sha256\":\"cf7a74eb23eedb37d70f6aa80ffd277a5c0496a18e5a3e05e04dd1f23c32b88c\"},{\"id\":\"verify-water@2229de9c965d\",\"sha256\":\"2229de9c965d094a5a96fb684cc5d73aeb15a9f47efd4d57cecb7f4913b913a8\"},{\"id\":\"verify-wheel@1d51d73f5037\",\"sha256\":\"1d51d73f5037ef5bb8d86353e2f657fe9937eaf515feccd6d780bdf5681ae8bf\"}],\"steps\":[{\"decision\":\"search 2 vehicle boxes for wheels, check 3 wheels and segment the water\",\"latency_ms\":10615,\"model\":\"muse-spark-open\",\"prompt_version\":\"scene@cf7a74eb23ee\",\"step\":\"scene\",\"target\":\"photo\"},{\"decision\":\"verify\",\"latency_ms\":9535,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"verify the best two\",\"latency_ms\":18554,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler 1 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":19946,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"refine with box [288,557,832,845] px + point [496, 720]\",\"latency_ms\":12580,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"verify\",\"latency_ms\":673,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"refine with box [201,769,408,904] px + points [210,841], [244,787], [354,787], [391,841] - points [302,863], [285,756], [368,821]\",\"latency_ms\":9115,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler 1 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":2148,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler 1 wheel\"},{\"decision\":\"refine with box [560,461,1120,672] px + point [832, 557]\",\"latency_ms\":11602,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"verify\",\"latency_ms\":660,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"refine with box [1219,502,1274,568] px + points [1223,543], [1242,509], [1265,543], [1247,563] - points [1246,540], [1243,499], [1241,575]\",\"latency_ms\":17825,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler 1 wheel\"},{\"decision\":\"answer with what was verified in time\",\"latency_ms\":0,\"model\":\"pipeline\",\"prompt_version\":null,\"step\":\"budget\",\"target\":\"photo\"},{\"decision\":\"report model estimate\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":null,\"step\":\"estimate\",\"target\":\"photo\"}]}",
+   "signature": "_pUbWxLIhBDo4BgYIBd9K9gdqqZ0x1DPlPI8kDTY6CG3gz4OE5zrBw0HT4j-AFhaKGObFCdDSDtidhxZcRjrAw"
+  }
+ }
+}

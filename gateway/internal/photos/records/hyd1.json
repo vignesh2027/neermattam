@@ -1,0 +1,461 @@
+{
+ "id": "hyd1",
+ "city": "hyderabad",
+ "place": "Dabeerpura",
+ "lat": 17.3678,
+ "lon": 78.4872,
+ "coord_source": "place_name",
+ "photo_date": "2015-09-06",
+ "measured_on": "2026-11-01",
+ "title": "Dabeerpura darwaza after a heavy rain.jpg",
+ "source_url": "https://commons.wikimedia.org/wiki/File:Dabeerpura_darwaza_after_a_heavy_rain.jpg",
+ "author": "Mohammed Mubashir",
+ "licence": "CC BY-SA 4.0",
+ "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+ "file_sha256": "c932a90a0b473b1825deec3609ca0624475a121396c94bb180ee138ac73cae4d",
+ "wall_s": 50.2,
+ "measurement": {
+  "measurement_id": "m_01M6C1WFRFNZF8351AEGJ1M306",
+  "usable": true,
+  "reasons": [
+   "standing water visible",
+   "the time budget of 55 s ran out before every check was done; this is the best answer reached in time",
+   "two wheeler 2 wheel: the scene model did not confirm the mask (time budget reached)",
+   "two-wheeler wheel 3: the scene model did not confirm the mask (time budget reached)",
+   "water: only the part confirmed before the time budget ran out is used",
+   "person 1: the person is not standing upright (sitting)",
+   "person 2: the person is not standing upright (sitting)",
+   "two-wheeler wheel: water does not meet the wheel",
+   "no wheel could be measured; depth is the scene model's visual estimate, not a measurement",
+   "estimate based on: Water consistently covers lower tyres and reaches ankles across open street"
+  ],
+  "reason_codes": [
+   {
+    "code": "water_visible",
+    "args": {}
+   },
+   {
+    "code": "budget_ran_out",
+    "args": {
+     "budget_s": 55
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "two wheeler 2 wheel",
+     "detail": "time budget reached"
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "two-wheeler wheel 3",
+     "detail": "time budget reached"
+    }
+   },
+   {
+    "code": "water_partial_budget",
+    "args": {}
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 1,
+     "failure": "posture",
+     "detail": "sitting"
+    }
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 2,
+     "failure": "posture",
+     "detail": "sitting"
+    }
+   },
+   {
+    "code": "wheel_failed",
+    "args": {
+     "kind": "two_wheeler_wheel",
+     "failure": "no_water_contact"
+    }
+   },
+   {
+    "code": "estimate_only",
+    "args": {}
+   },
+   {
+    "code": "estimate_basis",
+    "args": {
+     "basis": "Water consistently covers lower tyres and reaches ankles across open street"
+    }
+   }
+  ],
+  "depth_cm": 23.0,
+  "depth_sigma_cm": 20.0,
+  "reference": null,
+  "waterline": null,
+  "velocity_mps": null,
+  "velocity_sigma_mps": null,
+  "confidence": 0.21,
+  "models": {
+   "scene": "muse-spark-open",
+   "masks": "sam-2.1-hiera-small"
+  },
+  "timings_ms": {
+   "scene": 18925,
+   "agent": 31095,
+   "geometry": 27
+  },
+  "cost_usd": 0.031485,
+  "method": "model_estimate",
+  "model_estimate": {
+   "depth_cm": 23.0,
+   "depth_sigma_cm": 20.0,
+   "basis": "Water consistently covers lower tyres and reaches ankles across open street",
+   "model": "muse-spark-open"
+  },
+  "agent_trace": [
+   {
+    "step": "scene",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "photo 1920x1280 px",
+    "output": "water visible; references: two_wheeler_wheel, two_wheeler_wheel, two_wheeler_wheel, person, person; own estimate 23 cm",
+    "decision": "search 4 vehicle boxes for wheels, check 3 wheels and segment the water",
+    "latency_ms": 18925,
+    "prompt_version": "scene@cf7a74eb23ee",
+    "decision_code": {
+     "code": "scene_search_vehicles",
+     "args": {
+      "vehicles": 4,
+      "wheels": 3
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [346,870,827,1179] px + points [[576, 1024]]",
+    "output": "mask 78540 px (3% of photo)",
+    "decision": "verify",
+    "latency_ms": 2971,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler wheel 3",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [73,800,139,861] px + points [81,826], [106,800], [131,826] - points [106,813], [106,806]",
+    "output": "6 proposals, 6 distinct; best shapes 0.50, 0.47",
+    "decision": "verify the best two",
+    "latency_ms": 4024,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler 1 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [777,790,994,916] px",
+    "output": "81 proposals from 24 grid points and 3 dark blobs; best: wheel 0.52 = shape 0.68 (fit 1.00, arc 141 deg, ratio 0.69, spill 0.03, closed ring) x dark 0.53 x size 1.00; wheel 0.32 = shape 0.40 (fit 1.00, arc 72 deg, ratio 0.52, spill 0.00, closed ring) x dark 0.59 x size 1.00",
+    "decision": "verify the best two",
+    "latency_ms": 8511,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler 2 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [1779,800,1920,909] px",
+    "output": "84 proposals from 24 grid points and 4 dark blobs; best: wheel 0.43 = shape 0.53 (fit 1.00, arc 96 deg, ratio 0.71, spill 0.00, closed ring) x dark 0.62 x size 1.00; wheel 0.42 = shape 0.55 (fit 1.00, arc 99 deg, ratio 0.59, spill 0.00, closed ring) x dark 0.53 x size 1.00",
+    "decision": "verify the best two",
+    "latency_ms": 11839,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the proposed region tinted",
+    "output": "is_water=true, coverage partial; Magenta is water but small foreground patch missing the main flooded street around people and vehicles.",
+    "decision": "refine with box [288,794,1632,1254] px + point [983, 1039]",
+    "latency_ms": 10643,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[288,794,1632,1254]",
+      "points": "point [983, 1039]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [288,794,1632,1254] px + points [[983, 1039]]",
+    "output": "mask 541579 px (22% of photo)",
+    "decision": "verify",
+    "latency_ms": 1049,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler 1 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [748,704,1004,960] px with 2 outlines A and B",
+    "output": "chose A, shape 0.68 (fit 1.00, arc 141 deg, ratio 0.69, spill 0.03, closed ring), edge ratio 2.60, box agreement 0.85, is_target=true, outline good, view side, edge visible 0.65, waterline visible; A follows the round outer edge of the rear bicycle tyre above the water while B cuts off the curve with straight edges",
+    "decision": "accept",
+    "latency_ms": 9374,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "accept",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler wheel 3",
+    "model": "muse-spark-open",
+    "input": "crop [0,700,232,956] px with 2 outlines A and B",
+    "output": "chose NONE, is_target=false, outline wrong, view head_on, edge visible 0.55, waterline visible; Both magenta outlines enclose the mudguard, lights and number plate, not the narrow upright tyre band above water.",
+    "decision": "refine with box [89,806,113,850] px + points [92,833], [95,818], [107,833] - points [100,829], [81,827], [100,799]",
+    "latency_ms": 15429,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[89,806,113,850]",
+      "points": "points [92,833], [95,818], [107,833] - points [100,829], [81,827], [100,799]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler wheel 3",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [89,806,113,850] px + points [92,833], [95,818], [107,833] - points [100,829], [81,827], [100,799]",
+    "output": "6 proposals, 6 distinct; best shapes 0.00, 0.00",
+    "decision": "verify the best two",
+    "latency_ms": 1451,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler 2 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [1678,701,1920,957] px with 2 outlines A and B",
+    "output": "chose B, shape 0.55 (fit 1.00, arc 99 deg, ratio 0.59, spill 0.00, closed ring), edge ratio 0.76, box agreement 0.74, is_target=true, outline good, view side, edge visible 0.65, waterline visible; B follows the round outer edge of the front tyre above water while A traces only the narrow front mudguard edge",
+    "decision": "refine with box [1785,800,1812,857] px + points [1787,830], [1804,802], [1823,830], [1814,807] - points [1807,833], [1810,802], [1800,825]",
+    "latency_ms": 11670,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[1785,800,1812,857]",
+      "points": "points [1787,830], [1804,802], [1823,830], [1814,807] - points [1807,833], [1810,802], [1800,825]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler 2 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [1785,800,1812,857] px + points [1787,830], [1804,802], [1823,830], [1814,807] - points [1807,833], [1810,802], [1800,825]",
+    "output": "6 proposals, 6 distinct; best shapes 0.77, 0.70",
+    "decision": "verify the best two",
+    "latency_ms": 1554,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler 2 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [1688,699,1920,955] px",
+    "output": "error: the time budget ran out before this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the region tinted",
+    "output": "error: the time budget ran out during this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler wheel 3",
+    "model": "muse-spark-open",
+    "input": "crop [0,700,230,956] px",
+    "output": "error: the time budget ran out during this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "budget",
+    "target": "photo",
+    "model": "pipeline",
+    "input": "time budget 55 s",
+    "output": "50 s used; checks still open were stopped",
+    "decision": "answer with what was verified in time",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "budget_answer",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "people",
+    "model": "sam-2.1-hiera-small",
+    "input": "2 person boxes with head and body points (segmented during the checks)",
+    "output": "2 masks",
+    "decision": "measure each against the stature prior",
+    "latency_ms": 2164,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "measure_people",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water below people",
+    "model": "sam-2.1-hiera-small",
+    "input": "2 bands just below people (segmented during the checks)",
+    "output": "2 water masks",
+    "decision": "check that each outline ends at water",
+    "latency_ms": 9739,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "check_water_below",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 1",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the person is not standing upright (sitting)",
+    "decision": "declined",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 2",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the person is not standing upright (sitting)",
+    "decision": "declined",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "two wheeler wheel 1",
+    "model": "geometry",
+    "input": "wheel and water masks",
+    "output": "water does not meet the wheel",
+    "decision": "rejected",
+    "latency_ms": 26,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "rejected",
+     "args": {}
+    }
+   },
+   {
+    "step": "estimate",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "no measurable wheel",
+    "output": "23 cm, sigma 20 cm",
+    "decision": "report model estimate",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "report_estimate",
+     "args": {}
+    }
+   }
+  ],
+  "captured_at": null,
+  "input_sha256": "c932a90a0b473b1825deec3609ca0624475a121396c94bb180ee138ac73cae4d",
+  "certificate": {
+   "format": "neermattam-certificate/1",
+   "alg": "Ed25519",
+   "key_id": "ed25519:5cadd6dd4ddca908",
+   "payload": "{\"checks\":{\"failures\":[],\"rules\":[\"schema\",\"grid\",\"inside image\",\"allowed values\"]},\"decision\":{\"confidence\":0.21,\"depth_cm\":23.0,\"depth_sigma_cm\":20.0,\"method\":\"model_estimate\",\"reasons\":[\"standing water visible\",\"the time budget of 55 s ran out before every check was done; this is the best answer reached in time\",\"two wheeler 2 wheel: the scene model did not confirm the mask (time budget reached)\",\"two-wheeler wheel 3: the scene model did not confirm the mask (time budget reached)\",\"water: only the part confirmed before the time budget ran out is used\",\"person 1: the person is not standing upright (sitting)\",\"person 2: the person is not standing upright (sitting)\",\"two-wheeler wheel: water does not meet the wheel\",\"no wheel could be measured; depth is the scene model's visual estimate, not a measurement\",\"estimate based on: Water consistently covers lower tyres and reaches ankles across open street\"],\"usable\":true},\"format\":\"neermattam-certificate/1\",\"geometry\":{\"estimate\":{\"basis\":\"Water consistently covers lower tyres and reaches ankles across open street\",\"depth_cm\":23.0,\"high_cm\":30.0,\"low_cm\":15.0,\"sigma_cm\":20.0},\"person\":null,\"wheel\":null},\"input\":{\"height\":1280,\"kind\":\"image\",\"sha256\":\"c932a90a0b473b1825deec3609ca0624475a121396c94bb180ee138ac73cae4d\",\"width\":1920},\"issued_at\":\"2026-11-01T17:18:01Z\",\"measurement_id\":\"m_01M6C1WFRFNZF8351AEGJ1M306\",\"models\":[{\"name\":\"muse-spark-open\",\"role\":\"scene\",\"version\":\"meta-models/muse-spark-open-1026 on Baseten, reasoning effort low (scene), low (checks), temperature 0.0, seed 7\"},{\"name\":\"sam-2.1-hiera-small\",\"role\":\"masks\",\"version\":\"facebook/sam2.1-hiera-small, float32, run locally\"}],\"prompts\":[{\"id\":\"scene@cf7a74eb23ee\",\"sha256\":\"cf7a74eb23eedb37d70f6aa80ffd277a5c0496a18e5a3e05e04dd1f23c32b88c\"},{\"id\":\"verify-water@2229de9c965d\",\"sha256\":\"2229de9c965d094a5a96fb684cc5d73aeb15a9f47efd4d57cecb7f4913b913a8\"},{\"id\":\"verify-wheel@1d51d73f5037\",\"sha256\":\"1d51d73f5037ef5bb8d86353e2f657fe9937eaf515feccd6d780bdf5681ae8bf\"}],\"steps\":[{\"decision\":\"search 4 vehicle boxes for wheels, check 3 wheels and segment the water\",\"latency_ms\":18925,\"model\":\"muse-spark-open\",\"prompt_version\":\"scene@cf7a74eb23ee\",\"step\":\"scene\",\"target\":\"photo\"},{\"decision\":\"verify\",\"latency_ms\":2971,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"verify the best two\",\"latency_ms\":4024,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler wheel 3\"},{\"decision\":\"verify the best two\",\"latency_ms\":8511,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler 1 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":11839,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"refine with box [288,794,1632,1254] px + point [983, 1039]\",\"latency_ms\":10643,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"verify\",\"latency_ms\":1049,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"accept\",\"latency_ms\":9374,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler 1 wheel\"},{\"decision\":\"refine with box [89,806,113,850] px + points [92,833], [95,818], [107,833] - points [100,829], [81,827], [100,799]\",\"latency_ms\":15429,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler wheel 3\"},{\"decision\":\"verify the best two\",\"latency_ms\":1451,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler wheel 3\"},{\"decision\":\"refine with box [1785,800,1812,857] px + points [1787,830], [1804,802], [1823,830], [1814,807] - points [1807,833], [1810,802], [1800,825]\",\"latency_ms\":11670,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":1554,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler wheel 3\"},{\"decision\":\"answer with what was verified in time\",\"latency_ms\":0,\"model\":\"pipeline\",\"prompt_version\":null,\"step\":\"budget\",\"target\":\"photo\"},{\"decision\":\"measure each against the stature prior\",\"latency_ms\":2164,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"people\"},{\"decision\":\"check that each outline ends at water\",\"latency_ms\":9739,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water below people\"},{\"decision\":\"declined\",\"latency_ms\":0,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 1\"},{\"decision\":\"declined\",\"latency_ms\":0,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 2\"},{\"decision\":\"rejected\",\"latency_ms\":26,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"two wheeler wheel 1\"},{\"decision\":\"report model estimate\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":null,\"step\":\"estimate\",\"target\":\"photo\"}]}",
+   "signature": "aAMbkP-5WaISsKMfOSZPBEiwxRKWF4aV9bjQzCZBt7GusdMiEKaO-zaCZkabKnFPj_-Ho_ohZUkNk6oSaNw8AQ"
+  }
+ }
+}

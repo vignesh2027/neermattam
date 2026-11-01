@@ -206,7 +206,7 @@ func (e *Engine) Recession(ctx context.Context, cell string) (*Recession, error)
 // Export opens GET /v1/export. The caller copies and closes the body.
 func (e *Engine) Export(ctx context.Context, city, format string) (*http.Response, error) {
 	q := url.Values{"city": {city}, "format": {format}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.base+"/v1/export?"+q.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.base+e.withLayer("/v1/export?"+q.Encode()), nil)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,261 @@
+{
+ "id": "chn2",
+ "city": "chennai",
+ "place": "T. Nagar",
+ "lat": 13.036869,
+ "lon": 80.236179,
+ "coord_source": "camera_geotag",
+ "photo_date": "2008-10-22",
+ "measured_on": "2026-11-01",
+ "title": "India - Chennai - Monsoon - 08 (3059063220).jpg",
+ "source_url": "https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_08_(3059063220).jpg",
+ "author": "McKay Savage from London, UK",
+ "licence": "CC BY 2.0",
+ "licence_url": "https://creativecommons.org/licenses/by/2.0",
+ "file_sha256": "61bed6f618777a1cfd2ed3d308a335d63594fa26ecac3095e1a2834dfcb32fd1",
+ "wall_s": 50.3,
+ "measurement": {
+  "measurement_id": "m_01M6C1GHCQR7J666TQ1W6PF9TS",
+  "usable": true,
+  "reasons": [
+   "standing water visible",
+   "the time budget of 55 s ran out before every check was done; this is the best answer reached in time",
+   "water mask not confirmed (time budget reached)",
+   "person 1: the person looks like a child; the stature prior is for adults",
+   "person 2: the person looks like a child; the stature prior is for adults",
+   "person 3: the person looks like a child; the stature prior is for adults",
+   "water could not be segmented",
+   "no wheel could be measured; depth is the scene model's visual estimate, not a measurement",
+   "estimate based on: Water covers road and reaches ankles of children standing at stall"
+  ],
+  "reason_codes": [
+   {
+    "code": "water_visible",
+    "args": {}
+   },
+   {
+    "code": "budget_ran_out",
+    "args": {
+     "budget_s": 55
+    }
+   },
+   {
+    "code": "water_not_confirmed",
+    "args": {
+     "detail": "time budget reached"
+    }
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 1,
+     "failure": "child"
+    }
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 2,
+     "failure": "child"
+    }
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 3,
+     "failure": "child"
+    }
+   },
+   {
+    "code": "water_not_segmented",
+    "args": {}
+   },
+   {
+    "code": "estimate_only",
+    "args": {}
+   },
+   {
+    "code": "estimate_basis",
+    "args": {
+     "basis": "Water covers road and reaches ankles of children standing at stall"
+    }
+   }
+  ],
+  "depth_cm": 8.0,
+  "depth_sigma_cm": 20.0,
+  "reference": null,
+  "waterline": null,
+  "velocity_mps": null,
+  "velocity_sigma_mps": null,
+  "confidence": 0.21,
+  "models": {
+   "scene": "muse-spark-open",
+   "masks": "sam-2.1-hiera-small"
+  },
+  "timings_ms": {
+   "scene": 29813,
+   "agent": 20200
+  },
+  "cost_usd": 0.00626,
+  "method": "model_estimate",
+  "model_estimate": {
+   "depth_cm": 8.0,
+   "depth_sigma_cm": 20.0,
+   "basis": "Water covers road and reaches ankles of children standing at stall",
+   "model": "muse-spark-open"
+  },
+  "agent_trace": [
+   {
+    "step": "scene",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "photo 1920x1440 px",
+    "output": "water visible; references: person, person, person; own estimate 8 cm",
+    "decision": "no wheel: measure 3 persons against the stature prior and segment the water",
+    "latency_ms": 29813,
+    "prompt_version": "scene@cf7a74eb23ee",
+    "decision_code": {
+     "code": "scene_measure_persons",
+     "args": {
+      "n": 3
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [86,965,1892,1419] px + points [[983, 1217]]",
+    "output": "mask 957405 px (35% of photo)",
+    "decision": "verify",
+    "latency_ms": 9638,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the region tinted",
+    "output": "error: the time budget ran out during this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "budget",
+    "target": "photo",
+    "model": "pipeline",
+    "input": "time budget 55 s",
+    "output": "50 s used; checks still open were stopped",
+    "decision": "answer with what was verified in time",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "budget_answer",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "people",
+    "model": "sam-2.1-hiera-small",
+    "input": "3 person boxes with head and body points (segmented during the checks)",
+    "output": "3 masks",
+    "decision": "measure each against the stature prior",
+    "latency_ms": 6206,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "measure_people",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water below people",
+    "model": "sam-2.1-hiera-small",
+    "input": "3 bands just below people (segmented during the checks)",
+    "output": "3 water masks",
+    "decision": "check that each outline ends at water",
+    "latency_ms": 6034,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "check_water_below",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 1",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the person looks like a child; the stature prior is for adults",
+    "decision": "declined",
+    "latency_ms": 1,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 2",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the person looks like a child; the stature prior is for adults",
+    "decision": "declined",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 3",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the person looks like a child; the stature prior is for adults",
+    "decision": "declined",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "estimate",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "no measurable wheel",
+    "output": "8 cm, sigma 20 cm",
+    "decision": "report model estimate",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "report_estimate",
+     "args": {}
+    }
+   }
+  ],
+  "captured_at": null,
+  "input_sha256": "61bed6f618777a1cfd2ed3d308a335d63594fa26ecac3095e1a2834dfcb32fd1",
+  "certificate": {
+   "format": "neermattam-certificate/1",
+   "alg": "Ed25519",
+   "key_id": "ed25519:5cadd6dd4ddca908",
+   "payload": "{\"checks\":{\"failures\":[],\"rules\":[\"schema\",\"grid\",\"inside image\",\"allowed values\"]},\"decision\":{\"confidence\":0.21,\"depth_cm\":8.0,\"depth_sigma_cm\":20.0,\"method\":\"model_estimate\",\"reasons\":[\"standing water visible\",\"the time budget of 55 s ran out before every check was done; this is the best answer reached in time\",\"water mask not confirmed (time budget reached)\",\"person 1: the person looks like a child; the stature prior is for adults\",\"person 2: the person looks like a child; the stature prior is for adults\",\"person 3: the person looks like a child; the stature prior is for adults\",\"water could not be segmented\",\"no wheel could be measured; depth is the scene model's visual estimate, not a measurement\",\"estimate based on: Water covers road and reaches ankles of children standing at stall\"],\"usable\":true},\"format\":\"neermattam-certificate/1\",\"geometry\":{\"estimate\":{\"basis\":\"Water covers road and reaches ankles of children standing at stall\",\"depth_cm\":8.0,\"high_cm\":12.0,\"low_cm\":5.0,\"sigma_cm\":20.0},\"person\":null,\"wheel\":null},\"input\":{\"height\":1440,\"kind\":\"image\",\"sha256\":\"61bed6f618777a1cfd2ed3d308a335d63594fa26ecac3095e1a2834dfcb32fd1\",\"width\":1920},\"issued_at\":\"2026-11-01T17:11:29Z\",\"measurement_id\":\"m_01M6C1GHCQR7J666TQ1W6PF9TS\",\"models\":[{\"name\":\"muse-spark-open\",\"role\":\"scene\",\"version\":\"meta-models/muse-spark-open-1026 on Baseten, reasoning effort low (scene), low (checks), temperature 0.0, seed 7\"},{\"name\":\"sam-2.1-hiera-small\",\"role\":\"masks\",\"version\":\"facebook/sam2.1-hiera-small, float32, run locally\"}],\"prompts\":[{\"id\":\"scene@cf7a74eb23ee\",\"sha256\":\"cf7a74eb23eedb37d70f6aa80ffd277a5c0496a18e5a3e05e04dd1f23c32b88c\"},{\"id\":\"verify-water@2229de9c965d\",\"sha256\":\"2229de9c965d094a5a96fb684cc5d73aeb15a9f47efd4d57cecb7f4913b913a8\"}],\"steps\":[{\"decision\":\"no wheel: measure 3 persons against the stature prior and segment the water\",\"latency_ms\":29813,\"model\":\"muse-spark-open\",\"prompt_version\":\"scene@cf7a74eb23ee\",\"step\":\"scene\",\"target\":\"photo\"},{\"decision\":\"verify\",\"latency_ms\":9638,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"answer with what was verified in time\",\"latency_ms\":0,\"model\":\"pipeline\",\"prompt_version\":null,\"step\":\"budget\",\"target\":\"photo\"},{\"decision\":\"measure each against the stature prior\",\"latency_ms\":6206,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"people\"},{\"decision\":\"check that each outline ends at water\",\"latency_ms\":6034,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water below people\"},{\"decision\":\"declined\",\"latency_ms\":1,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 1\"},{\"decision\":\"declined\",\"latency_ms\":0,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 2\"},{\"decision\":\"declined\",\"latency_ms\":0,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 3\"},{\"decision\":\"report model estimate\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":null,\"step\":\"estimate\",\"target\":\"photo\"}]}",
+   "signature": "329dTOTPInl3JJpw7Q5SKZiLY6sDsZDkp6GtL_RtKpWxAJBmqDXSB35jt4Z-xYzY80fCbOSVvsMbad8t5BbkBA"
+  }
+ }
+}

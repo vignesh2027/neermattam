@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"neermattam/gateway/internal/certs"
+	"neermattam/gateway/internal/upstream"
 	"neermattam/gateway/internal/web"
 )
 
@@ -117,7 +118,7 @@ func (a *App) verifyPage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	p := a.page(w, r, "verify", false)
 	p.Footer = true
-	st, ok := a.Certs.Get(id)
+	st, ok := a.certificate(id)
 	if !ok {
 		p.Verify = &web.VerifyView{ID: id, Missing: true}
 		a.render(w, http.StatusNotFound, "verify", p)
@@ -125,6 +126,9 @@ func (a *App) verifyPage(w http.ResponseWriter, r *http.Request) {
 	}
 	res := a.checkCertificate(r.Context(), st)
 	p.Verify = web.NewVerifyView(p.Lang, id, st, res, a.Cfg.PublicURL)
+	if ph, ok := a.Photos.ByMeasurement(id); ok {
+		p.Verify.Archival = &web.ArchivalView{Year: ph.Year(), MeasuredOn: web.Day(p.Lang, ph.MeasuredAt()), Place: ph.Place, City: ph.City, Credit: ph.Credit(), SourceURL: ph.SourceURL, LicenceURL: ph.LicenceURL}
+	}
 	a.render(w, http.StatusOK, "verify", p)
 }
 
@@ -134,7 +138,7 @@ func (a *App) apiCertificate(w http.ResponseWriter, r *http.Request) {
 	if !a.limit(w, r, a.apiLimit, "api") {
 		return
 	}
-	st, ok := a.Certs.Get(r.PathValue("id"))
+	st, ok := a.certificate(r.PathValue("id"))
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "This gateway holds no certificate for that measurement.", "code": "no_certificate"})
 		return
@@ -159,4 +163,32 @@ func (a *App) wellKnownKeys(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_, _ = w.Write(a.CertKeys.Document())
+}
+
+// certificate finds a stored report certificate, or one of the measured
+// archival photos' certificates.
+func (a *App) certificate(id string) (certs.Stored, bool) {
+	if st, ok := a.Certs.Get(id); ok {
+		return st, true
+	}
+	ph, ok := a.Photos.ByMeasurement(id)
+	if !ok || len(ph.Measurement.Certificate) == 0 {
+		return certs.Stored{}, false
+	}
+	m := ph.Measurement
+	st := certs.Stored{Certificate: m.Certificate, UploadSHA256: ph.FileSHA256, ReceivedAt: ph.MeasuredAt()}
+	if len(m.ReasonCodes) == len(m.Reasons) {
+		st.ReasonCodes = m.ReasonCodes
+	}
+	for _, step := range m.AgentTrace {
+		if step.DecisionCode != nil {
+			st.StepCodes = make([]*upstream.Code, len(m.AgentTrace))
+			for i := range m.AgentTrace {
+				st.StepCodes[i] = m.AgentTrace[i].DecisionCode
+			}
+			break
+		}
+	}
+	st.Decision = &certs.Decision{Status: certs.DecisionArchival, DecidedAt: ph.MeasuredAt()}
+	return st, true
 }

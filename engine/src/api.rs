@@ -17,6 +17,12 @@
 //!   critical sites and the risk ledger, in [`crate::sites_api`].
 //! - `GET /healthz`, `GET /readyz`.
 //!
+//! Every map endpoint (readings, cells, route, stream, hotspots, summary,
+//! recession, export) takes `layer=live` (the default) or `layer=replay`.
+//! The replay layer is a second, separate map for a labelled simulated
+//! scenario: it is never saved, never feeds the risk ledger or the critical
+//! sites, and nothing posted to it can reach the live map.
+//!
 //! Every error is JSON, `{"error": "..."}`, with status 400 for invalid
 //! input, 404 for an unknown path, an unknown cell or when no road connects
 //! the points, 413 for an oversized body and 503 while a road graph is
@@ -65,6 +71,29 @@ const EVENT_BUFFER: usize = 4096;
 /// the gap and lose almost all its weight: one future-dated dry report could
 /// hide deep water for a day.
 pub const MAX_FUTURE_SKEW_SECS: i64 = 300;
+
+/// Which map a request reads or writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Layer {
+    /// The live map of real reports: saved, fed to the risk ledger and the
+    /// critical sites. The default.
+    Live,
+    /// A separate map for a labelled simulated replay. Kept in memory only,
+    /// never mixed with the live map.
+    Replay,
+}
+
+/// The optional `layer` query parameter.
+pub(crate) fn layer_param(q: &HashMap<String, String>) -> Result<Layer, ApiError> {
+    match q.get("layer").map(|s| s.trim()) {
+        None | Some("" | "live") => Ok(Layer::Live),
+        Some("replay") => Ok(Layer::Replay),
+        Some(other) => Err(ApiError::bad_request(format!(
+            "layer must be live or replay, got '{other}'"
+        ))),
+    }
+}
 
 /// A bounded map of recently fused reading ids to the cell each fell in, so
 /// a retried POST is not fused twice and is answered with the original cell.
@@ -138,6 +167,11 @@ pub struct AppState {
     pub config: Config,
     /// The live cell map, shared by every city (the H3 grid is global).
     pub grid: RwLock<Grid>,
+    /// The replay map: a labelled simulated scenario, kept apart from the
+    /// live map in memory only (see [`Layer`]).
+    pub replay: RwLock<Grid>,
+    replay_events: broadcast::Sender<Arc<CellEvent>>,
+    replay_ids: Mutex<RecentIds>,
     /// One slot per configured city, in `config.cities` order.
     graphs: Vec<GraphSlot>,
     events: broadcast::Sender<Arc<CellEvent>>,
@@ -156,6 +190,9 @@ impl AppState {
     pub fn new(config: Config) -> Arc<Self> {
         let grid = Grid::new(config.fusion, config.resolution);
         let (events, _) = broadcast::channel(EVENT_BUFFER);
+        let (replay_events, _) = broadcast::channel(EVENT_BUFFER);
+        let replay = Grid::new(config.fusion, config.resolution);
+        let replay_ids = RecentIds::new(config.dedupe_capacity);
         let (shutdown_tx, _) = watch::channel(false);
         let sites = crate::sites::SitesState::new(&config);
         if let Some(e) = &sites.registry.load_error {
@@ -166,12 +203,38 @@ impl AppState {
             recent_ids: Mutex::new(RecentIds::new(config.dedupe_capacity)),
             graphs: config.cities.iter().map(|_| GraphSlot::default()).collect(),
             config,
+            replay: RwLock::new(replay),
+            replay_events,
+            replay_ids: Mutex::new(replay_ids),
             grid: RwLock::new(grid),
             events,
             dirty: AtomicBool::new(false),
             history_dirty: AtomicBool::new(false),
             shutdown_tx,
         })
+    }
+
+    /// The map a layer names.
+    #[must_use]
+    pub fn grid_of(&self, layer: Layer) -> &RwLock<Grid> {
+        match layer {
+            Layer::Live => &self.grid,
+            Layer::Replay => &self.replay,
+        }
+    }
+
+    fn events_of(&self, layer: Layer) -> &broadcast::Sender<Arc<CellEvent>> {
+        match layer {
+            Layer::Live => &self.events,
+            Layer::Replay => &self.replay_events,
+        }
+    }
+
+    fn ids_of(&self, layer: Layer) -> &Mutex<RecentIds> {
+        match layer {
+            Layer::Live => &self.recent_ids,
+            Layer::Replay => &self.replay_ids,
+        }
     }
 
     fn slot(&self, city: &str) -> Option<&GraphSlot> {
@@ -296,6 +359,8 @@ impl AppState {
                     Err(e) => warn!(error = %e, "risk ledger task failed"),
                 }
             }
+            // The replay map is never saved; it only forgets, like the live one.
+            self.replay.write().forget_old(Utc::now());
             let forgotten = self.grid.write().forget_old(Utc::now());
             if forgotten > 0 {
                 info!(
@@ -654,6 +719,7 @@ struct HazardOut {
 #[derive(Serialize)]
 struct ReadingOut {
     reading_id: Option<String>,
+    layer: Layer,
     cell: String,
     city: Option<String>,
     depth_cm: f64,
@@ -671,19 +737,25 @@ struct ReadingOut {
 
 fn reading_out(
     st: &AppState,
+    layer: Layer,
     cell: h3o::CellIndex,
     id: Option<String>,
     duplicate: bool,
     now: DateTime<Utc>,
 ) -> Result<ReadingOut, ApiError> {
-    let view = st.grid.read().view(cell, now).ok_or_else(|| ApiError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: "cell state missing after update".into(),
-    })?;
+    let view = st
+        .grid_of(layer)
+        .read()
+        .view(cell, now)
+        .ok_or_else(|| ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "cell state missing after update".into(),
+        })?;
     let p = cell_properties(&view, &st.config);
     let pol = &st.config.policy;
     Ok(ReadingOut {
         reading_id: id,
+        layer,
         cell: p.cell,
         city: p.city,
         depth_cm: p.depth_cm,
@@ -711,8 +783,11 @@ fn reading_out(
 
 async fn post_reading(
     State(st): State<Arc<AppState>>,
+    q: Result<Query<HashMap<String, String>>, QueryRejection>,
     body: Result<Json<ReadingIn>, JsonRejection>,
 ) -> Result<Json<ReadingOut>, ApiError> {
+    let Query(q) = q?;
+    let layer = layer_param(&q)?;
     let Json(r) = body?;
     let now = Utc::now();
     let obs = validate_reading(&r, &st.config, now).map_err(ApiError::bad_request)?;
@@ -721,7 +796,7 @@ async fn post_reading(
     // retry that races the original waits for it and is then answered from
     // the cell the original was fused into. Lock order: ids, then grid.
     let ingested = {
-        let mut ids = st.recent_ids.lock();
+        let mut ids = st.ids_of(layer).lock();
         if let Some((id, cell)) = r
             .reading_id
             .as_deref()
@@ -729,7 +804,7 @@ async fn post_reading(
         {
             drop(ids);
             info!(reading_id = %id, cell = %cell, "duplicate reading ignored");
-            return reading_out(&st, cell, r.reading_id.clone(), true, now)
+            return reading_out(&st, layer, cell, r.reading_id.clone(), true, now)
                 .map_err(|_| ApiError {
                     status: StatusCode::CONFLICT,
                     message: format!(
@@ -739,10 +814,21 @@ async fn post_reading(
                 .map(Json);
         }
         let ingested = {
-            let mut g = st.grid.write();
+            let mut g = st.grid_of(layer).write();
             let ingested = g
                 .ingest(&obs)
                 .map_err(|e| ApiError::bad_request(e.to_string()))?;
+            if layer == Layer::Replay {
+                // A replay never reaches the risk ledger or the snapshot.
+                drop(g);
+                if let Some(id) = &r.reading_id {
+                    ids.insert(id, ingested.cell);
+                }
+                drop(ids);
+                publish(&st, layer, &ingested.touched, now);
+                let out = reading_out(&st, layer, ingested.cell, r.reading_id.clone(), false, now)?;
+                return Ok(Json(out));
+            }
             // The risk ledger keeps the cell's fused direct level just after
             // this reading (its history point), or the reading itself when
             // history is off.
@@ -773,18 +859,9 @@ async fn post_reading(
     // Publish every changed cell. The events are sent while the read lock is
     // held, so no later write can slip in between building a cell's view and
     // sending it: a subscriber never receives an older state after a newer one.
-    {
-        let g = st.grid.read();
-        for v in ingested.touched.iter().filter_map(|c| g.view(*c, now)) {
-            // No subscribers is fine.
-            let _ = st.events.send(Arc::new(CellEvent {
-                cell: v.cell,
-                data: cell_feature(&v, &st.config).to_string(),
-            }));
-        }
-    }
+    publish(&st, layer, &ingested.touched, now);
 
-    let out = reading_out(&st, ingested.cell, r.reading_id.clone(), false, now)?;
+    let out = reading_out(&st, layer, ingested.cell, r.reading_id.clone(), false, now)?;
     info!(
         reading_id = r.reading_id.as_deref().unwrap_or(""),
         source = r.source.as_deref().unwrap_or(""),
@@ -796,6 +873,21 @@ async fn post_reading(
         "reading fused"
     );
     Ok(Json(out))
+}
+
+/// Publish every changed cell of a layer. The events are sent while the read
+/// lock is held, so no later write can slip in between building a cell's view
+/// and sending it: a subscriber never receives an older state after a newer
+/// one.
+fn publish(st: &AppState, layer: Layer, touched: &[h3o::CellIndex], now: DateTime<Utc>) {
+    let g = st.grid_of(layer).read();
+    for v in touched.iter().filter_map(|c| g.view(*c, now)) {
+        // No subscribers is fine.
+        let _ = st.events_of(layer).send(Arc::new(CellEvent {
+            cell: v.cell,
+            data: cell_feature(&v, &st.config).to_string(),
+        }));
+    }
 }
 
 /// Run CPU-heavy work (building views of a whole city, scoring, exporting)
@@ -848,9 +940,14 @@ fn cell_in(bbox: &crate::geo::BBox, cell: h3o::CellIndex) -> bool {
 /// Every cell with state on the city's map (all cells when `city` is
 /// `None`), sorted by index. Cells are filtered before their views are built,
 /// so the read lock is held only as long as the city needs.
-fn city_views(st: &AppState, city: Option<&City>, now: DateTime<Utc>) -> Vec<CellView> {
+fn city_views(
+    st: &AppState,
+    layer: Layer,
+    city: Option<&City>,
+    now: DateTime<Utc>,
+) -> Vec<CellView> {
     let mut views: Vec<CellView> = {
-        let g = st.grid.read();
+        let g = st.grid_of(layer).read();
         g.views_where(now, |cell| city.is_none_or(|c| c.holds_cell(cell)))
             .collect()
     };
@@ -863,6 +960,7 @@ async fn get_cells(
     q: Result<Query<HashMap<String, String>>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let Query(q) = q?;
+    let layer = layer_param(&q)?;
     let city = city_param(&q, &st.config)?;
     let bbox: Option<crate::geo::BBox> = q
         .get("bbox")
@@ -884,7 +982,7 @@ async fn get_cells(
     }
     let now = Utc::now();
     // An explicit box selects by cell centre; a city alone selects its map.
-    let mut views: Vec<CellView> = city_views(&st, city, now)
+    let mut views: Vec<CellView> = city_views(&st, layer, city, now)
         .into_iter()
         .filter(|v| bbox.is_none() || cell_in(&area, v.cell))
         .collect();
@@ -896,6 +994,7 @@ async fn get_cells(
         "features": features,
         "truncated": truncated,
         "generated_at": now,
+        "layer": layer,
     })))
 }
 
@@ -970,6 +1069,7 @@ async fn get_route(
     q: Result<Query<HashMap<String, String>>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let Query(q) = q?;
+    let layer = layer_param(&q)?;
     let cfg = &st.config;
     let from = parse_point(&q, "from")?;
     let to = parse_point(&q, "to")?;
@@ -1021,7 +1121,7 @@ async fn get_route(
         }
     };
     let now = Utc::now();
-    let water = st.grid.read().water_map(now);
+    let water = st.grid_of(layer).read().water_map(now);
     let policy = cfg.policy;
     let started = std::time::Instant::now();
     let result =
@@ -1050,6 +1150,8 @@ async fn get_route(
     );
     let mut feature = route_feature(&result.route, vehicle, city, cfg, now);
     feature["baseline"] = route_feature(&result.baseline, vehicle, city, cfg, now);
+    feature["properties"]["layer"] = json!(layer);
+    feature["baseline"]["properties"]["layer"] = json!(layer);
     debug_assert!(result.route.kind != RouteKind::Baseline);
     Ok(Json(feature))
 }
@@ -1060,7 +1162,7 @@ async fn stream(
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let Query(q) = q?;
     let only: Option<City> = city_param(&q, &st.config)?.cloned();
-    let rx = st.events.subscribe();
+    let rx = st.events_of(layer_param(&q)?).subscribe();
     let mut stop = st.shutdown_tx.subscribe();
     let stopped = async move {
         let _ = stop.wait_for(|v| *v).await;
@@ -1144,6 +1246,7 @@ async fn get_hotspots(
     q: Result<Query<HashMap<String, String>>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let Query(q) = q?;
+    let layer = layer_param(&q)?;
     let city = city_param(&q, &st.config)?;
     let limit = match q.get("limit") {
         None => HOTSPOT_DEFAULT_LIMIT,
@@ -1162,7 +1265,7 @@ async fn get_hotspots(
     let ranked = {
         let (st, city) = (Arc::clone(&st), city.cloned());
         blocking(move || {
-            let views = city_views(&st, city.as_ref(), now);
+            let views = city_views(&st, layer, city.as_ref(), now);
             let cfg = &st.config;
             let mut ranked = analytics::hotspots(views, &cfg.policy, &cfg.fusion, now, limit);
             name_hotspots(&st, &mut ranked);
@@ -1172,6 +1275,7 @@ async fn get_hotspots(
     };
     Ok(Json(json!({
         "city": city.map(|c| &c.id),
+        "layer": layer,
         "generated_at": now,
         "advisory": true,
         "score": "depth 40 x min(depth_block / 150 cm, 1) + hazard 30 x min(HR / 3, 1) with HR the Defra rating at depth_block + freshness 20 x (1 - age_h / 12) + reports 10 x min(ln(1 + n) / ln(31), 1) with n the readings in force",
@@ -1205,14 +1309,15 @@ async fn get_summary(
     q: Result<Query<HashMap<String, String>>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let Query(q) = q?;
+    let layer = layer_param(&q)?;
     let city = city_param(&q, &st.config)?;
     let now = Utc::now();
     let summary = {
         let (st, city) = (Arc::clone(&st), city.cloned());
         blocking(move || {
-            let views = city_views(&st, city.as_ref(), now);
+            let views = city_views(&st, layer, city.as_ref(), now);
             let cfg = &st.config;
-            let history_points = st.grid.read().history_points();
+            let history_points = st.grid_of(layer).read().history_points();
             (
                 analytics::summarise(views, &cfg.policy, &cfg.fusion, now),
                 history_points,
@@ -1223,6 +1328,7 @@ async fn get_summary(
     let (summary, history_points) = summary;
     let mut out = serde_json::to_value(&summary).expect("summary serialises");
     out["city"] = json!(city.map(|c| &c.id));
+    out["layer"] = json!(layer);
     out["generated_at"] = json!(now);
     // Global, not per city: the cap applies to the whole map.
     out["history_points"] = json!({
@@ -1237,6 +1343,7 @@ async fn get_recession(
     q: Result<Query<HashMap<String, String>>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let Query(q) = q?;
+    let layer = layer_param(&q)?;
     let raw = q
         .get("cell")
         .map(|s| s.trim())
@@ -1254,7 +1361,7 @@ async fn get_recession(
     }
     let now = Utc::now();
     let (view, history) = {
-        let g = st.grid.read();
+        let g = st.grid_of(layer).read();
         match (g.view(cell, now), g.state(cell)) {
             (Some(v), Some(s)) => (v, s.history.iter().copied().collect::<Vec<_>>()),
             _ => {
@@ -1291,6 +1398,7 @@ async fn get_recession(
     Ok(Json(json!({
         "cell": cell.to_string(),
         "city": city_of_cell(&st.config, cell),
+        "layer": layer,
         "lat": r6(centre.lat()),
         "lon": r6(centre.lng()),
         "advisory": true,
@@ -1372,6 +1480,7 @@ async fn get_export(
 ) -> Result<Response, ApiError> {
     let Query(q) = q?;
     let cfg = &st.config;
+    let layer = layer_param(&q)?;
     let city = required_city(&q, cfg)?;
     let format = q.get("format").map_or("geojson", |s| s.trim());
     if !matches!(format, "geojson" | "csv") {
@@ -1386,7 +1495,7 @@ async fn get_export(
         let (st, city) = (Arc::clone(&st), city.clone());
         blocking(move || {
             let cfg = &st.config;
-            let mut views = city_views(&st, Some(&city), now);
+            let mut views = city_views(&st, layer, Some(&city), now);
             let total_cells = views.len();
             let truncated = total_cells > cfg.max_cells;
             if truncated {

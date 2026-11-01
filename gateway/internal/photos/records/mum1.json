@@ -1,0 +1,364 @@
+{
+ "id": "mum1",
+ "city": "mumbai",
+ "place": "Linking Road, Bandra",
+ "lat": 19.069,
+ "lon": 72.8335,
+ "coord_source": "place_name",
+ "photo_date": "2006-07-04",
+ "measured_on": "2026-11-01",
+ "title": "Mumbai monsoon.jpg",
+ "source_url": "https://commons.wikimedia.org/wiki/File:Mumbai_monsoon.jpg",
+ "author": "PlaneMad (English Wikipedia user)",
+ "licence": "CC BY-SA 3.0",
+ "licence_url": "http://creativecommons.org/licenses/by-sa/3.0/",
+ "file_sha256": "9d7954aad391cbf2f9851976437a4514ae5bc149541fd4de529d2ea962f02b5f",
+ "wall_s": 50.3,
+ "measurement": {
+  "measurement_id": "m_01M6C1N7PV1GJ91RBD08BYQ217",
+  "usable": true,
+  "reasons": [
+   "standing water visible",
+   "the time budget of 55 s ran out before every check was done; this is the best answer reached in time",
+   "auto rickshaw 1 wheel: the scene model did not confirm the mask (time budget reached)",
+   "auto rickshaw 2 wheel: the scene model did not confirm the mask (tyre seen head-on, its outline cannot be measured)",
+   "person 1: the shoulder line could not be found",
+   "person 2: the person's outline does not end at the water (0% water)",
+   "person 3: the measured depth is outside the plausible range (-123 cm)",
+   "no wheel could be measured; depth is the scene model's visual estimate, not a measurement",
+   "estimate based on: Ankle-deep sheet flow covering entire carriageway with pavement stones exposed"
+  ],
+  "reason_codes": [
+   {
+    "code": "water_visible",
+    "args": {}
+   },
+   {
+    "code": "budget_ran_out",
+    "args": {
+     "budget_s": 55
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "auto rickshaw 1 wheel",
+     "detail": "time budget reached"
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "auto rickshaw 2 wheel",
+     "detail": "tyre seen head-on, its outline cannot be measured"
+    }
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 1,
+     "failure": "no_shoulders"
+    }
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 2,
+     "failure": "no_water_below",
+     "detail": "0% water"
+    }
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 3,
+     "failure": "implausible",
+     "detail": "-123 cm"
+    }
+   },
+   {
+    "code": "estimate_only",
+    "args": {}
+   },
+   {
+    "code": "estimate_basis",
+    "args": {
+     "basis": "Ankle-deep sheet flow covering entire carriageway with pavement stones exposed"
+    }
+   }
+  ],
+  "depth_cm": 10.0,
+  "depth_sigma_cm": 20.0,
+  "reference": null,
+  "waterline": null,
+  "velocity_mps": null,
+  "velocity_sigma_mps": null,
+  "confidence": 0.19,
+  "models": {
+   "scene": "muse-spark-open",
+   "masks": "sam-2.1-hiera-small"
+  },
+  "timings_ms": {
+   "scene": 14993,
+   "agent": 35055,
+   "geometry": 0
+  },
+  "cost_usd": 0.020287,
+  "method": "model_estimate",
+  "model_estimate": {
+   "depth_cm": 10.0,
+   "depth_sigma_cm": 20.0,
+   "basis": "Ankle-deep sheet flow covering entire carriageway with pavement stones exposed",
+   "model": "muse-spark-open"
+  },
+  "agent_trace": [
+   {
+    "step": "scene",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "photo 989x742 px",
+    "output": "water visible; references: auto_wheel, auto_wheel, person, person, person; own estimate 10 cm",
+    "decision": "search 2 vehicle boxes for wheels, check 2 wheels and segment the water",
+    "latency_ms": 14993,
+    "prompt_version": "scene@cf7a74eb23ee",
+    "decision_code": {
+     "code": "scene_search_vehicles",
+     "args": {
+      "vehicles": 2,
+      "wheels": 2
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [407,310,666,455] px + points [[532, 380]]",
+    "output": "mask 35600 px (5% of photo)",
+    "decision": "verify",
+    "latency_ms": 10575,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "auto rickshaw 2 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [867,185,981,272] px",
+    "output": "84 proposals from 24 grid points and 4 dark blobs; best: wheel 0.21 = shape 0.32 (fit 1.00, arc 57 deg, ratio 0.38, spill 0.00) x dark 0.34 x size 1.00; wheel 0.18 = shape 0.22 (fit 0.67, arc 114 deg, ratio 0.62, spill 0.04) x dark 0.72 x size 0.94",
+    "decision": "verify the best two",
+    "latency_ms": 13563,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "auto rickshaw 1 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [370,202,551,305] px",
+    "output": "84 proposals from 24 grid points and 4 dark blobs; best: wheel 0.53 = shape 0.59 (fit 0.98, arc 120 deg, ratio 0.81, spill 0.02) x dark 0.80 x size 1.00; wheel 0.26 = shape 0.30 (fit 1.00, arc 54 deg, ratio 0.43, spill 0.00) x dark 0.74 x size 1.00",
+    "decision": "verify the best two",
+    "latency_ms": 16575,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the proposed region tinted",
+    "output": "is_water=true, coverage good; Magenta region aligns with flooded street water surrounding pedestrians and auto-rickshaws.",
+    "decision": "accept",
+    "latency_ms": 11326,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "accept",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "auto rickshaw 2 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [800,92,989,348] px with 2 outlines A and B",
+    "output": "chose A, shape 0.32 (fit 1.00, arc 57 deg, ratio 0.38, spill 0.00), edge ratio 0.62, box agreement 0.52, is_target=true, outline good, view head_on, edge visible 0.65, waterline visible; A follows the narrow front tyre edge above water while B covers bodywork and mudguard",
+    "decision": "give up: tyre seen head-on, its outline cannot be measured",
+    "latency_ms": 10308,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "give_up_reason",
+     "args": {
+      "detail": "tyre seen head-on, its outline cannot be measured"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "auto rickshaw 1 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [360,133,616,389] px with 2 outlines A and B",
+    "output": "chose A, shape 0.59 (fit 0.98, arc 120 deg, ratio 0.81, spill 0.02), edge ratio 1.13, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.57, is_target=true, outline partial, view side, edge visible 0.65, waterline visible; A follows the wheel tyre above water while B outlines bodywork stripe, but A is jagged and slightly loose due to motion blur.",
+    "decision": "refine with box [471,235,509,272] px + points [472,257], [480,238], [497,239], [506,257] - points [489,255], [488,229], [489,219]",
+    "latency_ms": 8297,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[471,235,509,272]",
+      "points": "points [472,257], [480,238], [497,239], [506,257] - points [489,255], [488,229], [489,219]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "auto rickshaw 1 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [471,235,509,272] px + points [472,257], [480,238], [497,239], [506,257] - points [489,255], [488,229], [489,219]",
+    "output": "6 proposals, 6 distinct; best shapes 0.17, 0.00",
+    "decision": "verify the best two",
+    "latency_ms": 1290,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "auto rickshaw 1 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [361,126,617,382] px",
+    "output": "error: the time budget ran out during this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "budget",
+    "target": "photo",
+    "model": "pipeline",
+    "input": "time budget 55 s",
+    "output": "50 s used; checks still open were stopped",
+    "decision": "answer with what was verified in time",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "budget_answer",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "people",
+    "model": "sam-2.1-hiera-small",
+    "input": "3 person boxes with head and body points (segmented during the checks)",
+    "output": "3 masks",
+    "decision": "measure each against the stature prior",
+    "latency_ms": 9808,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "measure_people",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water below people",
+    "model": "sam-2.1-hiera-small",
+    "input": "2 bands just below people (segmented during the checks)",
+    "output": "2 water masks",
+    "decision": "check that each outline ends at water",
+    "latency_ms": 7356,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "check_water_below",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 1",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the shoulder line could not be found",
+    "decision": "declined",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 2",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the person's outline does not end at the water (0% water)",
+    "decision": "declined",
+    "latency_ms": 2,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 3",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the measured depth is outside the plausible range (-123 cm)",
+    "decision": "declined",
+    "latency_ms": 1,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "estimate",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "no measurable wheel",
+    "output": "10 cm, sigma 20 cm",
+    "decision": "report model estimate",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "report_estimate",
+     "args": {}
+    }
+   }
+  ],
+  "captured_at": null,
+  "input_sha256": "9d7954aad391cbf2f9851976437a4514ae5bc149541fd4de529d2ea962f02b5f",
+  "certificate": {
+   "format": "neermattam-certificate/1",
+   "alg": "Ed25519",
+   "key_id": "ed25519:5cadd6dd4ddca908",
+   "payload": "{\"checks\":{\"failures\":[],\"rules\":[\"schema\",\"grid\",\"inside image\",\"allowed values\"]},\"decision\":{\"confidence\":0.19,\"depth_cm\":10.0,\"depth_sigma_cm\":20.0,\"method\":\"model_estimate\",\"reasons\":[\"standing water visible\",\"the time budget of 55 s ran out before every check was done; this is the best answer reached in time\",\"auto rickshaw 1 wheel: the scene model did not confirm the mask (time budget reached)\",\"auto rickshaw 2 wheel: the scene model did not confirm the mask (tyre seen head-on, its outline cannot be measured)\",\"person 1: the shoulder line could not be found\",\"person 2: the person's outline does not end at the water (0% water)\",\"person 3: the measured depth is outside the plausible range (-123 cm)\",\"no wheel could be measured; depth is the scene model's visual estimate, not a measurement\",\"estimate based on: Ankle-deep sheet flow covering entire carriageway with pavement stones exposed\"],\"usable\":true},\"format\":\"neermattam-certificate/1\",\"geometry\":{\"estimate\":{\"basis\":\"Ankle-deep sheet flow covering entire carriageway with pavement stones exposed\",\"depth_cm\":10.0,\"high_cm\":15.0,\"low_cm\":5.0,\"sigma_cm\":20.0},\"person\":null,\"wheel\":null},\"input\":{\"height\":742,\"kind\":\"image\",\"sha256\":\"9d7954aad391cbf2f9851976437a4514ae5bc149541fd4de529d2ea962f02b5f\",\"width\":989},\"issued_at\":\"2026-11-01T17:14:03Z\",\"measurement_id\":\"m_01M6C1N7PV1GJ91RBD08BYQ217\",\"models\":[{\"name\":\"muse-spark-open\",\"role\":\"scene\",\"version\":\"meta-models/muse-spark-open-1026 on Baseten, reasoning effort low (scene), low (checks), temperature 0.0, seed 7\"},{\"name\":\"sam-2.1-hiera-small\",\"role\":\"masks\",\"version\":\"facebook/sam2.1-hiera-small, float32, run locally\"}],\"prompts\":[{\"id\":\"scene@cf7a74eb23ee\",\"sha256\":\"cf7a74eb23eedb37d70f6aa80ffd277a5c0496a18e5a3e05e04dd1f23c32b88c\"},{\"id\":\"verify-water@2229de9c965d\",\"sha256\":\"2229de9c965d094a5a96fb684cc5d73aeb15a9f47efd4d57cecb7f4913b913a8\"},{\"id\":\"verify-wheel@1d51d73f5037\",\"sha256\":\"1d51d73f5037ef5bb8d86353e2f657fe9937eaf515feccd6d780bdf5681ae8bf\"}],\"steps\":[{\"decision\":\"search 2 vehicle boxes for wheels, check 2 wheels and segment the water\",\"latency_ms\":14993,\"model\":\"muse-spark-open\",\"prompt_version\":\"scene@cf7a74eb23ee\",\"step\":\"scene\",\"target\":\"photo\"},{\"decision\":\"verify\",\"latency_ms\":10575,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"verify the best two\",\"latency_ms\":13563,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"auto rickshaw 2 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":16575,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"auto rickshaw 1 wheel\"},{\"decision\":\"accept\",\"latency_ms\":11326,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"give up: tyre seen head-on, its outline cannot be measured\",\"latency_ms\":10308,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"auto rickshaw 2 wheel\"},{\"decision\":\"refine with box [471,235,509,272] px + points [472,257], [480,238], [497,239], [506,257] - points [489,255], [488,229], [489,219]\",\"latency_ms\":8297,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"auto rickshaw 1 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":1290,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"auto rickshaw 1 wheel\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"auto rickshaw 1 wheel\"},{\"decision\":\"answer with what was verified in time\",\"latency_ms\":0,\"model\":\"pipeline\",\"prompt_version\":null,\"step\":\"budget\",\"target\":\"photo\"},{\"decision\":\"measure each against the stature prior\",\"latency_ms\":9808,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"people\"},{\"decision\":\"check that each outline ends at water\",\"latency_ms\":7356,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water below people\"},{\"decision\":\"declined\",\"latency_ms\":0,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 1\"},{\"decision\":\"declined\",\"latency_ms\":2,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 2\"},{\"decision\":\"declined\",\"latency_ms\":1,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 3\"},{\"decision\":\"report model estimate\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":null,\"step\":\"estimate\",\"target\":\"photo\"}]}",
+   "signature": "a63tLOLAnIiXSbIgot_RfqH8qRkjH6TzGkRVoD48HBZ2s-2mod4p7BiyWaFNCrLkdctzDC5vRoLBJji6xudvBA"
+  }
+ }
+}

@@ -1,0 +1,448 @@
+{
+ "id": "kol2",
+ "city": "kolkata",
+ "place": "Sector V, Salt Lake",
+ "lat": 22.5755,
+ "lon": 88.4323,
+ "coord_source": "place_name",
+ "photo_date": "2007-08-13",
+ "measured_on": "2026-11-01",
+ "title": "Sector-V Saltlake - Kolkata 2007-08-13 08506.JPG",
+ "source_url": "https://commons.wikimedia.org/wiki/File:Sector-V_Saltlake_-_Kolkata_2007-08-13_08506.JPG",
+ "author": "Biswarup Ganguly",
+ "licence": "CC BY 3.0",
+ "licence_url": "https://creativecommons.org/licenses/by/3.0",
+ "file_sha256": "243b69188a3863bc78d34356349c82dc762201d9dcdda8291e0fc2344d75cdef",
+ "wall_s": 50.2,
+ "measurement": {
+  "measurement_id": "m_01M6C2137VJGPECV97G70YGNFZ",
+  "usable": true,
+  "reasons": [
+   "standing water visible",
+   "the time budget of 55 s ran out before every check was done; this is the best answer reached in time",
+   "car 2 wheel: the scene model did not confirm the mask (outline and the tyre's box disagree)",
+   "car wheel 3: the scene model did not confirm the mask (time budget reached)",
+   "bus wheel: water does not meet the wheel",
+   "no wheel could be measured; depth is the scene model's visual estimate, not a measurement",
+   "estimate based on: Water covers road and reaches lower tyre sidewalls of multiple vehicles"
+  ],
+  "reason_codes": [
+   {
+    "code": "water_visible",
+    "args": {}
+   },
+   {
+    "code": "budget_ran_out",
+    "args": {
+     "budget_s": 55
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "car 2 wheel",
+     "detail": "outline and the tyre's box disagree"
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "car wheel 3",
+     "detail": "time budget reached"
+    }
+   },
+   {
+    "code": "wheel_failed",
+    "args": {
+     "kind": "bus_wheel",
+     "failure": "no_water_contact"
+    }
+   },
+   {
+    "code": "estimate_only",
+    "args": {}
+   },
+   {
+    "code": "estimate_basis",
+    "args": {
+     "basis": "Water covers road and reaches lower tyre sidewalls of multiple vehicles"
+    }
+   }
+  ],
+  "depth_cm": 28.0,
+  "depth_sigma_cm": 20.0,
+  "reference": null,
+  "waterline": null,
+  "velocity_mps": null,
+  "velocity_sigma_mps": null,
+  "confidence": 0.21,
+  "models": {
+   "scene": "muse-spark-open",
+   "masks": "sam-2.1-hiera-small"
+  },
+  "timings_ms": {
+   "scene": 11218,
+   "agent": 38794,
+   "geometry": 45
+  },
+  "cost_usd": 0.048084,
+  "method": "model_estimate",
+  "model_estimate": {
+   "depth_cm": 28.0,
+   "depth_sigma_cm": 20.0,
+   "basis": "Water covers road and reaches lower tyre sidewalls of multiple vehicles",
+   "model": "muse-spark-open"
+  },
+  "agent_trace": [
+   {
+    "step": "scene",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "photo 1920x1440 px",
+    "output": "water visible; references: bus_wheel, car_wheel, car_wheel, car_wheel; own estimate 28 cm",
+    "decision": "search 4 vehicle boxes for wheels, check 4 wheels and segment the water",
+    "latency_ms": 11218,
+    "prompt_version": "scene@cf7a74eb23ee",
+    "decision_code": {
+     "code": "scene_search_vehicles",
+     "args": {
+      "vehicles": 4,
+      "wheels": 4
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [538,1008,1575,1435] px + points [[983, 1256]]",
+    "output": "mask 414896 px (15% of photo)",
+    "decision": "verify",
+    "latency_ms": 1580,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "car wheel 3",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [1290,939,1341,997] px + points [1298,958], [1313,943], [1332,960] - points [1313,965], [1313,976]",
+    "output": "6 proposals, 5 distinct; best shapes 0.28, 0.19",
+    "decision": "verify the best two",
+    "latency_ms": 3078,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "car 2 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [562,872,1044,1022] px",
+    "output": "75 proposals from 24 grid points and 1 dark blob; best: wheel 0.78 = shape 0.82 (fit 1.00, arc 147 deg, ratio 0.76, spill 0.00) x dark 0.91 x size 1.00; wheel 0.53 = shape 0.53 (fit 1.00, arc 96 deg, ratio 0.85, spill 0.00) x dark 1.00 x size 1.00",
+    "decision": "verify the best two",
+    "latency_ms": 9321,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the proposed region tinted",
+    "output": "is_water=true, coverage partial; Magenta is floodwater but only foreground and misses water immediately around vehicles.",
+    "decision": "refine with box [653,994,1382,1195] px + point [998, 1094]",
+    "latency_ms": 8726,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[653,994,1382,1195]",
+      "points": "point [998, 1094]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [653,994,1382,1195] px + points [[998, 1094]]",
+    "output": "mask 150725 px (5% of photo)",
+    "decision": "verify",
+    "latency_ms": 417,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "bus 1 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [0,812,618,1152] px",
+    "output": "75 proposals from 24 grid points and 1 dark blob; best: wheel 0.82 = shape 0.82 (fit 0.91, arc 189 deg, ratio 0.77, spill 0.00) x dark 1.00 x size 1.00; wheel 0.49 = shape 0.50 (fit 1.00, arc 90 deg, ratio 0.44, spill 0.00, closed ring) x dark 0.95 x size 1.00",
+    "decision": "verify the best two",
+    "latency_ms": 13430,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the proposed region tinted",
+    "output": "is_water=true, coverage good; Magenta region lies on the flooded roadway water in the foreground covering the standing water around the vehicles.",
+    "decision": "accept",
+    "latency_ms": 6622,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "accept",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "car wheel 3",
+    "model": "muse-spark-open",
+    "input": "crop [1032,655,1602,1225] px with 2 outlines A and B",
+    "output": "chose NONE, is_target=false, outline wrong, view head_on, edge visible 0.00, waterline not visible; Both magenta outlines trace grille/number-plate area, no tyre rubber is visible above the flood water so neither follows the tyre.",
+    "decision": "refine with box [1290,939,1341,997] px - points [1317,951], [1306,940], [1328,940]",
+    "latency_ms": 16476,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "other",
+     "args": {
+      "text": "refine with box [1290,939,1341,997] px - points [1317,951], [1306,940], [1328,940]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "car wheel 3",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [1290,939,1341,997] px - points [1317,951], [1306,940], [1328,940]",
+    "output": "2 proposals, 2 distinct; best shapes 0.38, 0.00",
+    "decision": "verify the best two",
+    "latency_ms": 849,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "car 2 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [700,827,956,1083] px with 1 outline",
+    "output": "chose A, shape 0.82 (fit 1.00, arc 147 deg, ratio 0.76, spill 0.00), edge ratio 1.63, box agreement 0.73, is_target=true, outline wrong, view side, edge visible 0.70, waterline visible; Outline is the rear tyre but its lower edge is curved around the submerged part instead of straight at the waterline, adding hidden tyre/water area.",
+    "decision": "refine with box [798,931,858,999] px + points [804,975], [819,941], [843,942], [854,974] - points [828,987], [828,924], [828,1011]",
+    "latency_ms": 11651,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[798,931,858,999]",
+      "points": "points [804,975], [819,941], [843,942], [854,974] - points [828,987], [828,924], [828,1011]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "car 2 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [798,931,858,999] px + points [804,975], [819,941], [843,942], [854,974] - points [828,987], [828,924], [828,1011]",
+    "output": "6 proposals, 6 distinct; best shapes 0.98, 0.80",
+    "decision": "verify the best two",
+    "latency_ms": 1417,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "bus 1 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [0,823,229,1130] px with 1 outline",
+    "output": "chose A, shape 0.82 (fit 0.91, arc 189 deg, ratio 0.77, spill 0.00), edge ratio 0.83, box agreement 0.72, is_target=true, outline good, view side, edge visible 0.90, waterline visible; Magenta outline follows the black tyre outer edge above water with rim inside and does not include mudguard or bodywork.",
+    "decision": "accept",
+    "latency_ms": 11005,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "accept",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "car 2 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [700,836,956,1092] px with 2 outlines A and B",
+    "output": "chose B, shape 0.80 (fit 1.00, arc 144 deg, ratio 0.89, spill 0.00), edge ratio 0.69, not a tyre edge: a darker ring lies just outside the outline (dark 1.00 outside, 0.67 inside): it follows the rim, inside the tyre, box agreement 0.93, is_target=true, outline good, view side, edge visible 0.65, waterline visible; B follows the tyre outer edge closely above the water with straight waterline, while A is jagged and strays slightly.",
+    "decision": "refine with box [798,931,858,999] px + points [802,964], [824,935], [850,964] - points [828,970], [828,924], [866,938]",
+    "latency_ms": 5930,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[798,931,858,999]",
+      "points": "points [802,964], [824,935], [850,964] - points [828,970], [828,924], [866,938]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "car 2 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [798,931,858,999] px + points [802,964], [824,935], [850,964] - points [828,970], [828,924], [866,938]",
+    "output": "6 proposals, 6 distinct; best shapes 1.00, 0.98",
+    "decision": "verify the best two",
+    "latency_ms": 842,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "car wheel 3",
+    "model": "muse-spark-open",
+    "input": "crop [1190,843,1446,1099] px with 2 outlines A and B",
+    "output": "chose NONE, is_target=false, outline wrong, view head_on, edge visible 0.00, waterline not visible; Both magenta outlines follow the yellow number plate, not a tyre; front wheels are submerged under water/splash and no tyre edge is visible above water.",
+    "decision": "refine with box [1290,939,1341,997] px - points [1318,977], [1318,999], [1241,984]",
+    "latency_ms": 10922,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "other",
+     "args": {
+      "text": "refine with box [1290,939,1341,997] px - points [1318,977], [1318,999], [1241,984]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "car wheel 3",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [1290,939,1341,997] px - points [1318,977], [1318,999], [1241,984]",
+    "output": "2 proposals, 2 distinct; best shapes 0.33, 0.00",
+    "decision": "verify the best two",
+    "latency_ms": 167,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "car 2 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [700,836,956,1092] px with 2 outlines A and B",
+    "output": "chose B, shape 0.98 (fit 1.00, arc 186 deg, ratio 0.84, spill 0.00), edge ratio 0.67, not a tyre edge: a darker ring lies just outside the outline (dark 0.98 outside, 0.68 inside): it follows the rim, inside the tyre, box agreement 0.62, is_target=true, outline good, view side, edge visible 0.70, waterline visible; B follows the round outer edge of the tyre closely above the water with straight waterline, while A is jagged and strays",
+    "decision": "give up: the outline covers a different area than the tyre (0.62)",
+    "latency_ms": 6711,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "give_up_reason",
+     "args": {
+      "detail": "the outline covers a different area than the tyre (0.62)"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "car wheel 3",
+    "model": "muse-spark-open",
+    "input": "crop [1189,844,1445,1100] px",
+    "output": "error: the time budget ran out during this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "budget",
+    "target": "photo",
+    "model": "pipeline",
+    "input": "time budget 55 s",
+    "output": "50 s used; checks still open were stopped",
+    "decision": "answer with what was verified in time",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "budget_answer",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "bus wheel 1",
+    "model": "geometry",
+    "input": "wheel and water masks",
+    "output": "water does not meet the wheel",
+    "decision": "rejected",
+    "latency_ms": 42,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "rejected",
+     "args": {}
+    }
+   },
+   {
+    "step": "estimate",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "no measurable wheel",
+    "output": "28 cm, sigma 20 cm",
+    "decision": "report model estimate",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "report_estimate",
+     "args": {}
+    }
+   }
+  ],
+  "captured_at": null,
+  "input_sha256": "243b69188a3863bc78d34356349c82dc762201d9dcdda8291e0fc2344d75cdef",
+  "certificate": {
+   "format": "neermattam-certificate/1",
+   "alg": "Ed25519",
+   "key_id": "ed25519:5cadd6dd4ddca908",
+   "payload": "{\"checks\":{\"failures\":[],\"rules\":[\"schema\",\"grid\",\"inside image\",\"allowed values\"]},\"decision\":{\"confidence\":0.21,\"depth_cm\":28.0,\"depth_sigma_cm\":20.0,\"method\":\"model_estimate\",\"reasons\":[\"standing water visible\",\"the time budget of 55 s ran out before every check was done; this is the best answer reached in time\",\"car 2 wheel: the scene model did not confirm the mask (outline and the tyre's box disagree)\",\"car wheel 3: the scene model did not confirm the mask (time budget reached)\",\"bus wheel: water does not meet the wheel\",\"no wheel could be measured; depth is the scene model's visual estimate, not a measurement\",\"estimate based on: Water covers road and reaches lower tyre sidewalls of multiple vehicles\"],\"usable\":true},\"format\":\"neermattam-certificate/1\",\"geometry\":{\"estimate\":{\"basis\":\"Water covers road and reaches lower tyre sidewalls of multiple vehicles\",\"depth_cm\":28.0,\"high_cm\":35.0,\"low_cm\":20.0,\"sigma_cm\":20.0},\"person\":null,\"wheel\":null},\"input\":{\"height\":1440,\"kind\":\"image\",\"sha256\":\"243b69188a3863bc78d34356349c82dc762201d9dcdda8291e0fc2344d75cdef\",\"width\":1920},\"issued_at\":\"2026-11-01T17:20:32Z\",\"measurement_id\":\"m_01M6C2137VJGPECV97G70YGNFZ\",\"models\":[{\"name\":\"muse-spark-open\",\"role\":\"scene\",\"version\":\"meta-models/muse-spark-open-1026 on Baseten, reasoning effort low (scene), low (checks), temperature 0.0, seed 7\"},{\"name\":\"sam-2.1-hiera-small\",\"role\":\"masks\",\"version\":\"facebook/sam2.1-hiera-small, float32, run locally\"}],\"prompts\":[{\"id\":\"scene@cf7a74eb23ee\",\"sha256\":\"cf7a74eb23eedb37d70f6aa80ffd277a5c0496a18e5a3e05e04dd1f23c32b88c\"},{\"id\":\"verify-water@2229de9c965d\",\"sha256\":\"2229de9c965d094a5a96fb684cc5d73aeb15a9f47efd4d57cecb7f4913b913a8\"},{\"id\":\"verify-wheel@1d51d73f5037\",\"sha256\":\"1d51d73f5037ef5bb8d86353e2f657fe9937eaf515feccd6d780bdf5681ae8bf\"}],\"steps\":[{\"decision\":\"search 4 vehicle boxes for wheels, check 4 wheels and segment the water\",\"latency_ms\":11218,\"model\":\"muse-spark-open\",\"prompt_version\":\"scene@cf7a74eb23ee\",\"step\":\"scene\",\"target\":\"photo\"},{\"decision\":\"verify\",\"latency_ms\":1580,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"verify the best two\",\"latency_ms\":3078,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"car wheel 3\"},{\"decision\":\"verify the best two\",\"latency_ms\":9321,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"car 2 wheel\"},{\"decision\":\"refine with box [653,994,1382,1195] px + point [998, 1094]\",\"latency_ms\":8726,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"verify\",\"latency_ms\":417,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"verify the best two\",\"latency_ms\":13430,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"bus 1 wheel\"},{\"decision\":\"accept\",\"latency_ms\":6622,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"refine with box [1290,939,1341,997] px - points [1317,951], [1306,940], [1328,940]\",\"latency_ms\":16476,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"car wheel 3\"},{\"decision\":\"verify the best two\",\"latency_ms\":849,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"car wheel 3\"},{\"decision\":\"refine with box [798,931,858,999] px + points [804,975], [819,941], [843,942], [854,974] - points [828,987], [828,924], [828,1011]\",\"latency_ms\":11651,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"car 2 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":1417,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"car 2 wheel\"},{\"decision\":\"accept\",\"latency_ms\":11005,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"bus 1 wheel\"},{\"decision\":\"refine with box [798,931,858,999] px + points [802,964], [824,935], [850,964] - points [828,970], [828,924], [866,938]\",\"latency_ms\":5930,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"car 2 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":842,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"car 2 wheel\"},{\"decision\":\"refine with box [1290,939,1341,997] px - points [1318,977], [1318,999], [1241,984]\",\"latency_ms\":10922,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"car wheel 3\"},{\"decision\":\"verify the best two\",\"latency_ms\":167,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"car wheel 3\"},{\"decision\":\"give up: the outline covers a different area than the tyre (0.62)\",\"latency_ms\":6711,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"car 2 wheel\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"car wheel 3\"},{\"decision\":\"answer with what was verified in time\",\"latency_ms\":0,\"model\":\"pipeline\",\"prompt_version\":null,\"step\":\"budget\",\"target\":\"photo\"},{\"decision\":\"rejected\",\"latency_ms\":42,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"bus wheel 1\"},{\"decision\":\"report model estimate\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":null,\"step\":\"estimate\",\"target\":\"photo\"}]}",
+   "signature": "-6smK44spo3yEs-0u6cA-9WO-sKZba2YvoWcGEuve6K3-Zr4QBwYfJPXQB8i7ypK-UwFwqSO5JEOLNfTHKt9DA"
+  }
+ }
+}

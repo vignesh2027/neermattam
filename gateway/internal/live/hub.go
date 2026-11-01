@@ -1,6 +1,7 @@
 package live
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -72,6 +73,10 @@ type Hub struct {
 
 	upstreamUp atomic.Bool
 	listeners  []func(Message)
+
+	// DropSimulated leaves out stream cells labelled simulated: set on the
+	// live map's hub, which carries real reports only.
+	DropSimulated bool
 }
 
 // NewHub returns a hub serving at most max clients.
@@ -267,6 +272,9 @@ func (h *Hub) handle(ev upstream.Event) {
 		h.log.Warn("engine sent an unreadable cell event", "error", err.Error())
 		return
 	}
+	if h.DropSimulated && bytes.Contains(data, []byte(`"origin":"simulated"`)) {
+		return
+	}
 	h.Broadcast(Message{Event: "cell", Data: data, City: city})
 }
 
@@ -324,6 +332,40 @@ func DecorateCollectionFor(raw []byte, o *Origins, city string, simulated bool) 
 		"truncated":          fc["truncated"],
 		"generated_at":       fc["generated_at"],
 		"simulated_scenario": simulated,
+	}
+	if city != "" {
+		body["city"] = city
+	}
+	return json.Marshal(body)
+}
+
+// DecorateLive is DecorateCollectionFor for the live map, which holds real
+// reports only: a cell labelled simulated (left in the engine by an older
+// deployment that mixed the scenario into the live map) is left out.
+func DecorateLive(raw []byte, o *Origins, city string) ([]byte, error) {
+	var fc map[string]any
+	if err := json.Unmarshal(raw, &fc); err != nil {
+		return nil, err
+	}
+	feats, _ := fc["features"].([]any)
+	out := make([]any, 0, len(feats))
+	for _, x := range feats {
+		f, ok := x.(map[string]any)
+		if !ok {
+			continue
+		}
+		c := compact(f, o)
+		if c["properties"].(map[string]any)["origin"] == OriginSimulated {
+			continue
+		}
+		out = append(out, c)
+	}
+	body := map[string]any{
+		"type":               "FeatureCollection",
+		"features":           out,
+		"truncated":          fc["truncated"],
+		"generated_at":       fc["generated_at"],
+		"simulated_scenario": false,
 	}
 	if city != "" {
 		body["city"] = city

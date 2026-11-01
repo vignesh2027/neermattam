@@ -148,14 +148,20 @@ func (a *App) controlView(ctx context.Context, lang, city, base string, demo boo
 		e3  error
 	)
 	wg.Add(2)
-	go func() { defer wg.Done(); sum, e1 = a.Engine.Summary(ctx, city) }()
-	go func() { defer wg.Done(); hs, e2 = a.Engine.Hotspots(ctx, city, 15) }()
+	// The public demo reads the simulated replay's map; the keyed room the
+	// live map.
+	eng, label := a.Engine, a.Origins.Label
+	if demo && a.Replay != nil {
+		eng, label = a.Replay, a.ReplayOrigins.Label
+	}
+	go func() { defer wg.Done(); sum, e1 = eng.Summary(ctx, city) }()
+	go func() { defer wg.Done(); hs, e2 = eng.Hotspots(ctx, city, 15) }()
 	if cell != "" {
 		wg.Add(1)
-		go func() { defer wg.Done(); rec, e3 = a.Engine.Recession(ctx, cell) }()
+		go func() { defer wg.Done(); rec, e3 = eng.Recession(ctx, cell) }()
 	}
 	wg.Wait()
-	v := web.NewControlView(lang, city, base, demo, sum, hs, cell, a.Origins.Label)
+	v := web.NewControlView(lang, city, base, demo, sum, hs, cell, label)
 	if e1 != nil || e2 != nil {
 		v.Error = "ctl.engine_down"
 	}
@@ -216,7 +222,7 @@ func (a *App) controlExport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The control room needs its key.", http.StatusUnauthorized)
 		return
 	}
-	a.export(w, r, a.cityFor(nil, r).ID)
+	a.export(w, r, a.Engine, a.cityFor(nil, r).ID)
 }
 
 func (a *App) controlDemoExport(w http.ResponseWriter, r *http.Request) {
@@ -227,17 +233,17 @@ func (a *App) controlDemoExport(w http.ResponseWriter, r *http.Request) {
 	if !a.limit(w, r, a.apiLimit, "api") {
 		return
 	}
-	a.export(w, r, cities.Default)
+	a.export(w, r, a.Replay, cities.Default)
 }
 
-func (a *App) export(w http.ResponseWriter, r *http.Request, city string) {
+func (a *App) export(w http.ResponseWriter, r *http.Request, eng *upstream.Engine, city string) {
 	format := r.URL.Query().Get("format")
 	if format != "csv" {
 		format = "geojson"
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	resp, err := a.Engine.Export(ctx, city, format)
+	resp, err := eng.Export(ctx, city, format)
 	if err != nil {
 		var ue *upstream.Error
 		if errors.As(err, &ue) {

@@ -57,15 +57,35 @@ func parseLatLon(s string) (float64, float64, bool) {
 	return lat, lon, true
 }
 
-// simulatedIn says whether a city's map holds the simulated scenario. The
-// scenario only ever lives in the default city.
-func (a *App) simulatedIn(city string) bool {
-	return city == cities.Default && a.Origins.HasSimulated()
+// ReplayID names the one past flood a visitor can replay: Cyclone Michaung,
+// December 2023, simulated. It lives on the engine's replay layer, in
+// Chennai only, and is switched on with ?replay=michaung.
+const ReplayID = "michaung"
+
+// replayAvailable says whether the replay can be switched on for a city.
+func (a *App) replayAvailable(city string) bool {
+	return a.Replay != nil && city == cities.Default
 }
 
-// cellsForCity returns the cells on a city's map, from the shared cache.
+// replayOn says whether a request asks for the replay in a city where it is
+// available. Everything else shows the live map, which holds real reports
+// only.
+func (a *App) replayOn(r *http.Request, city string) bool {
+	return r != nil && a.replayAvailable(city) && r.URL.Query().Get("replay") == ReplayID
+}
+
+// cellsForCity returns the cells on a city's live map, from the shared cache.
 func (a *App) cellsForCity(ctx context.Context, city string) (*cellsEntry, error) {
-	return a.cellsCached(ctx, "city="+city, url.Values{"city": {city}}, city)
+	return a.cellsForCityLayer(ctx, city, false)
+}
+
+// cellsForCityLayer returns a city's live cells, or with replay the
+// simulated replay's cells.
+func (a *App) cellsForCityLayer(ctx context.Context, city string, replay bool) (*cellsEntry, error) {
+	if replay && a.Replay != nil {
+		return a.cellsCached(ctx, "replay/city="+city, url.Values{"city": {city}}, city, true)
+	}
+	return a.cellsCached(ctx, "city="+city, url.Values{"city": {city}}, city, false)
 }
 
 // cellFeatures decodes a city's cells, for the alert watcher.
@@ -90,7 +110,8 @@ func (a *App) apiCities(w http.ResponseWriter, r *http.Request) {
 			"centre":             map[string]float64{"lat": c.CentreLat, "lon": c.CentreLon},
 			"cells":              c.Cells,
 			"routing":            c.Routing,
-			"simulated_scenario": a.simulatedIn(c.ID),
+			"simulated_scenario": false,
+			"replay_available":   a.replayAvailable(c.ID),
 		})
 	}
 	w.Header().Set("Cache-Control", "public, max-age=30")

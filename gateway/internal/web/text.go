@@ -34,6 +34,14 @@ func When(lang string, t time.Time) string {
 	return fmt.Sprintf("%s, %d %s", lt.Format("15:04"), lt.Day(), i18n.Month(lang, lt.Month()))
 }
 
+// Day formats a calendar date, such as 1 November 2026, in a language.
+func Day(lang string, t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf("%d %s %d", t.Day(), i18n.Month(lang, t.Month()), t.Year())
+}
+
 // Place localises "near X" and "at lat, lon"; place names stay as they are.
 func Place(lang, p string) string {
 	switch {

@@ -312,3 +312,40 @@ func TestUnknownMethodNameIsCapped(t *testing.T) {
 		t.Fatalf("%+v", s)
 	}
 }
+
+func TestRecentRainForTheMap(t *testing.T) {
+	var calls atomic.Int32
+	at := time.Date(2026, 11, 1, 12, 30, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var times, mm []string
+		for h := 30; h >= -2; h-- { // 30 hours back to 2 hours ahead
+			ts := at.Truncate(time.Hour).Add(-time.Duration(h) * time.Hour)
+			times = append(times, `"`+ts.Format("2006-01-02T15:04")+`"`)
+			mm = append(mm, "0.5")
+		}
+		w.Write([]byte(`{"hourly":{"time":[` + strings.Join(times, ",") + `],"precipitation":[` + strings.Join(mm, ",") + `]}}`))
+	}))
+	defer srv.Close()
+	o := NewOpenMeteo(srv.URL, time.Second, nil)
+	o.now = func() time.Time { return at }
+	r, err := o.Recent(context.Background(), 13.05, 80.24, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 24 hourly values end in (12:30 minus 24 h, 12:30]: 13:00 yesterday to 12:00.
+	if r.Hours != 24 || r.Last24hMM != 12.0 || r.Last1hMM != 0.5 || !r.HourEnd.Equal(at.Truncate(time.Hour)) || !r.ReadAt.Equal(at) {
+		t.Fatalf("got %+v", r)
+	}
+	if _, err := o.Recent(context.Background(), 13.05, 80.24, 10*time.Minute); err != nil || calls.Load() != 1 {
+		t.Fatalf("within 10 minutes the series is reused; %d calls, %v", calls.Load(), err)
+	}
+	o.now = func() time.Time { return at.Add(11 * time.Minute) }
+	if _, err := o.Recent(context.Background(), 13.05, 80.24, 10*time.Minute); err != nil || calls.Load() != 2 {
+		t.Fatalf("an older series is read again; %d calls, %v", calls.Load(), err)
+	}
+	// Too few hours is an error, so the page says unavailable, never zero.
+	if _, err := recent(rainEntry{fetched: at}, at); err == nil {
+		t.Fatal("an empty series must not read as no rain")
+	}
+}

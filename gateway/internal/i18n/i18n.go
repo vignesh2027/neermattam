@@ -41,9 +41,9 @@ var Languages = []Lang{
 
 // Catalogs maps a language code to its messages.
 var Catalogs = map[string]map[string]string{
-	"en": merge(enPages, enOps, enVerify, enSites, enFixes, enCodes), "ta": merge(ta, taOps, taVerify, taSites, taFixes, taCodes), "hi": merge(hi, hiOps, hiVerify, hiSites, hiFixes, hiCodes),
-	"te": merge(te, teOps, teVerify, teSites, teFixes, teCodes), "kn": merge(kn, knOps, knVerify, knSites, knFixes, knCodes), "ml": merge(ml, mlOps, mlVerify, mlSites, mlFixes, mlCodes),
-	"bn": merge(bn, bnOps, bnVerify, bnSites, bnFixes, bnCodes), "mr": merge(mr, mrOps, mrVerify, mrSites, mrFixes, mrCodes),
+	"en": merge(enPages, enOps, enVerify, enSites, enFixes, enCodes, enLive), "ta": merge(ta, taOps, taVerify, taSites, taFixes, taCodes, taLive), "hi": merge(hi, hiOps, hiVerify, hiSites, hiFixes, hiCodes, hiLive),
+	"te": merge(te, teOps, teVerify, teSites, teFixes, teCodes, teLive), "kn": merge(kn, knOps, knVerify, knSites, knFixes, knCodes, knLive), "ml": merge(ml, mlOps, mlVerify, mlSites, mlFixes, mlCodes, mlLive),
+	"bn": merge(bn, bnOps, bnVerify, bnSites, bnFixes, bnCodes, bnLive), "mr": merge(mr, mrOps, mrVerify, mrSites, mrFixes, mrCodes, mrLive),
 }
 
 // merge joins a language's message files: the pages (messages_<code>.go),

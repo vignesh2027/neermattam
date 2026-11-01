@@ -93,6 +93,59 @@ func (o *OpenMeteo) Rain(ctx context.Context, lat, lon float64, at time.Time) (R
 	return summarise(e, at), nil
 }
 
+// RecentRain is modelled rainfall for the hours up to now, and when it was
+// read from Open-Meteo.
+type RecentRain struct {
+	Last1hMM  float64   // the latest complete hour
+	Last24hMM float64   // the 24 hours up to now
+	Hours     int       // hourly values in the 24-hour window
+	HourEnd   time.Time // end of the latest complete hour
+	ReadAt    time.Time // when the series was fetched
+}
+
+// Recent reads rainfall in the last hour and the last 24 hours at a point,
+// from a series no older than maxAge (it is fetched again when older).
+func (o *OpenMeteo) Recent(ctx context.Context, lat, lon float64, maxAge time.Duration) (RecentRain, error) {
+	key, glat, glon := gridKey(lat, lon)
+	o.mu.Lock()
+	e, ok := o.cache[key]
+	o.mu.Unlock()
+	if !ok || o.now().Sub(e.fetched) > maxAge {
+		var err error
+		e, err = o.fetch(ctx, glat, glon)
+		if err != nil {
+			return RecentRain{}, err
+		}
+		o.mu.Lock()
+		o.cache[key] = e
+		o.mu.Unlock()
+	}
+	return recent(e, o.now())
+}
+
+// recent sums the hourly values in (now-24h, now]. Each value is the total
+// of the hour before its time stamp.
+func recent(e rainEntry, now time.Time) (RecentRain, error) {
+	r := RecentRain{ReadAt: e.fetched}
+	for i, t := range e.hours {
+		if t.After(now) || !t.After(now.Add(-24*time.Hour)) {
+			continue
+		}
+		r.Last24hMM += e.mm[i]
+		r.Hours++
+		if t.After(r.HourEnd) {
+			r.HourEnd, r.Last1hMM = t, e.mm[i]
+		}
+	}
+	if r.Hours < 20 {
+		// Too little of the day is covered to give a 24-hour total.
+		return RecentRain{}, errors.New("open-meteo returned too few recent hours")
+	}
+	r.Last1hMM = math.Round(r.Last1hMM*10) / 10
+	r.Last24hMM = math.Round(r.Last24hMM*10) / 10
+	return r, nil
+}
+
 // summarise adds the hourly values in (at-48h, at]. Open-Meteo's hourly
 // precipitation is the total of the preceding hour, so the value stamped
 // 10:00 covers 09:00 to 10:00.

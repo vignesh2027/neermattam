@@ -42,6 +42,9 @@ const (
 	DecisionFused    = "fused"
 	DecisionRejected = "rejected"
 	DecisionUnusable = "unusable"
+	// DecisionArchival is an archival photo measured for the "Measured
+	// photos" layer: shown as such, never added to the live map.
+	DecisionArchival = "archival"
 )
 
 // Decision is the gateway's verdict on a measured report.

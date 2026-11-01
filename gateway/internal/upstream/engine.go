@@ -76,6 +76,36 @@ type Engine struct {
 	timeout      time.Duration
 	routeTimeout time.Duration
 	metrics      *metrics.Set
+	// layer is the engine map this client reads and writes: "" for the live
+	// map, "replay" for the separate map of the labelled simulated replay.
+	layer string
+}
+
+// LayerReplay is the engine's separate map for the simulated replay.
+const LayerReplay = "replay"
+
+// WithLayer returns a client for another engine map, sharing connections.
+// Every request it makes carries layer=<layer>, so a replay client can never
+// read or write the live map.
+func (e *Engine) WithLayer(layer string) *Engine {
+	c := *e
+	c.layer = layer
+	return &c
+}
+
+// Layer is the map this client uses ("" is the live map).
+func (e *Engine) Layer() string { return e.layer }
+
+// withLayer adds the client's layer to a request path.
+func (e *Engine) withLayer(path string) string {
+	if e.layer == "" {
+		return path
+	}
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + "layer=" + url.QueryEscape(e.layer)
 }
 
 // NewEngine returns an engine client. The http.Client has no overall timeout
@@ -135,6 +165,9 @@ type ReadingResult struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 	Hazard           Hazard    `json:"hazard"`
 	Duplicate        bool      `json:"duplicate"`
+	// Layer is the map the engine fused the reading into ("live" or
+	// "replay"); empty from an engine that predates layers.
+	Layer string `json:"layer"`
 }
 
 // PostReading fuses one reading.
@@ -292,7 +325,7 @@ func (e *Engine) do(ctx context.Context, method, path string, body io.Reader, ti
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	start := time.Now()
-	req, err := http.NewRequestWithContext(ctx, method, e.base+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, e.base+e.withLayer(path), body)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +362,7 @@ type Event struct {
 // Stream connects to /v1/stream (every city) and calls fn for each event until the
 // stream ends or ctx is cancelled. Only the connection has a timeout.
 func (e *Engine) Stream(ctx context.Context, fn func(Event)) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.base+"/v1/stream", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.base+e.withLayer("/v1/stream"), nil)
 	if err != nil {
 		return err
 	}

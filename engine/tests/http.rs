@@ -552,3 +552,80 @@ async fn history_is_saved_on_its_own_slower_cadence() {
     assert!(text.contains("neermattam-engine-history"));
     assert!(!std::fs::read_to_string(&path).unwrap().contains("history"));
 }
+
+#[tokio::test]
+async fn replay_layer_never_reaches_the_live_map() {
+    let state = AppState::new(config());
+    state.set_graph("chennai", town());
+    let app = app_with(&state);
+    // A deep simulated reading on the replay layer.
+    let (s, b) = send(
+        &app,
+        post_json(
+            "/v1/readings?layer=replay",
+            &reading("sim_1", 12.97, 80.2154, 60.0),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(b["layer"], "replay");
+    assert_eq!(b["depth_cm"], 60.0);
+
+    // The live map, its summary, hotspots and routes do not see it.
+    let (_, live) = send(&app, get("/v1/cells?city=chennai")).await;
+    assert_eq!(live["layer"], "live");
+    assert_eq!(live["features"].as_array().unwrap().len(), 0, "{live}");
+    let (_, sum) = send(&app, get("/v1/summary?city=chennai")).await;
+    assert_eq!(sum["readings"], 0, "{sum}");
+    let (_, hot) = send(&app, get("/v1/hotspots?city=chennai")).await;
+    assert_eq!(hot["count"], 0);
+    let uri = "/v1/route?from=12.97,80.21&to=12.97,80.2208&vehicle=car";
+    let (s, r) = send(&app, get(uri)).await;
+    assert_eq!(s, StatusCode::OK, "{r}");
+    assert_eq!(r["properties"]["layer"], "live");
+    assert_eq!(r["properties"]["cells_avoided"], 0);
+    assert_eq!(state.grid.read().len(), 0);
+
+    // The replay map has it, and routes around it.
+    let (_, rep) = send(&app, get("/v1/cells?city=chennai&layer=replay")).await;
+    assert_eq!(rep["layer"], "replay");
+    assert_eq!(rep["features"].as_array().unwrap().len(), 7);
+    let (_, sum) = send(&app, get("/v1/summary?city=chennai&layer=replay")).await;
+    assert_eq!(sum["readings"], 1, "{sum}");
+    let (s, r) = send(&app, get(&format!("{uri}&layer=replay"))).await;
+    assert_eq!(s, StatusCode::OK, "{r}");
+    assert_eq!(r["properties"]["layer"], "replay");
+    assert!(
+        r["properties"]["cells_avoided"].as_u64().unwrap() > 0,
+        "{r}"
+    );
+    let cell = rep["features"][0]["id"].as_str().unwrap().to_string();
+    let (s, _) = send(&app, get(&format!("/v1/recession?cell={cell}"))).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = send(
+        &app,
+        get(&format!("/v1/recession?cell={cell}&layer=replay")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    // The same id on the live layer is a new reading, not a duplicate: the
+    // two layers keep their own ids.
+    let (_, b) = send(
+        &app,
+        post_json("/v1/readings", &reading("sim_1", 12.99, 80.22, 5.0)),
+    )
+    .await;
+    assert_eq!(b["layer"], "live");
+    assert_eq!(b["duplicate"], false);
+
+    // The risk ledger only ever saw the live reading.
+    let (_, siting) = send(&app, get("/v1/siting?city=chennai")).await;
+    assert!(!siting.to_string().contains("60.0"), "{siting}");
+
+    for bad in ["/v1/cells?city=chennai&layer=demo", "/v1/summary?layer=x"] {
+        let (s, b) = send(&app, get(bad)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");
+        assert!(b["error"].as_str().unwrap().contains("layer"));
+    }
+}

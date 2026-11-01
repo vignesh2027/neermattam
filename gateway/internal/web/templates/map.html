@@ -1,27 +1,29 @@
 {{define "content"}}
-<section class="map-page" aria-label="{{t "map.aria"}}">
+<link rel="preload" href="https://tiles.openfreemap.org/styles/positron" as="fetch" crossorigin>
+<link rel="stylesheet" href="{{asset "map.css"}}">
+<section class="map-page{{if .Replay.On}} is-replay{{end}}" aria-label="{{t "map.aria"}}">
   <div id="map" class="map-full" role="region" aria-label="{{t "map.region_aria"}}"></div>
-  {{if .CellsJSON}}<script type="application/json" id="cells-data" data-etag="{{.CellsETag}}">{{.CellsJSON}}</script>{{end}}
 
   <div class="overlay glass status-card">
-    <div class="title-row"><h1><span class="live-dot" id="live-dot" aria-hidden="true"></span>{{t "map.title_city" (t (printf "city.%s" .City.ID))}}</h1>{{template "city_switcher" .}}</div>
-    <p class="sub">{{t "map.sub"}}</p>
+    <div class="title-row"><h1><span class="live-dot" id="live-dot" aria-hidden="true"></span>{{if .Replay.On}}{{t "replay.title" (t (printf "city.%s" .City.ID))}}{{else}}{{t "map.title_city" (t (printf "city.%s" .City.ID))}}{{end}}</h1>{{template "city_switcher" .}}</div>
+    <p class="sub">{{if .Replay.On}}{{t "replay.sub"}}{{else}}{{t "map.sub_live"}}{{end}}</p>
     <div class="stats" aria-live="polite">
       <div class="stat"><b id="st-cells">{{.Stats.Cells}}</b><span><span class="lg-only">{{t "map.stat_cells"}}</span><span class="sm-only">{{t "map.stat_cells_short"}}</span></span></div>
       <div class="stat"><b id="st-deep">{{.Stats.Deep}}</b><span>{{t "map.stat_deep"}}</span></div>
       <div class="stat"><b id="st-max">{{.Stats.Max}}</b><span><span class="lg-only">{{t "map.stat_max"}}</span><span class="sm-only">{{t "map.stat_max_short"}}</span></span></div>
     </div>
-    {{if .City.Simulated}}
-    <div class="sim-banner" role="note">
-      {{template "icon-flask"}}
-      <span><strong>{{t "sim.title"}}</strong> <span class="lg-only">{{t "sim.long"}}</span><span class="sm-only">{{t "sim.short"}}</span></span>
-    </div>
-    {{else if .Stats.Empty}}
+    {{template "city_rain" .}}
+    {{template "replay_switch" .}}
+    {{if and (not .Replay.On) .Stats.Empty}}
     <div class="empty-banner" role="note" id="empty-banner">
       {{template "icon-pin"}}
-      <span><strong>{{t "city.no_reports" (t (printf "city.%s" .City.ID))}}</strong> {{t "city.no_reports_sub"}}</span>
+      <span><strong>{{t "city.no_reports" (t (printf "city.%s" .City.ID))}}</strong> {{t "city.no_reports_sub"}}
+      {{$active := false}}{{range .Overview}}{{if and .Active (not .Current)}}{{$active = true}}{{end}}{{end}}
+      {{if $active}}<span class="nm-active">{{t "india.active_now"}} {{range .Overview}}{{if and .Active (not .Current)}}<a class="nm-chip" href="{{.Href}}">{{t (printf "city.%s" .ID)}}</a>{{end}}{{end}}</span>
+      {{else}}<span class="nm-active">{{t "india.none_active"}}</span>{{end}}</span>
     </div>
     {{end}}
+    <div class="nm-narrow">{{template "map_more" (pair . false)}}</div>
   </div>
 
   <details class="overlay glass legend" id="legend" open>
@@ -46,7 +48,7 @@
       <ul class="keys">
         <li><span class="sw sw-hatch" aria-hidden="true"></span>{{t "legend.unknown"}}</li>
         <li><span class="sw sw-none" aria-hidden="true"></span>{{t "legend.no_reports"}}</li>
-        {{if .City.Simulated}}<li><span class="sw sw-real" aria-hidden="true"></span>{{t "legend.real"}}</li>{{end}}
+        {{if .Photos}}<li><span class="sw nm-sw-photo" aria-hidden="true"></span>{{t "legend.photo"}}</li>{{end}}
       </ul>
     </div>
   </details>
@@ -63,14 +65,47 @@
       <li class="empty" id="feed-empty" style="display:block;border:0;background:none;padding:0">{{t "feed.empty"}}</li>
       {{end}}
     </ol>
+    <div class="nm-wide">{{template "map_more" (pair . true)}}</div>
   </aside>
 
   <div class="overlay map-actions">
     <p class="advisory-pill" role="note">{{template "icon-alert"}}{{t "advisory.short"}}</p>
     <a class="btn btn-primary btn-lg" href="/report?city={{.City.ID}}" id="report-here">{{template "icon-camera"}}{{t "map.report_here"}}</a>
   </div>
+  {{if .CellsJSON}}<script type="application/json" id="cells-data" data-etag="{{.CellsETag}}">{{.CellsJSON}}</script>{{end}}
+  {{if .Photos}}<script type="application/json" id="photos-data">{{.PhotosJSON}}</script>{{end}}
 </section>
 {{end}}
+
+{{define "map_more"}}{{$wide := .B}}{{with .A}}
+    <details class="nm-more"{{if $wide}} open{{end}}>
+      <summary>{{t "india.title"}} {{template "icon-chev"}}</summary>
+      <ul class="nm-cities" role="list">
+        {{range .Overview}}<li{{if .Current}} aria-current="true"{{end}}><a href="{{.Href}}">
+          <b>{{t (printf "city.%s" .ID)}}</b>
+          <span>{{if .Reports}}<em class="nm-real">{{t "india.reports_n" .Reports}}</em>{{else}}{{t "india.reports_none"}}{{end}}</span>
+          <span>{{if .HasRain}}{{t "india.rain_24h" .Rain24h}}{{else}}{{t "rain.unavailable"}}{{end}}</span>
+          {{if .Photos}}<span>{{t "india.photos_n" .Photos}}</span>{{end}}
+        </a></li>{{end}}
+      </ul>
+      <p class="nm-note">{{t "india.note"}}</p>
+    </details>
+    {{if .Photos}}<details class="nm-more"{{if $wide}} open{{end}}>
+      <summary>{{t "photos.title" (len .Photos) (t (printf "city.%s" .City.ID))}} {{template "icon-chev"}}</summary>
+      <p class="nm-note">{{t "photos.lead"}}</p>
+      <ul class="nm-photos" role="list">
+        {{range .Photos}}<li>
+          <img src="{{.Thumb}}" alt="{{t "photos.alt" .Place}}" width="96" height="64" loading="lazy" decoding="async">
+          <div>
+            <b>{{.Place}}</b>
+            <span class="nm-ph-label">{{t "photos.label" .Year .MeasuredOn}}</span>
+            <span>{{if .Depth}}<strong>{{.Depth}} ± {{.Sigma}} cm</strong> · {{end}}{{t (printf "photos.method_%s" .Method)}}</span>
+            <span class="nm-ph-links"><a href="{{.Verify}}">{{t "photos.verify"}}</a> · <a href="{{.Source}}" rel="noopener">{{.Credit}}</a></span>
+          </div>
+        </li>{{end}}
+      </ul>
+    </details>{{end}}
+{{end}}{{end}}
 
 {{define "scripts"}}<script nonce="{{.Nonce}}">
 document.addEventListener("DOMContentLoaded", function () {
@@ -87,8 +122,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Cells go on as soon as the style is parsed, before base map tiles load.
   map.once("style.load", function () {
-    NM.addCells(map, { showReal: {{.City.Simulated}} });
+    NM.addCells(map, { showReal: false });
     NM.popups(map);
+    addPhotos();
     if (focus) new maplibregl.Marker({ color: "#2563EB" }).setLngLat(focus).addTo(map);
     var framed = !!focus;
     var inline = document.getElementById("cells-data"), initial = null;
@@ -106,7 +142,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var max = known.reduce(function (a, f) { return Math.max(a, f.properties.depth_cm); }, 0);
         document.getElementById("st-cells").textContent = list.length.toLocaleString();
         document.getElementById("st-deep").textContent = deep.toLocaleString();
-        document.getElementById("st-max").textContent = known.length ? Math.round(max) + " cm" : NM.tr("js.none");
+        document.getElementById("st-max").textContent = known.length ? Math.round(max) + " cm" : "\u2013";
         var empty = document.getElementById("empty-banner");
         if (empty && list.length) empty.remove();
       },
@@ -129,6 +165,37 @@ document.addEventListener("DOMContentLoaded", function () {
     var pad = mobile ? { top: 230, bottom: 150, left: 24, right: 24 }
       : { top: 70, bottom: 50, left: 360, right: innerWidth > 1100 ? 420 : 80 };
     map.fitBounds(b, { padding: pad, maxZoom: 14, duration: 0 });
+  }
+
+  // Measured archival photos: a separate layer, never part of the live map.
+  function addPhotos() {
+    var node = document.getElementById("photos-data");
+    if (!node) return;
+    var fc; try { fc = JSON.parse(node.textContent); } catch (e) { return; }
+    map.addSource("photos", { type: "geojson", data: fc });
+    map.addLayer({ id: "photos", type: "circle", source: "photos",
+      paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 5, 15, 9], "circle-color": "#FFFFFF",
+        "circle-stroke-color": "#0B1B33", "circle-stroke-width": 2.5 } });
+    map.addLayer({ id: "photos-dot", type: "circle", source: "photos",
+      paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2, 15, 3.5], "circle-color": "#0B1B33" } });
+    map.on("click", "photos", function (e) {
+      var p = e.features && e.features[0] && e.features[0].properties;
+      if (!p) return;
+      var box = NM.el("div", "nm-pop");
+      var img = NM.el("img"); img.src = p.thumb; img.alt = p.place; img.width = 240; box.appendChild(img);
+      box.appendChild(NM.el("b", null, p.place));
+      box.appendChild(NM.el("span", "nm-ph-label", p.label));
+      box.appendChild(NM.el("span", null, p.depth + " · " + p.method));
+      var links = NM.el("span", "nm-ph-links");
+      var v = NM.el("a", null, NM.tr("js.photo_verify")); v.href = p.verify; links.appendChild(v);
+      links.appendChild(document.createTextNode(" · "));
+      var c = NM.el("a", null, p.credit); c.href = p.source; c.rel = "noopener"; links.appendChild(c);
+      box.appendChild(links);
+      e.preventDefault();
+      new maplibregl.Popup({ maxWidth: "280px", focusAfterOpen: true }).setLngLat(e.lngLat).setDOMContent(box).addTo(map);
+    });
+    map.on("mouseenter", "photos", function () { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", "photos", function () { map.getCanvas().style.cursor = ""; });
   }
 
   map.on("moveend", function () {

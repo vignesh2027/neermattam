@@ -27,6 +27,9 @@ type VerifyView struct {
 	DecisionTrust   string
 	DecisionAt      string
 	DecisionReasons []reasons.View
+	// Archival is set for a measured archival photo (the map's "Measured
+	// photos" layer): never added to the live map.
+	Archival *ArchivalView
 
 	// Upload is "match", "mismatch" or "unknown": does the certificate's
 	// input hash equal the SHA-256 of the file the gateway received?
@@ -90,7 +93,7 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 	v.Decision = "unknown"
 	if d := st.Decision; d != nil {
 		switch d.Status {
-		case certs.DecisionFused, certs.DecisionRejected, certs.DecisionUnusable:
+		case certs.DecisionFused, certs.DecisionRejected, certs.DecisionUnusable, certs.DecisionArchival:
 			v.Decision = d.Status
 		}
 		v.DecisionTrust = fmt.Sprintf("%.2f", d.Trust)
@@ -241,4 +244,9 @@ func verifyNumbers(lang string, rec *certs.Record) []Fact {
 		add("vfy.n_estimate", fmt.Sprintf("%.0f cm%s, σ %.1f cm", e.DepthCm, rng, e.SigmaCm))
 	}
 	return out
+}
+
+// ArchivalView describes a measured archival photo on its verify page.
+type ArchivalView struct {
+	Year, MeasuredOn, Place, City, Credit, SourceURL, LicenceURL string
 }

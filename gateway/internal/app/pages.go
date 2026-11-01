@@ -57,14 +57,23 @@ func (a *App) page(w http.ResponseWriter, r *http.Request, active string, needsM
 		q.Set("lang", l.Code)
 		p.LangLinks = append(p.LangLinks, web.LangLink{Code: l.Code, Name: l.Name, Native: l.Native, Href: r.URL.Path + "?" + q.Encode(), Current: l.Code == lang})
 	}
-	p.City = web.NewCityView(city.ID, city.Name, city.BBox, city.CentreLat, city.CentreLon, city.Cells, city.Routing, a.simulatedIn(city.ID))
+	replay := a.replayOn(r, city.ID)
+	p.City = web.NewCityView(city.ID, city.Name, city.BBox, city.CentreLat, city.CentreLon, city.Cells, city.Routing, replay)
 	for _, c := range a.Cities.All() {
 		q := r.URL.Query()
-		for _, k := range []string{"at", "from", "to", "cell"} {
-			q.Del(k) // points belong to the old city
+		for _, k := range []string{"at", "from", "to", "cell", "replay"} {
+			q.Del(k) // points belong to the old city; the replay is Chennai's
 		}
 		q.Set("city", c.ID)
-		p.CityLinks = append(p.CityLinks, web.CityLink{ID: c.ID, Href: r.URL.Path + "?" + q.Encode(), Current: c.ID == city.ID, Simulated: a.simulatedIn(c.ID)})
+		p.CityLinks = append(p.CityLinks, web.CityLink{ID: c.ID, Href: r.URL.Path + "?" + q.Encode(), Current: c.ID == city.ID})
+	}
+	if a.replayAvailable(city.ID) {
+		on, off := r.URL.Query(), r.URL.Query()
+		on.Set("city", city.ID)
+		on.Set("replay", ReplayID)
+		off.Set("city", city.ID)
+		off.Del("replay")
+		p.Replay = web.ReplayView{Available: true, On: replay, OnHref: r.URL.Path + "?" + on.Encode(), OffHref: r.URL.Path + "?" + off.Encode()}
 	}
 	return p
 }
@@ -79,10 +88,10 @@ func (a *App) render(w http.ResponseWriter, status int, name string, p *web.Page
 // quickly, so the page reads correctly before any script runs.
 func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
 	p := a.page(w, r, "map", true)
-	p.Stats = web.MapStats{Cells: "0", Deep: "0", Max: i18n.T(p.Lang, "js.none")}
+	p.Stats = web.MapStats{Cells: "0", Deep: "0", Max: web.NoValue}
 	ctx, cancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
 	defer cancel()
-	if e, err := a.cellsForCity(ctx, p.City.ID); err == nil {
+	if e, err := a.cellsForCityLayer(ctx, p.City.ID, p.Replay.On); err == nil {
 		// The first paint needs no second round trip: the cells ride in
 		// the page. json.Marshal escapes <, > and &, so the JSON cannot
 		// close its script element.
@@ -108,10 +117,15 @@ func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	p.Feed = a.Hub.Feed(p.City.ID)
+	if p.Replay.On {
+		p.Feed = a.ReplayHub.Feed(p.City.ID)
+	} else {
+		p.Feed = a.Hub.Feed(p.City.ID)
+	}
 	if len(p.Feed) > 5 {
 		p.Feed = p.Feed[:5]
 	}
+	a.mapExtras(r.Context(), p)
 	a.render(w, http.StatusOK, "map", p)
 }
 
@@ -284,12 +298,13 @@ func (a *App) planRoute(ctx context.Context, r *http.Request, city string) (*web
 	if perr != nil {
 		return nil, perr.Status, perr.Text(lang)
 	}
-	raw, err := a.routeJSON(ctx, q)
+	replay := a.replayOn(r, q.City)
+	raw, err := a.routeJSON(ctx, q, replay)
 	if err != nil {
 		re := a.engineRouteError(err, q.City)
 		return nil, re.Status, re.Text(lang)
 	}
-	v, err := web.NewRouteView(raw, q.Vehicle, a.simulatedIn(q.City), lang)
+	v, err := web.NewRouteView(raw, q.Vehicle, replay, lang)
 	if err != nil {
 		return nil, http.StatusBadGateway, i18n.T(lang, "err.route_down")
 	}

@@ -40,6 +40,21 @@ type fakeEngine struct {
 	mu         sync.Mutex
 	readings   []map[string]any
 	events     chan string
+	layers     []string // the layer of every cells, route and reading request ("" is live)
+}
+
+func (e *fakeEngine) layer(r *http.Request) string {
+	l := r.URL.Query().Get("layer")
+	e.mu.Lock()
+	e.layers = append(e.layers, r.URL.Path+":"+l)
+	e.mu.Unlock()
+	return l
+}
+
+func (e *fakeEngine) sawLayers() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]string(nil), e.layers...)
 }
 
 func newFakeEngine(t *testing.T) *fakeEngine {
@@ -48,6 +63,7 @@ func newFakeEngine(t *testing.T) *fakeEngine {
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{"status":"ready"}`)) })
 	mux.HandleFunc("GET /v1/cells", func(w http.ResponseWriter, r *http.Request) {
 		e.cellsCalls.Add(1)
+		e.layer(r)
 		time.Sleep(time.Duration(e.cellsDelay.Load()))
 		if r.URL.Query().Get("bbox") == "" && r.URL.Query().Get("city") == "" {
 			http.Error(w, `{"error":"at least one of bbox and city is required"}`, 400)
@@ -60,7 +76,15 @@ func newFakeEngine(t *testing.T) *fakeEngine {
 		fmt.Fprintf(w, `{"type":"FeatureCollection","truncated":false,"features":[%s]}`, cellJSON)
 	})
 	addAnalytics(mux)
+	mux.HandleFunc("GET /v1/sites", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("city") != "chennai" {
+			http.Error(w, `{"error":"no sites"}`, 500)
+			return
+		}
+		w.Write([]byte(`{"city":"chennai","total":15,"count":1,"counts":{"data_centre":{"osm":15,"operator":0},"hospital":{"osm":842,"operator":0},"telephone_exchange":{"osm":5,"operator":0}},"sites":[]}`))
+	})
 	mux.HandleFunc("POST /v1/readings", func(w http.ResponseWriter, r *http.Request) {
+		e.layer(r)
 		var m map[string]any
 		json.NewDecoder(r.Body).Decode(&m)
 		e.mu.Lock()
@@ -69,6 +93,7 @@ func newFakeEngine(t *testing.T) *fakeEngine {
 		w.Write([]byte(`{"reading_id":"r_x","cell":"8a618c4e2d47fff","depth_cm":31.0,"depth_sigma_cm":2.4,"depth_upper_cm":34.6,"velocity_mps":null,"velocity_sigma_mps":null,"unknown":false,"n_readings":2,"updated_at":"2026-10-27T09:11:14Z","hazard":{"rating":1.1,"class":"danger_some","class_upper":"danger_most","debris_factor":1.0,"velocity_mps":1.0,"velocity_assumed":true},"duplicate":false}`))
 	})
 	mux.HandleFunc("GET /v1/route", func(w http.ResponseWriter, r *http.Request) {
+		e.layer(r)
 		if strings.HasPrefix(r.URL.Query().Get("from"), "28.") {
 			http.Error(w, `{"error":"routes in delhi are not available: its road graph is still loading"}`, 503)
 			return
@@ -596,7 +621,7 @@ func TestPagesRender(t *testing.T) {
 
 func TestCellsProxyCachesAndLabels(t *testing.T) {
 	h := newHarness(t, nil, true)
-	h.app.Origins.Mark("8a618c4e2d47fff", true)
+	h.app.Origins.Mark("8a618c4e2d47fff", false)
 	for i := 0; i < 3; i++ {
 		resp, _ := http.Get(h.srv.URL + "/api/cells")
 		var fc struct {
@@ -607,7 +632,7 @@ func TestCellsProxyCachesAndLabels(t *testing.T) {
 		}
 		json.NewDecoder(resp.Body).Decode(&fc)
 		resp.Body.Close()
-		if len(fc.Features) != 1 || fc.Features[0].Properties["origin"] != "simulated" || !fc.Simulated {
+		if len(fc.Features) != 1 || fc.Features[0].Properties["origin"] != "reported" || fc.Simulated {
 			t.Fatalf("cells %+v", fc)
 		}
 	}
@@ -641,7 +666,7 @@ func TestRouteProxy(t *testing.T) {
 
 func TestSSEProxyFansOutLabelledCells(t *testing.T) {
 	h := newHarness(t, map[string]string{"MAX_SSE_CLIENTS": "2"}, true)
-	h.app.Origins.Mark("8a618c4e2d47fff", true)
+	h.app.Origins.Mark("8a618c4e2d47fff", false)
 	deadline := time.Now().Add(3 * time.Second)
 	for !h.app.Hub.UpstreamConnected() && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -699,7 +724,7 @@ func TestSSEProxyFansOutLabelledCells(t *testing.T) {
 		if err := json.Unmarshal([]byte(readEvent(b, "cell")), &f); err != nil {
 			t.Fatal(err)
 		}
-		if f["properties"].(map[string]any)["origin"] != "simulated" {
+		if f["properties"].(map[string]any)["origin"] != "reported" {
 			t.Fatalf("event not labelled: %v", f["properties"])
 		}
 	}
@@ -871,8 +896,14 @@ func TestRealReportsKeepTheirLabelAcrossARestart(t *testing.T) {
 	if got := h2.app.Origins.Label("8a618c4e2d47fff", 12.9912, 80.2176); got != "reported" {
 		t.Fatalf("after a restart the real cell reads %q, want reported", got)
 	}
-	if got := h2.app.Origins.Label("8a61aaaaaaaaaaa", 13.05, 80.25); got != "simulated" {
-		t.Fatalf("in a demo a cell with no record reads %q, want simulated", got)
+	// The live map holds real reports only, so even with the replay on
+	// the gateway a cell with no record reads reported; the simulated
+	// scenario has its own map and labels.
+	if got := h2.app.Origins.Label("8a61aaaaaaaaaaa", 13.05, 80.25); got != "reported" {
+		t.Fatalf("on the live map a cell with no record reads %q, want reported", got)
+	}
+	if got := h2.app.ReplayOrigins.Label("8a61aaaaaaaaaaa", 13.05, 80.25); got != "simulated" {
+		t.Fatalf("on the replay map a cell reads %q, want simulated", got)
 	}
 	feed := h2.app.Hub.Feed("")
 	if len(feed) == 0 || feed[0].Simulated || feed[0].DepthCm != 23.4 {

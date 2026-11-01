@@ -24,6 +24,8 @@ window.NM = (function () {
   // The page's city: its box frames the map; cells and the stream are its.
   var CITY = { id: "chennai", bbox: [80.10, 12.80, 80.33, 13.24], centre: [80.215, 13.02] };
   try { CITY = JSON.parse(document.getElementById("city").textContent) || CITY; } catch (e) {}
+  // The simulated replay, when the page shows it, has its own cells and stream.
+  var REPLAY = CITY.simulated ? "&replay=michaung" : "";
   function cityView(extra) {
     var o = CITY.id === "chennai" ? { center: [80.2209, 13.0], zoom: 11.3 }
       : { bounds: [[CITY.bbox[0], CITY.bbox[1]], [CITY.bbox[2], CITY.bbox[3]]], fitBoundsOptions: { padding: 24 } };
@@ -216,7 +218,7 @@ window.NM = (function () {
     function load() {
       var h = { Accept: "application/json" };
       if (etag) h["If-None-Match"] = etag;
-      return fetch("/api/cells?city=" + encodeURIComponent(CITY.id), { headers: h })
+      return fetch("/api/cells?city=" + encodeURIComponent(CITY.id) + REPLAY, { headers: h })
         .then(function (r) {
           if (r.status === 304) return null;
           if (!r.ok) throw new Error(r.status);
@@ -234,7 +236,7 @@ window.NM = (function () {
     }
     function connect() {
       if (!window.EventSource) return;
-      es = new EventSource("/api/stream?city=" + encodeURIComponent(CITY.id));
+      es = new EventSource("/api/stream?city=" + encodeURIComponent(CITY.id) + REPLAY);
       es.onopen = function () { if (hooks.onStatus) hooks.onStatus("up"); };
       es.onerror = function () { if (hooks.onStatus) hooks.onStatus("down"); };
       es.addEventListener("cell", function (e) {
@@ -306,3 +308,12 @@ window.NM = (function () {
   return api;
 })();
 </script>{{end}}
+
+{{define "city_rain"}}{{range .Overview}}{{if .Current}}<p class="nm-rain" id="city-rain">{{if .HasRain}}{{t "rain.line" .Rain24h .Rain1h .RainAt}}{{else}}{{t "rain.unavailable"}}{{end}}</p>{{end}}{{end}}{{end}}
+
+{{define "replay_switch"}}{{if .Replay.Available}}{{if .Replay.On}}
+<div class="sim-banner nm-replay" role="note">
+  {{template "icon-flask"}}
+  <span><strong>{{t "replay.on_title"}}</strong> {{t "replay.on_body"}} <a href="{{.Replay.OffHref}}">{{t "replay.back"}}</a></span>
+</div>
+{{else}}<p class="nm-replay-link"><a href="{{.Replay.OnHref}}">{{template "icon-flask"}}<span>{{t "replay.switch"}}</span></a></p>{{end}}{{end}}{{end}}

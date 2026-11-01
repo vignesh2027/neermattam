@@ -4,10 +4,12 @@
     <p class="eyebrow">{{t "route.eyebrow"}}</p>
     <div class="title-row"><h1 id="route-title">{{t "route.title"}}</h1>{{template "city_switcher" .}}</div>
     <p class="lead">{{t "route.lead"}}</p>
+    {{template "replay_switch" .}}
     {{if ne .City.Routing "ready"}}{{if ne .City.Routing "unknown"}}<p class="note-warn" role="note">{{template "icon-alert"}}<span>{{if eq .City.Routing "failed"}}{{t "err.route_failed" (t (printf "city.%s" .City.ID))}}{{else}}{{t "err.route_loading" (t (printf "city.%s" .City.ID))}}{{end}}</span></p>{{end}}{{end}}
 
     <form id="route-form" method="get" action="/route">
       <input type="hidden" name="city" value="{{.City.ID}}">
+      {{if .Replay.On}}<input type="hidden" name="replay" value="michaung">{{end}}
       <div class="endpoints">
         <div class="endpoint">
           <span class="pin pin-a" aria-hidden="true"><span>A</span></span>

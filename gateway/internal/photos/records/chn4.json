@@ -1,0 +1,286 @@
+{
+ "id": "chn4",
+ "city": "chennai",
+ "place": "Nandanam",
+ "lat": 13.0286,
+ "lon": 80.2403,
+ "coord_source": "place_name",
+ "photo_date": "2015-12-03",
+ "measured_on": "2026-11-01",
+ "title": "Chennai flood water logging near ofice nandanam6.jpg",
+ "source_url": "https://commons.wikimedia.org/wiki/File:Chennai_flood_water_logging_near_ofice_nandanam6.jpg",
+ "author": "Vijayingarsal",
+ "licence": "CC0",
+ "licence_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+ "file_sha256": "aefd4df8c7144f87ef925ee799454788cad2c91f0701a19011e22157a2973f4e",
+ "wall_s": 50.6,
+ "measurement": {
+  "measurement_id": "m_01M6C1KPESSBJAB8DHXJM0NTQA",
+  "usable": true,
+  "reasons": [
+   "standing water visible",
+   "the time budget of 55 s ran out before every check was done; this is the best answer reached in time",
+   "water: only the part confirmed before the time budget ran out is used",
+   "person 1: the outline does not match the person the scene model boxed",
+   "person 2: the shoulder line could not be found",
+   "person 3: the shoulder line could not be found",
+   "no wheel could be measured; depth is the scene model's visual estimate, not a measurement",
+   "estimate based on: Water at knee to mid-thigh on three adults wading across flooded street"
+  ],
+  "reason_codes": [
+   {
+    "code": "water_visible",
+    "args": {}
+   },
+   {
+    "code": "budget_ran_out",
+    "args": {
+     "budget_s": 55
+    }
+   },
+   {
+    "code": "water_partial_budget",
+    "args": {}
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 1,
+     "failure": "box_mismatch"
+    }
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 2,
+     "failure": "no_shoulders"
+    }
+   },
+   {
+    "code": "person_declined",
+    "args": {
+     "person": 3,
+     "failure": "no_shoulders"
+    }
+   },
+   {
+    "code": "estimate_only",
+    "args": {}
+   },
+   {
+    "code": "estimate_basis",
+    "args": {
+     "basis": "Water at knee to mid-thigh on three adults wading across flooded street"
+    }
+   }
+  ],
+  "depth_cm": 45.0,
+  "depth_sigma_cm": 20.0,
+  "reference": null,
+  "waterline": null,
+  "velocity_mps": null,
+  "velocity_sigma_mps": null,
+  "confidence": 0.23,
+  "models": {
+   "scene": "muse-spark-open",
+   "masks": "sam-2.1-hiera-small"
+  },
+  "timings_ms": {
+   "scene": 13527,
+   "agent": 36620,
+   "geometry": 0
+  },
+  "cost_usd": 0.010378,
+  "method": "model_estimate",
+  "model_estimate": {
+   "depth_cm": 45.0,
+   "depth_sigma_cm": 20.0,
+   "basis": "Water at knee to mid-thigh on three adults wading across flooded street",
+   "model": "muse-spark-open"
+  },
+  "agent_trace": [
+   {
+    "step": "scene",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "photo 1632x918 px",
+    "output": "water visible; references: person, person, person; own estimate 45 cm",
+    "decision": "no wheel: measure 3 persons against the stature prior and segment the water",
+    "latency_ms": 13527,
+    "prompt_version": "scene@cf7a74eb23ee",
+    "decision_code": {
+     "code": "scene_measure_persons",
+     "args": {
+      "n": 3
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [73,532,1609,905] px + points [[836, 745]]",
+    "output": "mask 427513 px (29% of photo)",
+    "decision": "verify",
+    "latency_ms": 15770,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the proposed region tinted",
+    "output": "is_water=true, coverage partial; Magenta is water but stops in foreground and misses the flooded surface immediately around the wading people.",
+    "decision": "refine with box [8,431,1624,624] px + point [816, 514]",
+    "latency_ms": 12008,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[8,431,1624,624]",
+      "points": "point [816, 514]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [8,431,1624,624] px + points [[816, 514]]",
+    "output": "mask 584508 px (39% of photo)",
+    "decision": "verify",
+    "latency_ms": 1109,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the region tinted",
+    "output": "error: the time budget ran out during this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "budget",
+    "target": "photo",
+    "model": "pipeline",
+    "input": "time budget 55 s",
+    "output": "50 s used; checks still open were stopped",
+    "decision": "answer with what was verified in time",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "budget_answer",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "people",
+    "model": "sam-2.1-hiera-small",
+    "input": "3 person boxes with head and body points (segmented during the checks)",
+    "output": "3 masks",
+    "decision": "measure each against the stature prior",
+    "latency_ms": 12499,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "measure_people",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water below people",
+    "model": "sam-2.1-hiera-small",
+    "input": "3 bands just below people (segmented during the checks)",
+    "output": "3 water masks",
+    "decision": "check that each outline ends at water",
+    "latency_ms": 10957,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "check_water_below",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 1",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the outline does not match the person the scene model boxed",
+    "decision": "declined",
+    "latency_ms": 10,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 2",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the shoulder line could not be found",
+    "decision": "declined",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "geometry",
+    "target": "person 3",
+    "model": "geometry",
+    "input": "person mask",
+    "output": "the shoulder line could not be found",
+    "decision": "declined",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "declined",
+     "args": {}
+    }
+   },
+   {
+    "step": "estimate",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "no measurable wheel",
+    "output": "45 cm, sigma 20 cm",
+    "decision": "report model estimate",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "report_estimate",
+     "args": {}
+    }
+   }
+  ],
+  "captured_at": null,
+  "input_sha256": "aefd4df8c7144f87ef925ee799454788cad2c91f0701a19011e22157a2973f4e",
+  "certificate": {
+   "format": "neermattam-certificate/1",
+   "alg": "Ed25519",
+   "key_id": "ed25519:5cadd6dd4ddca908",
+   "payload": "{\"checks\":{\"failures\":[],\"rules\":[\"schema\",\"grid\",\"inside image\",\"allowed values\"]},\"decision\":{\"confidence\":0.23,\"depth_cm\":45.0,\"depth_sigma_cm\":20.0,\"method\":\"model_estimate\",\"reasons\":[\"standing water visible\",\"the time budget of 55 s ran out before every check was done; this is the best answer reached in time\",\"water: only the part confirmed before the time budget ran out is used\",\"person 1: the outline does not match the person the scene model boxed\",\"person 2: the shoulder line could not be found\",\"person 3: the shoulder line could not be found\",\"no wheel could be measured; depth is the scene model's visual estimate, not a measurement\",\"estimate based on: Water at knee to mid-thigh on three adults wading across flooded street\"],\"usable\":true},\"format\":\"neermattam-certificate/1\",\"geometry\":{\"estimate\":{\"basis\":\"Water at knee to mid-thigh on three adults wading across flooded street\",\"depth_cm\":45.0,\"high_cm\":55.0,\"low_cm\":35.0,\"sigma_cm\":20.0},\"person\":null,\"wheel\":null},\"input\":{\"height\":918,\"kind\":\"image\",\"sha256\":\"aefd4df8c7144f87ef925ee799454788cad2c91f0701a19011e22157a2973f4e\",\"width\":1632},\"issued_at\":\"2026-11-01T17:13:13Z\",\"measurement_id\":\"m_01M6C1KPESSBJAB8DHXJM0NTQA\",\"models\":[{\"name\":\"muse-spark-open\",\"role\":\"scene\",\"version\":\"meta-models/muse-spark-open-1026 on Baseten, reasoning effort low (scene), low (checks), temperature 0.0, seed 7\"},{\"name\":\"sam-2.1-hiera-small\",\"role\":\"masks\",\"version\":\"facebook/sam2.1-hiera-small, float32, run locally\"}],\"prompts\":[{\"id\":\"scene@cf7a74eb23ee\",\"sha256\":\"cf7a74eb23eedb37d70f6aa80ffd277a5c0496a18e5a3e05e04dd1f23c32b88c\"},{\"id\":\"verify-water@2229de9c965d\",\"sha256\":\"2229de9c965d094a5a96fb684cc5d73aeb15a9f47efd4d57cecb7f4913b913a8\"}],\"steps\":[{\"decision\":\"no wheel: measure 3 persons against the stature prior and segment the water\",\"latency_ms\":13527,\"model\":\"muse-spark-open\",\"prompt_version\":\"scene@cf7a74eb23ee\",\"step\":\"scene\",\"target\":\"photo\"},{\"decision\":\"verify\",\"latency_ms\":15770,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"refine with box [8,431,1624,624] px + point [816, 514]\",\"latency_ms\":12008,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"verify\",\"latency_ms\":1109,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"answer with what was verified in time\",\"latency_ms\":0,\"model\":\"pipeline\",\"prompt_version\":null,\"step\":\"budget\",\"target\":\"photo\"},{\"decision\":\"measure each against the stature prior\",\"latency_ms\":12499,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"people\"},{\"decision\":\"check that each outline ends at water\",\"latency_ms\":10957,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water below people\"},{\"decision\":\"declined\",\"latency_ms\":10,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 1\"},{\"decision\":\"declined\",\"latency_ms\":0,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 2\"},{\"decision\":\"declined\",\"latency_ms\":0,\"model\":\"geometry\",\"prompt_version\":null,\"step\":\"geometry\",\"target\":\"person 3\"},{\"decision\":\"report model estimate\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":null,\"step\":\"estimate\",\"target\":\"photo\"}]}",
+   "signature": "j0cxNQS4UJsQ5GppNQUGun2wpQQXv_UvYRNXNZGTJxIubwv9JuyXlhu89nppkTS-EKDNXhFClUX6FN0aGX84Bw"
+  }
+ }
+}

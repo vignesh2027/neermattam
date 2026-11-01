@@ -259,7 +259,7 @@ func (a *App) fillWatch(ctx context.Context, s *alerts.Subscription, city, vehic
 
 // routeLine plans the water-aware route and returns its line (lon,lat).
 func (a *App) routeLine(ctx context.Context, from, to, vehicle, city string) ([][2]float64, error) {
-	raw, err := a.routeJSON(ctx, routeQuery{From: from, To: to, Vehicle: vehicle, City: city})
+	raw, err := a.routeJSON(ctx, routeQuery{From: from, To: to, Vehicle: vehicle, City: city}, false)
 	if err != nil {
 		return nil, a.engineRouteError(err, city)
 	}

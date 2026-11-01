@@ -61,9 +61,11 @@ func run() error {
 		"addr", cfg.Addr, "engine", cfg.EngineURL, "perception", cfg.PerceptionURL,
 		"demo", cfg.Demo, "whatsapp", whatsapp, "service_area", cfg.ServiceArea.String())
 
-	if cfg.Demo {
+	if cfg.Demo && a.Replay != nil {
+		// The simulated Cyclone Michaung replay goes to the engine's
+		// separate replay map only; the live map stays real reports.
 		seeder := &demo.Seeder{
-			Engine: a.Engine, Origins: a.Origins, Hub: a.Hub, Log: log,
+			Engine: a.Replay, Origins: a.ReplayOrigins, Hub: a.ReplayHub, Log: log,
 			Drip: cfg.DemoDrip, Reseed: cfg.DemoReseedEvery,
 		}
 		go seeder.Run(base, cfg.ServiceArea.String())

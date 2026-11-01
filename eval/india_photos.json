@@ -1,0 +1,300 @@
+{
+ "note": "Street flood photos from Wikimedia Commons, at least two per city where a suitable one was found, used for the 'Measured photos' layer on the map. Each has a permissive licence (CC0, CC BY or CC BY-SA), a capture date, and a location from the camera's geotag or from a place named on the file page (coord_source says which; a named place is placed at that locality's OpenStreetMap coordinates, so it is accurate to a few hundred metres). These are archival photos: they are measured once by the real perception service and shown as such, and never enter live fusion. No suitable photo was found for Delhi or Visakhapatnam (searched 1 November 2026: Commons categories '2023 Delhi floods', 'Rain in Delhi', 'Cyclone Hudhud in Visakhapatnam', and full-text and nearcoord searches for flood, flooded, waterlogged, waterlogging, inundation, submerged and rain near each city); the candidates there showed wet roads, river banks or wind damage, not standing water on a street, or had no place more precise than the city. The photos are not stored in git: eval/india_photos.py downloads them into eval/photos/india/ (gitignored).",
+ "searched_on": "2026-11-01",
+ "photos": [
+  {
+   "id": "chn1",
+   "city": "chennai",
+   "title": "India - Chennai - Monsoon - 07 (3059060932).jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_07_(3059060932).jpg",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/23/India_-_Chennai_-_Monsoon_-_07_%283059060932%29.jpg/1920px-India_-_Chennai_-_Monsoon_-_07_%283059060932%29.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/2/23/India_-_Chennai_-_Monsoon_-_07_%283059060932%29.jpg",
+   "author": "McKay Savage from London, UK",
+   "licence": "CC BY 2.0",
+   "licence_url": "https://creativecommons.org/licenses/by/2.0",
+   "date": "2008-10-22",
+   "place": "CIT Nagar",
+   "lat": 13.029597,
+   "lon": 80.235075,
+   "coord_source": "camera_geotag",
+   "size_px": [
+    3264,
+    2448
+   ],
+   "description": "Various 2-wheelers well swamped by the water flooding the street."
+  },
+  {
+   "id": "chn2",
+   "city": "chennai",
+   "title": "India - Chennai - Monsoon - 08 (3059063220).jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_08_(3059063220).jpg",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d4/India_-_Chennai_-_Monsoon_-_08_%283059063220%29.jpg/1920px-India_-_Chennai_-_Monsoon_-_08_%283059063220%29.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/d/d4/India_-_Chennai_-_Monsoon_-_08_%283059063220%29.jpg",
+   "author": "McKay Savage from London, UK",
+   "licence": "CC BY 2.0",
+   "licence_url": "https://creativecommons.org/licenses/by/2.0",
+   "date": "2008-10-22",
+   "place": "T. Nagar",
+   "lat": 13.036869,
+   "lon": 80.236179,
+   "coord_source": "camera_geotag",
+   "size_px": [
+    3264,
+    2448
+   ],
+   "description": "Schoolboys nonchalantly going about their morning tea and snacks mindless of standing in the water."
+  },
+  {
+   "id": "chn3",
+   "city": "chennai",
+   "title": "India - Chennai - Monsoon - 03 (3058213357).jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_03_(3058213357).jpg",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/23/India_-_Chennai_-_Monsoon_-_03_%283058213357%29.jpg/1920px-India_-_Chennai_-_Monsoon_-_03_%283058213357%29.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/2/23/India_-_Chennai_-_Monsoon_-_03_%283058213357%29.jpg",
+   "author": "McKay Savage from London, UK",
+   "licence": "CC BY 2.0",
+   "licence_url": "https://creativecommons.org/licenses/by/2.0",
+   "date": "2008-10-22",
+   "place": "CIT Nagar",
+   "lat": 13.029597,
+   "lon": 80.235075,
+   "coord_source": "camera_geotag",
+   "size_px": [
+    3264,
+    2448
+   ],
+   "description": "An autorickshaw surfing its way down the street. They have to go slow since a) they don't have doors so will soak themselves and b) they will choke the engine."
+  },
+  {
+   "id": "chn4",
+   "city": "chennai",
+   "title": "Chennai flood water logging near ofice nandanam6.jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:Chennai_flood_water_logging_near_ofice_nandanam6.jpg",
+   "download": "https://upload.wikimedia.org/wikipedia/commons/0/08/Chennai_flood_water_logging_near_ofice_nandanam6.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/0/08/Chennai_flood_water_logging_near_ofice_nandanam6.jpg",
+   "author": "Vijayingarsal",
+   "licence": "CC0",
+   "licence_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+   "date": "2015-12-03",
+   "place": "Nandanam",
+   "lat": 13.0286,
+   "lon": 80.2403,
+   "coord_source": "place_name",
+   "size_px": [
+    1632,
+    918
+   ],
+   "description": "Chennai Flood, Nandanam"
+  },
+  {
+   "id": "mum1",
+   "city": "mumbai",
+   "title": "Mumbai monsoon.jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:Mumbai_monsoon.jpg",
+   "download": "https://upload.wikimedia.org/wikipedia/commons/6/64/Mumbai_monsoon.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/6/64/Mumbai_monsoon.jpg",
+   "author": "PlaneMad (English Wikipedia user)",
+   "licence": "CC BY-SA 3.0",
+   "licence_url": "http://creativecommons.org/licenses/by-sa/3.0/",
+   "date": "2006-07-04",
+   "place": "Linking Road, Bandra",
+   "lat": 19.069,
+   "lon": 72.8335,
+   "coord_source": "place_name",
+   "size_px": [
+    989,
+    742
+   ],
+   "description": "The monsoons in w:Mumbai creates waterlogging in many low lying areas such as this. A scene on w:Linking Road, w:Bandra"
+  },
+  {
+   "id": "mum2",
+   "city": "mumbai",
+   "title": "Kharghar Monsoon 2011.jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:Kharghar_Monsoon_2011.jpg",
+   "download": "https://upload.wikimedia.org/wikipedia/commons/8/8f/Kharghar_Monsoon_2011.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/8/8f/Kharghar_Monsoon_2011.jpg",
+   "author": "Michael Kohli from Navi Mumbai, India",
+   "licence": "CC BY-SA 2.0",
+   "licence_url": "https://creativecommons.org/licenses/by-sa/2.0",
+   "date": "2011-07-07",
+   "place": "Kharghar, Navi Mumbai",
+   "lat": 19.0256,
+   "lon": 73.0553,
+   "coord_source": "camera_geotag",
+   "size_px": [
+    1600,
+    960
+   ],
+   "description": "Sector 3, Kharghar is a mess"
+  },
+  {
+   "id": "blr1",
+   "city": "bengaluru",
+   "title": "Flooding in Bangalore 2.jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:Flooding_in_Bangalore_2.jpg",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/af/Flooding_in_Bangalore_2.jpg/1920px-Flooding_in_Bangalore_2.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/a/af/Flooding_in_Bangalore_2.jpg",
+   "author": "Shyamal",
+   "licence": "CC BY-SA 4.0",
+   "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+   "date": "2024-10-22",
+   "place": "Tatanagar",
+   "lat": 13.054617,
+   "lon": 77.573053,
+   "coord_source": "camera_geotag",
+   "size_px": [
+    4000,
+    1800
+   ],
+   "description": "Flooding in Tatanagar, Bangalore following heavier than normal rains"
+  },
+  {
+   "id": "blr2",
+   "city": "bengaluru",
+   "title": "Flooding in Bangalore.jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:Flooding_in_Bangalore.jpg",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/17/Flooding_in_Bangalore.jpg/1920px-Flooding_in_Bangalore.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/1/17/Flooding_in_Bangalore.jpg",
+   "author": "Shyamal",
+   "licence": "CC BY-SA 4.0",
+   "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+   "date": "2024-10-22",
+   "place": "Tatanagar",
+   "lat": 13.054617,
+   "lon": 77.573053,
+   "coord_source": "camera_geotag",
+   "size_px": [
+    4000,
+    1800
+   ],
+   "description": "Flooding in Tatanagar, Bangalore following heavier than normal rains"
+  },
+  {
+   "id": "blr3",
+   "city": "bengaluru",
+   "title": "Flooding in Bangalore 3.jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:Flooding_in_Bangalore_3.jpg",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d2/Flooding_in_Bangalore_3.jpg/1920px-Flooding_in_Bangalore_3.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/d/d2/Flooding_in_Bangalore_3.jpg",
+   "author": "Shyamal",
+   "licence": "CC BY-SA 4.0",
+   "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+   "date": "2024-10-22",
+   "place": "Tatanagar",
+   "lat": 13.054264,
+   "lon": 77.573067,
+   "coord_source": "camera_geotag",
+   "size_px": [
+    4000,
+    1800
+   ],
+   "description": "Flooding in Tatanagar, Bangalore following heavier than normal rains"
+  },
+  {
+   "id": "hyd1",
+   "city": "hyderabad",
+   "title": "Dabeerpura darwaza after a heavy rain.jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:Dabeerpura_darwaza_after_a_heavy_rain.jpg",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9c/Dabeerpura_darwaza_after_a_heavy_rain.jpg/1920px-Dabeerpura_darwaza_after_a_heavy_rain.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/9/9c/Dabeerpura_darwaza_after_a_heavy_rain.jpg",
+   "author": "Mohammed Mubashir",
+   "licence": "CC BY-SA 4.0",
+   "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+   "date": "2015-09-06",
+   "place": "Dabeerpura",
+   "lat": 17.3678,
+   "lon": 78.4872,
+   "coord_source": "place_name",
+   "size_px": [
+    6000,
+    4000
+   ],
+   "description": "Dabeerpura darwaza"
+  },
+  {
+   "id": "hyd2",
+   "city": "hyderabad",
+   "title": "Rain Rain Come Again (6062944236).jpg",
+   "page": "https://commons.wikimedia.org/wiki/File:Rain_Rain_Come_Again_(6062944236).jpg",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/82/Rain_Rain_Come_Again_%286062944236%29.jpg/1920px-Rain_Rain_Come_Again_%286062944236%29.jpg",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/8/82/Rain_Rain_Come_Again_%286062944236%29.jpg",
+   "author": "Rajib Ghosh from Hyderabad, India",
+   "licence": "CC BY 2.0",
+   "licence_url": "https://creativecommons.org/licenses/by/2.0",
+   "date": "2011-08-20",
+   "place": "Punjagutta",
+   "lat": 17.4276,
+   "lon": 78.4526,
+   "coord_source": "camera_geotag",
+   "size_px": [
+    3888,
+    2592
+   ],
+   "description": "Such is the paucity of water in hot Hyderabad, that these poor souls will dare not wish otherwise.\n\nShot at Punjagutta Circle on 20-Aug-11."
+  },
+  {
+   "id": "kol1",
+   "city": "kolkata",
+   "title": "Sector-V Saltlake - Kolkata 2007-08-13 08502.JPG",
+   "page": "https://commons.wikimedia.org/wiki/File:Sector-V_Saltlake_-_Kolkata_2007-08-13_08502.JPG",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7f/Sector-V_Saltlake_-_Kolkata_2007-08-13_08502.JPG/1920px-Sector-V_Saltlake_-_Kolkata_2007-08-13_08502.JPG",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/7/7f/Sector-V_Saltlake_-_Kolkata_2007-08-13_08502.JPG",
+   "author": "Biswarup Ganguly",
+   "licence": "CC BY 3.0",
+   "licence_url": "https://creativecommons.org/licenses/by/3.0",
+   "date": "2007-08-13",
+   "place": "Sector V, Salt Lake",
+   "lat": 22.5755,
+   "lon": 88.4323,
+   "coord_source": "place_name",
+   "size_px": [
+    2048,
+    1536
+   ],
+   "description": "Bidhan Nagar or Salt Lake City as it is popularly called, is a planned satellite township in the Indian state of West Bengal. It is the Information Technology hub. The photo shows a water-logged part "
+  },
+  {
+   "id": "kol2",
+   "city": "kolkata",
+   "title": "Sector-V Saltlake - Kolkata 2007-08-13 08506.JPG",
+   "page": "https://commons.wikimedia.org/wiki/File:Sector-V_Saltlake_-_Kolkata_2007-08-13_08506.JPG",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/38/Sector-V_Saltlake_-_Kolkata_2007-08-13_08506.JPG/1920px-Sector-V_Saltlake_-_Kolkata_2007-08-13_08506.JPG",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/3/38/Sector-V_Saltlake_-_Kolkata_2007-08-13_08506.JPG",
+   "author": "Biswarup Ganguly",
+   "licence": "CC BY 3.0",
+   "licence_url": "https://creativecommons.org/licenses/by/3.0",
+   "date": "2007-08-13",
+   "place": "Sector V, Salt Lake",
+   "lat": 22.5755,
+   "lon": 88.4323,
+   "coord_source": "place_name",
+   "size_px": [
+    2048,
+    1536
+   ],
+   "description": "Bidhan Nagar or Salt Lake City as it is popularly called, is a planned satellite township in the Indian state of West Bengal. It is the Information Technology hub. The photo shows a water-logged part "
+  },
+  {
+   "id": "kol3",
+   "city": "kolkata",
+   "title": "Sector-V Saltlake - Kolkata 2007-08-13 08501.JPG",
+   "page": "https://commons.wikimedia.org/wiki/File:Sector-V_Saltlake_-_Kolkata_2007-08-13_08501.JPG",
+   "download": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bb/Sector-V_Saltlake_-_Kolkata_2007-08-13_08501.JPG/1920px-Sector-V_Saltlake_-_Kolkata_2007-08-13_08501.JPG",
+   "original": "https://upload.wikimedia.org/wikipedia/commons/b/bb/Sector-V_Saltlake_-_Kolkata_2007-08-13_08501.JPG",
+   "author": "Biswarup Ganguly",
+   "licence": "CC BY 3.0",
+   "licence_url": "https://creativecommons.org/licenses/by/3.0",
+   "date": "2007-08-13",
+   "place": "Sector V, Salt Lake",
+   "lat": 22.5755,
+   "lon": 88.4323,
+   "coord_source": "place_name",
+   "size_px": [
+    2048,
+    1536
+   ],
+   "description": "Bidhan Nagar or Salt Lake City as it is popularly called, is a planned satellite township in the Indian state of West Bengal. It is the Information Technology hub. The photo shows a water-logged part "
+  }
+ ]
+}

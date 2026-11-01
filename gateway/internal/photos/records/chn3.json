@@ -1,0 +1,315 @@
+{
+ "id": "chn3",
+ "city": "chennai",
+ "place": "CIT Nagar",
+ "lat": 13.029597,
+ "lon": 80.235075,
+ "coord_source": "camera_geotag",
+ "photo_date": "2008-10-22",
+ "measured_on": "2026-11-01",
+ "title": "India - Chennai - Monsoon - 03 (3058213357).jpg",
+ "source_url": "https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_03_(3058213357).jpg",
+ "author": "McKay Savage from London, UK",
+ "licence": "CC BY 2.0",
+ "licence_url": "https://creativecommons.org/licenses/by/2.0",
+ "file_sha256": "984eea79f3827a89a32623ddfa744f93d9eb11235d221955e00c3ff29553c3a7",
+ "wall_s": 50.3,
+ "measurement": {
+  "measurement_id": "m_01M6C1J2KZXYD8PAAC83HW1VEZ",
+  "usable": true,
+  "reasons": [
+   "standing water visible",
+   "the time budget of 55 s ran out before every check was done; this is the best answer reached in time",
+   "auto rickshaw 1 wheel: the scene model did not confirm the mask (time budget reached)",
+   "two wheeler 2 wheel: the scene model did not confirm the mask (time budget reached)",
+   "no wheel could be measured; depth is the scene model's visual estimate, not a measurement",
+   "estimate based on: Water covers road and reaches lower third of parked motorcycle tyres."
+  ],
+  "reason_codes": [
+   {
+    "code": "water_visible",
+    "args": {}
+   },
+   {
+    "code": "budget_ran_out",
+    "args": {
+     "budget_s": 55
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "auto rickshaw 1 wheel",
+     "detail": "time budget reached"
+    }
+   },
+   {
+    "code": "wheel_not_confirmed",
+    "args": {
+     "target": "two wheeler 2 wheel",
+     "detail": "time budget reached"
+    }
+   },
+   {
+    "code": "estimate_only",
+    "args": {}
+   },
+   {
+    "code": "estimate_basis",
+    "args": {
+     "basis": "Water covers road and reaches lower third of parked motorcycle tyres."
+    }
+   }
+  ],
+  "depth_cm": 18.0,
+  "depth_sigma_cm": 20.0,
+  "reference": null,
+  "waterline": null,
+  "velocity_mps": null,
+  "velocity_sigma_mps": null,
+  "confidence": 0.21,
+  "models": {
+   "scene": "muse-spark-open",
+   "masks": "sam-2.1-hiera-small"
+  },
+  "timings_ms": {
+   "scene": 16823,
+   "agent": 33204,
+   "geometry": 0
+  },
+  "cost_usd": 0.024014,
+  "method": "model_estimate",
+  "model_estimate": {
+   "depth_cm": 18.0,
+   "depth_sigma_cm": 20.0,
+   "basis": "Water covers road and reaches lower third of parked motorcycle tyres.",
+   "model": "muse-spark-open"
+  },
+  "agent_trace": [
+   {
+    "step": "scene",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "photo 1920x1440 px",
+    "output": "water visible; references: two_wheeler_wheel, two_wheeler_wheel; own estimate 18 cm",
+    "decision": "search 2 vehicle boxes for wheels, check 2 wheels and segment the water",
+    "latency_ms": 16823,
+    "prompt_version": "scene@cf7a74eb23ee",
+    "decision_code": {
+     "code": "scene_search_vehicles",
+     "args": {
+      "vehicles": 2,
+      "wheels": 2
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "water",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [614,893,1691,1419] px + points [[998, 1181]]",
+    "output": "mask 570575 px (21% of photo)",
+    "decision": "verify",
+    "latency_ms": 5859,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify",
+     "args": {}
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler 2 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [827,308,1555,665] px",
+    "output": "84 proposals from 24 grid points and 4 dark blobs; best: wheel 0.43 = shape 0.57 (fit 0.87, arc 135 deg, ratio 0.80, spill 0.00, closed ring) x dark 0.53 x size 1.00; wheel 0.41 = shape 0.46 (fit 0.80, arc 129 deg, ratio 0.83, spill 0.00, closed ring) x dark 0.78 x size 1.00",
+    "decision": "verify the best two",
+    "latency_ms": 10533,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "auto rickshaw 1 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "lower part of the vehicle box [0,440,972,1143] px",
+    "output": "84 proposals from 24 grid points and 4 dark blobs; best: wheel 0.53 = shape 0.53 (fit 1.00, arc 96 deg, ratio 0.71, spill 0.00, closed ring) x dark 1.00 x size 1.00; wheel 0.31 = shape 0.36 (fit 1.00, arc 69 deg, ratio 0.35, spill 0.01, closed ring) x dark 0.71 x size 1.00",
+    "decision": "verify the best two",
+    "latency_ms": 15040,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "water",
+    "model": "muse-spark-open",
+    "input": "photo with the proposed region tinted",
+    "output": "is_water=true, coverage good; Magenta region lies on the turbulent brown floodwater directly behind the auto-rickshaw on the inundated street.",
+    "decision": "accept",
+    "latency_ms": 10002,
+    "prompt_version": "verify-water@2229de9c965d",
+    "decision_code": {
+     "code": "accept",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler 2 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [1243,194,1622,574] px with 1 outline",
+    "output": "chose A, shape 0.57 (fit 0.87, arc 135 deg, ratio 0.80, spill 0.00, closed ring), edge ratio 0.96, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.64, is_target=true, outline partial, view side, edge visible 0.65, waterline visible; Outline follows tyre above water but continues below waterline instead of stopping with straight edge, adding submerged invisible part.",
+    "decision": "refine with box [1317,323,1493,462] px + points [1326,414], [1393,333], [1478,403], [1338,354] - points [1396,432], [1393,314], [1355,401]",
+    "latency_ms": 10516,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[1317,323,1493,462]",
+      "points": "points [1326,414], [1393,333], [1478,403], [1338,354] - points [1396,432], [1393,314], [1355,401]"
+     }
+    }
+   },
+   {
+    "step": "validate",
+    "target": "auto rickshaw 1 wheel",
+    "model": "validator",
+    "input": "answer to verify auto rickshaw 1 wheel",
+    "output": "tyre_box: [[32, 518], [192, 712]] is not a box [x_min, y_min, x_max, y_max]; dropped; corrected_box: [[32, 518], [192, 712]] is not a box [x_min, y_min, x_max, y_max]; dropped",
+    "decision": "drop 2 fields that failed, use the rest",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "drop_fields",
+     "args": {
+      "n": 2
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "auto rickshaw 1 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [221,340,1229,1349] px with 2 outlines A and B",
+    "output": "chose NONE, is_target=false, outline wrong, view side, edge visible 0.45, waterline visible; Both magenta outlines are in the water under the centre of the body, not on the left rear tyre, so neither follows the tyre's outer edge.",
+    "decision": "refine with box [531,856,628,905] px + points [269,971], [300,893], [357,897], [394,971] - points [330,964], [327,850], [528,1031]",
+    "latency_ms": 10653,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "refine",
+     "args": {
+      "box": "[531,856,628,905]",
+      "points": "points [269,971], [300,893], [357,897], [394,971] - points [330,964], [327,850], [528,1031]"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "two wheeler 2 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [1317,323,1493,462] px + points [1326,414], [1393,333], [1478,403], [1338,354] - points [1396,432], [1393,314], [1355,401]",
+    "output": "6 proposals, 6 distinct; best shapes 0.73, 0.54",
+    "decision": "verify the best two",
+    "latency_ms": 5548,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "segment",
+    "target": "auto rickshaw 1 wheel",
+    "model": "sam-2.1-hiera-small",
+    "input": "box [531,856,628,905] px + points [269,971], [300,893], [357,897], [394,971] - points [330,964], [327,850], [528,1031]",
+    "output": "6 proposals, 6 distinct; best shapes 0.05, 0.03",
+    "decision": "verify the best two",
+    "latency_ms": 1184,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "verify_best",
+     "args": {
+      "n": "two"
+     }
+    }
+   },
+   {
+    "step": "verify",
+    "target": "auto rickshaw 1 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [269,659,805,1194] px",
+    "output": "error: the time budget ran out during this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "verify",
+    "target": "two wheeler 2 wheel",
+    "model": "muse-spark-open",
+    "input": "crop [1160,134,1670,644] px",
+    "output": "error: the time budget ran out during this check",
+    "decision": "give up",
+    "latency_ms": 0,
+    "prompt_version": "verify-wheel@1d51d73f5037",
+    "decision_code": {
+     "code": "give_up",
+     "args": {}
+    }
+   },
+   {
+    "step": "budget",
+    "target": "photo",
+    "model": "pipeline",
+    "input": "time budget 55 s",
+    "output": "50 s used; checks still open were stopped",
+    "decision": "answer with what was verified in time",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "budget_answer",
+     "args": {}
+    }
+   },
+   {
+    "step": "estimate",
+    "target": "photo",
+    "model": "muse-spark-open",
+    "input": "no measurable wheel",
+    "output": "18 cm, sigma 20 cm",
+    "decision": "report model estimate",
+    "latency_ms": 0,
+    "prompt_version": null,
+    "decision_code": {
+     "code": "report_estimate",
+     "args": {}
+    }
+   }
+  ],
+  "captured_at": null,
+  "input_sha256": "984eea79f3827a89a32623ddfa744f93d9eb11235d221955e00c3ff29553c3a7",
+  "certificate": {
+   "format": "neermattam-certificate/1",
+   "alg": "Ed25519",
+   "key_id": "ed25519:5cadd6dd4ddca908",
+   "payload": "{\"checks\":{\"failures\":[\"auto rickshaw 1 wheel: tyre_box: [[32, 518], [192, 712]] is not a box [x_min, y_min, x_max, y_max]; dropped; corrected_box: [[32, 518], [192, 712]] is not a box [x_min, y_min, x_max, y_max]; dropped (drop 2 fields that failed, use the rest)\"],\"rules\":[\"schema\",\"grid\",\"inside image\",\"allowed values\"]},\"decision\":{\"confidence\":0.21,\"depth_cm\":18.0,\"depth_sigma_cm\":20.0,\"method\":\"model_estimate\",\"reasons\":[\"standing water visible\",\"the time budget of 55 s ran out before every check was done; this is the best answer reached in time\",\"auto rickshaw 1 wheel: the scene model did not confirm the mask (time budget reached)\",\"two wheeler 2 wheel: the scene model did not confirm the mask (time budget reached)\",\"no wheel could be measured; depth is the scene model's visual estimate, not a measurement\",\"estimate based on: Water covers road and reaches lower third of parked motorcycle tyres.\"],\"usable\":true},\"format\":\"neermattam-certificate/1\",\"geometry\":{\"estimate\":{\"basis\":\"Water covers road and reaches lower third of parked motorcycle tyres.\",\"depth_cm\":18.0,\"high_cm\":25.0,\"low_cm\":12.0,\"sigma_cm\":20.0},\"person\":null,\"wheel\":null},\"input\":{\"height\":1440,\"kind\":\"image\",\"sha256\":\"984eea79f3827a89a32623ddfa744f93d9eb11235d221955e00c3ff29553c3a7\",\"width\":1920},\"issued_at\":\"2026-11-01T17:12:20Z\",\"measurement_id\":\"m_01M6C1J2KZXYD8PAAC83HW1VEZ\",\"models\":[{\"name\":\"muse-spark-open\",\"role\":\"scene\",\"version\":\"meta-models/muse-spark-open-1026 on Baseten, reasoning effort low (scene), low (checks), temperature 0.0, seed 7\"},{\"name\":\"sam-2.1-hiera-small\",\"role\":\"masks\",\"version\":\"facebook/sam2.1-hiera-small, float32, run locally\"}],\"prompts\":[{\"id\":\"scene@cf7a74eb23ee\",\"sha256\":\"cf7a74eb23eedb37d70f6aa80ffd277a5c0496a18e5a3e05e04dd1f23c32b88c\"},{\"id\":\"verify-water@2229de9c965d\",\"sha256\":\"2229de9c965d094a5a96fb684cc5d73aeb15a9f47efd4d57cecb7f4913b913a8\"},{\"id\":\"verify-wheel@1d51d73f5037\",\"sha256\":\"1d51d73f5037ef5bb8d86353e2f657fe9937eaf515feccd6d780bdf5681ae8bf\"}],\"steps\":[{\"decision\":\"search 2 vehicle boxes for wheels, check 2 wheels and segment the water\",\"latency_ms\":16823,\"model\":\"muse-spark-open\",\"prompt_version\":\"scene@cf7a74eb23ee\",\"step\":\"scene\",\"target\":\"photo\"},{\"decision\":\"verify\",\"latency_ms\":5859,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"water\"},{\"decision\":\"verify the best two\",\"latency_ms\":10533,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":15040,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"auto rickshaw 1 wheel\"},{\"decision\":\"accept\",\"latency_ms\":10002,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-water@2229de9c965d\",\"step\":\"verify\",\"target\":\"water\"},{\"decision\":\"refine with box [1317,323,1493,462] px + points [1326,414], [1393,333], [1478,403], [1338,354] - points [1396,432], [1393,314], [1355,401]\",\"latency_ms\":10516,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"drop 2 fields that failed, use the rest\",\"latency_ms\":0,\"model\":\"validator\",\"prompt_version\":null,\"step\":\"validate\",\"target\":\"auto rickshaw 1 wheel\"},{\"decision\":\"refine with box [531,856,628,905] px + points [269,971], [300,893], [357,897], [394,971] - points [330,964], [327,850], [528,1031]\",\"latency_ms\":10653,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"auto rickshaw 1 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":5548,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"verify the best two\",\"latency_ms\":1184,\"model\":\"sam-2.1-hiera-small\",\"prompt_version\":null,\"step\":\"segment\",\"target\":\"auto rickshaw 1 wheel\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"auto rickshaw 1 wheel\"},{\"decision\":\"give up\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":\"verify-wheel@1d51d73f5037\",\"step\":\"verify\",\"target\":\"two wheeler 2 wheel\"},{\"decision\":\"answer with what was verified in time\",\"latency_ms\":0,\"model\":\"pipeline\",\"prompt_version\":null,\"step\":\"budget\",\"target\":\"photo\"},{\"decision\":\"report model estimate\",\"latency_ms\":0,\"model\":\"muse-spark-open\",\"prompt_version\":null,\"step\":\"estimate\",\"target\":\"photo\"}]}",
+   "signature": "13nbsi9Im1MC1289B-ZVm-k0ZhdOc7TQCMnCVj1xv5eWkwD_QahjBJx9Dn3Vli3MHJqK343ngs4O-6wn0BgIAw"
+  }
+ }
+}

@@ -21,6 +21,7 @@ import (
 	"neermattam/gateway/internal/live"
 	"neermattam/gateway/internal/metrics"
 	"neermattam/gateway/internal/overlay"
+	"neermattam/gateway/internal/photos"
 	"neermattam/gateway/internal/ratelimit"
 	"neermattam/gateway/internal/report"
 	"neermattam/gateway/internal/upstream"
@@ -38,6 +39,18 @@ type App struct {
 	Perception *upstream.Perception
 	Origins    *live.Origins
 	Hub        *live.Hub
+	// Replay is the engine client for the separate replay map that holds the
+	// labelled simulated Cyclone Michaung scenario; nil unless DEMO=1.
+	// ReplayOrigins labels every one of its cells simulated, and ReplayHub
+	// fans out its stream. Nothing from the replay reaches the live map,
+	// its stats or /api/india.
+	Replay        *upstream.Engine
+	ReplayOrigins *live.Origins
+	ReplayHub     *live.Hub
+	// Rain is the latest rainfall per city (rain.go); Photos the measured
+	// archival photos (photos.go).
+	Rain       *cityRain
+	Photos     *photos.Set
 	Pipeline   *report.Pipeline
 	Renderer   *web.Renderer
 	WhatsApp   *whatsapp.Handler
@@ -56,7 +69,8 @@ type App struct {
 	// Build is the source commit this gateway was built from.
 	Build buildinfo.Info
 
-	ready readiness // /readyz hysteresis (ready.go)
+	ready readiness  // /readyz hysteresis (ready.go)
+	india indiaCache // GET /api/india (india.go)
 
 	reportLimit *ratelimit.Limiter
 	apiLimit    *ratelimit.Limiter
@@ -75,6 +89,9 @@ func (a *App) Wait() { a.bg.Wait() }
 // Options let tests replace external dependencies.
 type Options struct {
 	Rainfall verify.Rainfall // nil uses Open-Meteo
+	// CityRain replaces the source of each city's recent rainfall, for
+	// tests; nil uses Open-Meteo.
+	CityRain RecentRainSource
 	// Now replaces the clock the report pipeline uses, for tests.
 	Now func() time.Time
 }
@@ -100,12 +117,15 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 		cells:       newCellsCache(cfg.CellsCacheTTL),
 		started:     time.Now(),
 	}
-	a.Origins.Demo = cfg.Demo
+	// The live map holds real reports only: a cell with no record is
+	// labelled reported, and the simulated scenario lives on the engine's
+	// replay layer, labelled simulated throughout.
+	a.Origins.Demo = false
 	a.Cities = cities.NewRegistry(log)
-	if c, ok := a.Cities.Get(cities.Default); ok {
-		// Only the default city holds the simulated scenario, so only there
-		// can a cell with no record read as simulated.
-		a.Origins.DemoArea = c.Contains
+	if cfg.Demo {
+		a.Replay = a.Engine.WithLayer(upstream.LayerReplay)
+		a.ReplayOrigins = live.NewOrigins()
+		a.ReplayOrigins.Demo = true
 	}
 	if path := a.provenancePath(); path != "" {
 		n, err := a.Origins.Load(path)
@@ -124,6 +144,11 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 		log.Info("build", "commit", a.Build.Commit, "from", a.Build.Source, "uncommitted_changes", a.Build.Dirty)
 	}
 	a.Hub = live.NewHub(cfg.MaxSSEClients, a.Origins, log, m)
+	a.Hub.DropSimulated = true
+	if a.Replay != nil {
+		a.ReplayHub = live.NewHub(cfg.MaxSSEClients, a.ReplayOrigins, log, m)
+	}
+	a.Photos = loadPhotos(log)
 	// The ticker shows real reports from before a restart.
 	recs := a.Origins.Records()
 	for i := min(len(recs), 8) - 1; i >= 0; i-- {
@@ -139,9 +164,22 @@ func New(base context.Context, cfg config.Config, log *slog.Logger, opts Options
 		return nil, err
 	}
 	rain := opts.Rainfall
+	var recent RecentRainSource = opts.CityRain
 	if rain == nil {
-		rain = verify.NewOpenMeteo(cfg.OpenMeteoURL, cfg.WeatherTimeout, m)
+		om := verify.NewOpenMeteo(cfg.OpenMeteoURL, cfg.WeatherTimeout, m)
+		rain = om
+		if recent == nil {
+			recent = om // one client and cache for both
+		}
+	} else if r, ok := rain.(RecentRainSource); ok && recent == nil {
+		recent = r
 	}
+	if recent == nil {
+		// A test that replaced the rainfall check without a city source
+		// gets "rain data unavailable", never a network call.
+		recent = rainUnavailable{}
+	}
+	a.Rain = newCityRain(recent, a.Cities)
 	a.Pipeline = &report.Pipeline{
 		Cfg:        cfg,
 		Cities:     a.Cities,
@@ -233,6 +271,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /control/demo/export", a.controlDemoExport)
 
 	mux.HandleFunc("GET /api/cities", a.apiCities)
+	mux.HandleFunc("GET /api/india", a.apiIndia)
 	mux.HandleFunc("GET /api/alerts/key", a.apiAlertKey)
 	mux.HandleFunc("POST /api/alerts", a.apiAlertCreate)
 	mux.HandleFunc("GET /api/alerts/{id}", a.apiAlertGet)
@@ -315,6 +354,10 @@ func (a *App) SaveProvenance() {
 // provenance saver.
 func (a *App) Run(ctx context.Context) {
 	go a.Hub.Run(ctx, a.Engine)
+	if a.ReplayHub != nil {
+		go a.ReplayHub.Run(ctx, a.Replay)
+	}
+	go a.Rain.Run(ctx)
 	go a.citiesRefresh(ctx)
 	go a.certKeysRefresh(ctx)
 	if a.Alerts != nil {
@@ -360,6 +403,9 @@ func (a *App) Run(ctx context.Context) {
 // WhatsApp jobs.
 func (a *App) Shutdown() {
 	a.Hub.Close()
+	if a.ReplayHub != nil {
+		a.ReplayHub.Close()
+	}
 	if a.WhatsApp != nil {
 		a.WhatsApp.Wait()
 	}

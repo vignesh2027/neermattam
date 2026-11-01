@@ -113,10 +113,19 @@ func TestCitySwitcherScopesEveryPage(t *testing.T) {
 	if !strings.Contains(vz, "Visakhapatnam station") || !strings.Contains(vz, "RK Beach") || !strings.Contains(vz, "విశాఖపట్నం") || strings.Contains(vz, "Kodambakkam station") {
 		t.Fatal("the route page should offer Visakhapatnam's presets and its Telugu name")
 	}
-	// Chennai keeps the labelled simulated scenario.
+	// Chennai opens on the live map; the simulated replay is one tap away
+	// and labelled when on.
 	_, body = get(t, nil, h.srv.URL+"/map?city=chennai")
-	if !strings.Contains(body, `class="sim-banner"`) {
-		t.Fatal("Chennai should show the simulated scenario banner")
+	if strings.Contains(body, "sim-banner") || !strings.Contains(body, "replay=michaung") || !strings.Contains(body, "Replay a past flood: Cyclone Michaung, December 2023, simulated") {
+		t.Fatal("Chennai should open live, with the replay offered")
+	}
+	_, body = get(t, nil, h.srv.URL+"/map?city=chennai&replay=michaung")
+	if !strings.Contains(body, "sim-banner nm-replay") || !strings.Contains(body, `"simulated":true`) {
+		t.Fatal("the replay should be labelled as simulated")
+	}
+	_, body = get(t, nil, h.srv.URL+"/map?city=mumbai&replay=michaung")
+	if strings.Contains(body, "sim-banner") || strings.Contains(body, `"simulated":true`) {
+		t.Fatal("the replay exists only in Chennai")
 	}
 	// ?at= picks the city holding the point.
 	_, body = get(t, nil, h.srv.URL+"/map?at=28.6315,77.2167")

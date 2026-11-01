@@ -248,12 +248,12 @@ func (c *cellsCache) put(key string, e *cellsEntry) {
 // fresh.
 func (a *App) cellsFor(ctx context.Context, bbox config.BBox) (*cellsEntry, error) {
 	key := fmt.Sprintf("%.4f,%.4f,%.4f,%.4f", bbox.MinLon, bbox.MinLat, bbox.MaxLon, bbox.MaxLat)
-	return a.cellsCached(ctx, "bbox="+key, url.Values{"bbox": {key}}, "")
+	return a.cellsCached(ctx, "bbox="+key, url.Values{"bbox": {key}}, "", false)
 }
 
 // cellsCached serves one engine cells query from the 2-second cache.
 // Requests that miss together share one fetch.
-func (a *App) cellsCached(ctx context.Context, key string, q url.Values, city string) (*cellsEntry, error) {
+func (a *App) cellsCached(ctx context.Context, key string, q url.Values, city string, replay bool) (*cellsEntry, error) {
 	if e, ok := a.cells.get(key); ok {
 		a.Metrics.CellsCache.Inc("hit")
 		return e, nil
@@ -277,7 +277,7 @@ func (a *App) cellsCached(ctx context.Context, key string, q url.Values, city st
 	// The shared fetch must not die with the first caller's request.
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	c.e, c.err = a.fetchCells(fctx, q, city)
+	c.e, c.err = a.fetchCells(fctx, q, city, replay)
 	if c.err == nil {
 		a.cells.put(key, c.e)
 	}
@@ -288,16 +288,23 @@ func (a *App) cellsCached(ctx context.Context, key string, q url.Values, city st
 	return c.e, c.err
 }
 
-func (a *App) fetchCells(ctx context.Context, q url.Values, city string) (*cellsEntry, error) {
-	raw, err := a.Engine.CellsQuery(ctx, q)
+func (a *App) fetchCells(ctx context.Context, q url.Values, city string, replay bool) (*cellsEntry, error) {
+	eng, origins := a.Engine, a.Origins
+	if replay {
+		eng, origins = a.Replay, a.ReplayOrigins
+	}
+	raw, err := eng.CellsQuery(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	simulated := a.Origins.HasSimulated()
-	if city != "" {
-		simulated = a.simulatedIn(city)
+	var body []byte
+	if replay {
+		body, err = live.DecorateCollectionFor(raw, origins, city, true)
+	} else {
+		// The live map is real reports only; a cell an older deployment
+		// filled with simulated water is left out, not shown as real.
+		body, err = live.DecorateLive(raw, origins, city)
 	}
-	body, err := live.DecorateCollectionFor(raw, a.Origins, city, simulated)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +364,10 @@ func (a *App) cellsRequest(r *http.Request) (*cellsAnswer, int, string) {
 	if _, ok := a.Cities.Get(city); !ok {
 		return nil, http.StatusBadRequest, fmt.Sprintf("city must be one of %s", strings.Join(a.Cities.SortedIDs(), ", "))
 	}
-	e, err := a.cellsForCity(r.Context(), city)
+	if rp := q.Get("replay"); rp != "" && !a.replayOn(r, city) {
+		return nil, http.StatusBadRequest, "replay=" + ReplayID + " is the only replay, and only in Chennai on a gateway that has it"
+	}
+	e, err := a.cellsForCityLayer(r.Context(), city, a.replayOn(r, city))
 	return &cellsAnswer{e, err}, 0, ""
 }
 
@@ -465,14 +475,18 @@ func (a *App) parseRoute(r *http.Request, city string) (routeQuery, *routeError)
 	return routeQuery{from, to, v, city}, nil
 }
 
-// routeJSON asks the engine and labels the result when the city holds
-// simulated water.
-func (a *App) routeJSON(ctx context.Context, q routeQuery) ([]byte, error) {
-	raw, err := a.Engine.Route(ctx, q.From, q.To, q.Vehicle)
+// routeJSON asks the engine, on the live map or with replay on the
+// simulated replay's map, and labels a replay route as simulated.
+func (a *App) routeJSON(ctx context.Context, q routeQuery, replay bool) ([]byte, error) {
+	eng := a.Engine
+	if replay {
+		eng = a.Replay
+	}
+	raw, err := eng.Route(ctx, q.From, q.To, q.Vehicle)
 	if err != nil {
 		return nil, err
 	}
-	if !a.simulatedIn(q.City) {
+	if !replay {
 		return raw, nil
 	}
 	var f map[string]any
@@ -510,7 +524,7 @@ func (a *App) routeFor(r *http.Request) ([]byte, *routeError) {
 	if perr != nil {
 		return nil, perr
 	}
-	body, err := a.routeJSON(r.Context(), q)
+	body, err := a.routeJSON(r.Context(), q, a.replayOn(r, q.City))
 	if err != nil {
 		return nil, a.engineRouteError(err, q.City)
 	}
@@ -530,7 +544,11 @@ func (a *App) apiStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	sub, err := a.Hub.SubscribeCity(city)
+	hub, replay := a.Hub, a.replayOn(r, city)
+	if replay {
+		hub = a.ReplayHub
+	}
+	sub, err := hub.SubscribeCity(city)
 	if err != nil {
 		a.Metrics.SSEDropped.Inc("refused_full")
 		w.Header().Set("Retry-After", "10")
@@ -545,7 +563,7 @@ func (a *App) apiStream(w http.ResponseWriter, r *http.Request) {
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	hello, _ := json.Marshal(map[string]any{"city": city, "simulated_scenario": a.simulatedIn(city) || (city == "" && a.Origins.HasSimulated()), "engine_stream": a.Hub.UpstreamConnected()})
+	hello, _ := json.Marshal(map[string]any{"city": city, "simulated_scenario": replay, "engine_stream": hub.UpstreamConnected()})
 	if _, err := fmt.Fprintf(w, "retry: 3000\n\nevent: hello\ndata: %s\n\n", hello); err != nil {
 		return
 	}
@@ -620,7 +638,8 @@ func (a *App) readyz(w http.ResponseWriter, r *http.Request) {
 		"perception":         status(perErr),
 		"engine_stream":      a.Hub.UpstreamConnected(),
 		"whatsapp":           whatsapp,
-		"simulated_scenario": a.Cfg.Demo,
+		"simulated_scenario": false,
+		"replay_available":   a.Replay != nil,
 	}
 	if engNote != "" {
 		body["engine_note"] = engNote

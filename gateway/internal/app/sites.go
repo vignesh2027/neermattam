@@ -142,9 +142,8 @@ func (a *App) sitesPage(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer wg.Done()
 		siting, _ = a.Engine.SitingAreas(ctx, url.Values{"city": {city}, "limit": {"8"}})
-		if a.simulatedIn(city) {
-			simSiting, _ = a.Engine.SitingAreas(ctx, url.Values{"city": {city}, "limit": {"8"}, "bucket": {"unattributed"}})
-		}
+		// The simulated replay lives on the engine's replay layer and never
+		// reaches the risk ledger, so the page shows real reports only.
 	}()
 	wg.Wait()
 	o := web.SitesOptions{Lang: p.Lang, City: city, Kind: kind}
