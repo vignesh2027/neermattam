@@ -1,96 +1,202 @@
 {{define "content"}}
 <div class="home">
-  <section class="h-hero" aria-labelledby="h-title">
-    <div class="h-hero-text">
-      <img class="h-logo" src="{{asset "brand/logo-240.webp"}}" srcset="{{asset "brand/logo-240.webp"}} 1x, {{asset "brand/logo-480.webp"}} 2x" width="240" height="182" alt="{{t "logo.alt"}}" fetchpriority="high">
-      <p class="eyebrow">{{t "home.eyebrow"}}</p>
-      <h1 id="h-title">{{t "hero.line1"}} <em>{{t "hero.line2"}}</em></h1>
-      <p class="h-lead">{{t "home.lead"}}</p>
-      <div class="h-cta">
-        <a class="btn btn-primary btn-lg" href="/map?city={{.City.ID}}">{{template "icon-map"}}{{t "home.cta_map"}}</a>
-        <a class="btn btn-ghost btn-lg" href="/report?city={{.City.ID}}">{{template "icon-camera"}}{{t "cta.report_water"}}</a>
+  <section class="lp-hero" aria-labelledby="h-title">
+    <div class="lp-hero-text">
+      <p class="lp-eyebrow"><span class="live-dot" aria-hidden="true"></span>{{t "lp.eyebrow"}}</p>
+      <h1 id="h-title">{{t "lp.h1_a"}} <em>{{t "lp.h1_b"}}</em></h1>
+      <p class="lp-lead">{{t "lp.lead"}}</p>
+      <div class="lp-cta">
+        <a class="btn btn-primary btn-lg" href="/report#try">{{template "icon-camera"}}{{t "lp.cta_measure"}}</a>
+        <a class="btn btn-ghost btn-lg" href="/map?city={{.City.ID}}">{{template "icon-map"}}{{t "lp.cta_map"}}</a>
       </div>
-      <p class="h-advisory">{{template "icon-alert"}}<span>{{t "advisory.short"}}</span></p>
+      <p class="lp-models"><span>{{t "lp.hero_models"}}</span><span class="lp-model">Muse Spark Open</span><span class="lp-model">SAM 2.1</span></p>
     </div>
-
-    <div class="h-preview card">
-      <div class="h-preview-head">
-        <span class="live-dot" aria-hidden="true"></span>
-        <b>{{t "home.preview_title"}}</b>
-        {{template "city_switcher" .}}
-        <span class="muted small" id="pv-count">{{t "home.preview_count" .Home.Preview.Count}}</span>
-        {{if .City.Simulated}}<span class="chip chip-violet">{{t "sim.title_plain"}}</span>{{end}}
+    <div class="lp-hero-extra">
+      {{with .Home.Samples}}
+      <div class="lp-try" id="try-samples">
+        <p class="lp-try-label">{{t "lp.try_label"}}</p>
+        <ul class="lp-try-list" role="list">
+          {{range .}}<li><a href="{{.Href}}" class="lp-try-item"><img src="{{asset .Thumb}}" alt="" width="96" height="64" loading="lazy" decoding="async"><span><b>{{.Place}}</b><small>{{.Kind}}{{if .Year}} · {{.Year}}{{end}}</small></span></a></li>
+          {{end}}
+        </ul>
       </div>
-      <a class="h-map-link" href="/map?city={{.City.ID}}" aria-label="{{t "home.preview_aria"}}">
-      {{if eq .Home.Preview.Count 0}}<p class="h-empty" role="note">{{template "icon-pin"}}<span><b>{{t "city.no_reports" (t (printf "city.%s" .City.ID))}}</b> {{t "city.no_reports_sub"}}</span></p>{{end}}
-      {{with .Home.Preview}}
-      <svg class="h-map" id="pv" viewBox="0 0 {{.W}} {{.H}}" width="{{.W}}" height="{{.H}}" role="img" aria-label="{{t "home.preview_img"}}" data-bounds="{{.Bounds}}" data-city="{{$.City.ID}}">
-        <defs>
-          <pattern id="pv-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#F1F4F9"/><rect width="2" height="6" fill="#8A99B2"/></pattern>
-          <radialGradient id="pv-bg" cx="50%" cy="40%" r="75%"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E7F0FB"/></radialGradient>
-        </defs>
-        <rect width="{{.W}}" height="{{.H}}" fill="url(#pv-bg)"/>
-        <g class="pv-grid" stroke="#DCE7F5" stroke-width="1">{{range .Grid}}<path d="{{.}}"/>{{end}}</g>
-        <g id="pv-cells">{{range .Bands}}<path fill="{{.Fill}}" d="{{.D}}"/>{{end}}</g><g id="pv-live"></g>
-        <g class="pv-places">{{range .Places}}<g transform="translate({{.X}} {{.Y}})"><circle r="3.5"/><text x="7" y="4">{{.Name}}</text></g>{{end}}</g>
-      </svg>
       {{end}}
-      <div class="h-preview-foot"><span>{{t "home.preview_foot"}}</span><span class="h-arrow" aria-hidden="true">{{template "icon-chev-right"}}</span></div>
-      </a>
+      <ul class="lp-stats" role="list">
+        <li><b>7</b><span>{{t "lp.stat_cities"}}</span></li>
+        <li><b>8</b><span>{{t "lp.stat_pages"}}</span></li>
+        <li><b>12</b><span>{{t "lp.stat_voice"}}</span></li>
+        <li><b>{{template "icon-shield"}}</b><span>{{t "lp.stat_signed"}}</span></li>
+      </ul>
     </div>
+
+    {{with .Home.Showcase}}
+    <figure class="lp-show card" aria-labelledby="sc-cap">
+      <div class="sc-top">
+        <span class="sc-kicker">{{t "lp.sc_kicker"}}</span>
+        <span class="chip chip-grey">{{t "lp.sc_run" .RunDate}}</span>
+      </div>
+      <div class="sc-stage" style="aspect-ratio:{{.W}} / {{.H}}">
+        <img class="sc-photo" src="{{asset .Photo}}" alt="{{t "lp.sc_alt_photo" .Place}}" width="{{.W}}" height="{{.H}}" fetchpriority="high">
+        <img class="sc-measured" src="{{asset .Measured}}" alt="" width="{{.W}}" height="{{.H}}" aria-hidden="true">
+        <span class="sc-ring" style="left:{{.BoxLeft}};top:{{.BoxTop}};width:{{.BoxWidth}};height:{{.BoxHeight}}" aria-hidden="true"></span>
+        <span class="sc-tag" style="left:{{.BoxLeft}};top:{{.WaterTop}}" aria-hidden="true"><b>{{.Depth}} cm</b> ± {{.Sigma}}</span>
+        <ol class="sc-phases" aria-hidden="true">
+          <li class="ph1">{{t "lp.ph_read"}}</li>
+          <li class="ph2">{{t "lp.ph_outline"}}</li>
+          <li class="ph3">{{t "lp.ph_check"}}</li>
+          <li class="ph4">{{t "lp.ph_measure"}}</li>
+        </ol>
+      </div>
+      <div class="sc-result">
+        <img class="sc-loupe" src="{{asset .Person}}" alt="{{t "lp.sc_alt_person"}}" width="107" height="160" loading="lazy">
+        <div class="sc-depth">
+          <p class="sc-num"><b>{{.Depth}}<small>cm</small></b><span>± {{.Sigma}} cm</span></p>
+          <p class="sc-method"><span class="chip method-chip">{{template "icon-person"}}{{.MethodLabel}}</span></p>
+          <p class="sc-note">{{.Ruler}}{{if .Estimate}} {{t "lp.sc_also" .Estimate .EstimateSigma}}{{end}}</p>
+        </div>
+      </div>
+      <ul class="sc-verdicts" role="list" aria-label="{{t "lp.sc_verdicts_aria"}}">
+        <li class="sc-v-head">{{t "lp.sc_verdicts" .Checks}}</li>
+        {{range .Verdicts}}<li class="chip v-{{.Tone}}">{{.Target}}: {{.Decision}}</li>{{end}}
+      </ul>
+      <figcaption id="sc-cap" class="sc-cap">{{t "lp.sc_caption" .Place .Taken}} <a href="{{.SourceURL}}" rel="noopener">{{.Author}}</a>, <a href="{{.LicenceURL}}" rel="noopener">{{.Licence}}</a>. {{t "lp.sc_honest"}}</figcaption>
+    </figure>
+    {{end}}
   </section>
 
-  <section class="h-section" aria-labelledby="h-how">
-    <p class="eyebrow">{{t "home.how_eyebrow"}}</p>
-    <h2 id="h-how">{{t "home.how_title"}}</h2>
-    <ol class="h-steps">
-      <li class="card"><span class="n">1</span>{{template "icon-camera"}}<h3>{{t "home.step1_title"}}</h3><p>{{t "home.step1"}}</p></li>
-      <li class="card"><span class="n">2</span>{{template "icon-eye"}}<h3>{{t "home.step2_title"}}</h3><p>{{t "home.step2"}}</p></li>
-      <li class="card"><span class="n">3</span>{{template "icon-check"}}<h3>{{t "home.step3_title"}}</h3><p>{{t "home.step3"}}</p></li>
-      <li class="card"><span class="n">4</span>{{template "icon-route"}}<h3>{{t "home.step4_title"}}</h3><p>{{t "home.step4"}}</p></li>
+  <section class="lp-sec lp-meta" aria-labelledby="h-meta">
+    <p class="eyebrow">{{t "lp.meta_eyebrow"}}</p>
+    <h2 id="h-meta">{{t "lp.meta_title"}}</h2>
+    <p class="h-sub">{{t "lp.meta_lead"}}</p>
+    <ol class="lp-flow" role="list">
+      <li><span class="lp-flow-ic">{{template "icon-camera"}}</span><b>{{t "lp.flow_photo"}}</b><small>{{t "lp.flow_photo_p"}}</small></li>
+      <li class="is-meta"><span class="lp-flow-ic">{{template "icon-eye"}}</span><b>Muse Spark Open</b><small>{{t "lp.flow_read"}}</small></li>
+      <li class="is-meta"><span class="lp-flow-ic">{{template "icon-outline"}}</span><b>SAM 2.1</b><small>{{t "lp.flow_outline"}}</small></li>
+      <li class="is-meta"><span class="lp-flow-ic">{{template "icon-check"}}</span><b>Muse Spark Open</b><small>{{t "lp.flow_judge"}}</small></li>
+      <li><span class="lp-flow-ic">{{template "icon-ruler"}}</span><b>{{t "lp.flow_geometry"}}</b><small>{{t "lp.flow_geometry_p"}}</small></li>
+      <li><span class="lp-flow-ic">{{template "icon-shield"}}</span><b>{{t "lp.flow_cert"}}</b><small>{{t "lp.flow_cert_p"}}</small></li>
     </ol>
+    <div class="lp-why">
+      <article class="card"><h3>{{t "lp.why1"}}</h3><p>{{t "lp.why1_p"}}</p></article>
+      <article class="card"><h3>{{t "lp.why2"}}</h3><p>{{t "lp.why2_p"}}</p></article>
+      <article class="card"><h3>{{t "lp.why3"}}</h3><p>{{t "lp.why3_p"}}</p></article>
+      <article class="card"><h3>{{t "lp.why4"}}</h3><p>{{t "lp.why4_p"}}</p></article>
+    </div>
+    <p class="lp-status"><span class="chip chip-ok">{{t "lp.status_running"}}</span> {{t "lp.status_running_p"}} <span class="chip chip-grey">{{t "lp.status_off"}}</span> {{t "lp.status_off_p"}}</p>
   </section>
 
-  {{with .Home.Trace}}
-  <section class="h-section h-agent" aria-labelledby="h-trace">
+  {{with .Home.Showcase}}
+  <section class="lp-sec" aria-labelledby="h-trace">
     <div class="h-split-head">
       <div>
         <p class="eyebrow">{{t "home.trace_eyebrow"}}</p>
         <h2 id="h-trace">{{t "home.trace_title"}}</h2>
-        <p class="h-sub">{{t "home.trace_lead" .Total}}</p>
+        <p class="h-sub">{{t "lp.trace_lead" .Total .Wall}}</p>
       </div>
-      <a class="btn btn-ghost" href="/report">{{t "home.trace_try"}}</a>
+      <a class="btn btn-ghost" href="/report#try">{{t "lp.trace_try"}}</a>
     </div>
-    <ol class="timeline excerpt" role="list">
-      {{range .Steps}}{{template "trace_step" .}}{{end}}
+    <ol class="lp-trace" role="list">
+      {{range .Key}}
+      <li class="lt k-{{.Kind}} t-{{.Tone}}">
+        <span class="lt-node" aria-hidden="true">{{template "trace-icon" .Kind}}</span>
+        <div class="lt-card{{if .Thumb}} has-thumb{{end}}">
+          {{if .Thumb}}<img class="lt-thumb" src="{{asset .Thumb}}" alt="{{.ThumbAlt}}" width="720" height="357" loading="lazy" decoding="async">{{end}}
+          <div class="lt-body">
+            <p class="lt-head"><b>{{.Label}}</b><span class="lt-target">{{.Target}}</span><span class="lt-lat">{{.Latency}}</span></p>
+            {{if .Words}}<p class="lt-words"><q lang="en">{{.Words}}</q></p>{{else}}<p class="lt-out">{{.Output}}</p>{{end}}
+            <p class="lt-foot">{{if .Decision}}<span class="tdec">{{.Decision}}</span>{{end}}<span class="tmodel">{{.Model}}</span></p>
+            <details class="lt-raw"><summary>{{t "lp.raw"}}</summary>
+              <dl><dt>{{t "trace.input"}}</dt><dd>{{.RawInput}}</dd><dt>{{t "lp.raw_output"}}</dt><dd>{{.RawOutput}}</dd><dt>{{t "lp.raw_decision"}}</dt><dd>{{.RawDecision}}</dd></dl>
+            </details>
+          </div>
+        </div>
+      </li>
+      {{end}}
     </ol>
-    <p class="small muted h-credit">{{t "home.trace_credit" .Photo .Credit .Date}}</p>
+    <details class="lp-all card">
+      <summary>{{t "lp.all_steps" .Total}}</summary>
+      <div class="table-wrap"><table>
+        <thead><tr><th scope="col">#</th><th scope="col">{{t "lp.col_step"}}</th><th scope="col">{{t "lp.col_target"}}</th><th scope="col">{{t "lp.col_model"}}</th><th scope="col">{{t "trace.input"}}</th><th scope="col">{{t "lp.raw_output"}}</th><th scope="col">{{t "lp.raw_decision"}}</th><th scope="col">ms</th></tr></thead>
+        <tbody>{{range .Steps}}<tr><td class="num">{{.Index}}</td><td>{{.Label}}</td><td>{{.Target}}</td><td class="mono">{{.Model}}</td><td class="mono small">{{.RawInput}}</td><td class="small">{{.RawOutput}}</td><td class="small">{{.RawDecision}}</td><td class="num">{{.Latency}}</td></tr>{{end}}</tbody>
+      </table></div>
+    </details>
+    <p class="small muted h-credit">{{t "lp.trace_credit" .Title .Author .Licence .RunDate}} <a href="{{.DocURL}}" rel="noopener">{{.Doc}}</a></p>
   </section>
   {{end}}
 
-  <section class="h-section" aria-labelledby="h-meta">
-    <p class="eyebrow">{{t "home.models_eyebrow"}}</p>
-    <h2 id="h-meta">{{t "home.models_title"}}</h2>
-    <div class="h-models">
-      <article class="card h-model"><span class="h-model-tag">{{t "home.model_reasoning"}}</span><h3>Muse Spark Open</h3><p>{{t "home.model_muse"}}</p></article>
-      <article class="card h-model"><span class="h-model-tag">{{t "home.model_masks"}}</span><h3>SAM 2.1</h3><p>{{t "home.model_sam"}}</p></article>
+  {{with .Home.India}}{{$live := .Live}}
+  <section class="lp-sec lp-india" aria-labelledby="h-india">
+    <p class="eyebrow">{{t "lp.india_eyebrow"}}</p>
+    <h2 id="h-india">{{t "lp.india_title"}}</h2>
+    <p class="h-sub">{{t "lp.india_lead"}}</p>
+    <div class="lp-india-grid">
+      <ul class="lp-cities" role="list" id="india">
+        {{range .Cities}}
+        <li><a class="lp-city{{if .Current}} is-current{{end}}" href="{{.Href}}" data-city="{{.ID}}">
+          <span class="lp-city-head"><b>{{t (printf "city.%s" .ID)}}</b>{{if .Simulated}}<span class="chip chip-violet">{{t "city.demo_tag"}}</span>{{end}}</span>
+          {{if $live}}
+          <span class="lp-kv"><span>{{t "lp.k_rain"}}</span><b data-k="rain">{{if .Rain24}}{{.Rain24}}{{else}}<i class="nd">{{t "lp.no_data"}}</i>{{end}}</b></span>
+          <span class="lp-kv"><span>{{t "lp.k_reports"}}</span><b data-k="reports">{{if .Reports}}{{.Reports}}{{else}}<i class="nd">{{t "lp.no_data"}}</i>{{end}}</b></span>
+          <span class="lp-kv"><span>{{t "lp.k_deepest"}}</span><b data-k="deepest">{{if .Deepest}}{{.Deepest}}{{else}}<i class="nd">{{t "lp.none_yet"}}</i>{{end}}</b></span>
+          <span class="lp-kv"><span>{{t "lp.k_sites"}}</span><b data-k="sites">{{if .Sites}}{{.Sites}}{{else}}<i class="nd">{{t "lp.no_data"}}</i>{{end}}</b></span>
+          {{else}}
+          <span class="lp-kv"><span>{{t "lp.k_cells"}}</span><b>{{.Cells}}</b></span>
+          <span class="lp-kv"><span>{{t "lp.k_routing"}}</span><b>{{if eq .Routing "ready"}}<span class="ok-dot"></span>{{t "lp.routing_ready"}}{{else}}<i class="nd">{{t "lp.routing_wait"}}</i>{{end}}</b></span>
+          {{end}}
+        </a></li>
+        {{end}}
+      </ul>
+      <div class="h-preview card">
+        <div class="h-preview-head">
+          <span class="live-dot" aria-hidden="true"></span>
+          <b>{{t "home.preview_title"}}</b>
+          {{template "city_switcher" $}}
+          <span class="muted small" id="pv-count">{{t "home.preview_count" $.Home.Preview.Count}}</span>
+          {{if $.City.Simulated}}<span class="chip chip-violet">{{t "sim.title_plain"}}</span>{{end}}
+        </div>
+        <a class="h-map-link" href="/map?city={{$.City.ID}}" aria-label="{{t "home.preview_aria"}}">
+        {{if eq $.Home.Preview.Count 0}}<p class="h-empty" role="note">{{template "icon-pin"}}<span><b>{{t "city.no_reports" (t (printf "city.%s" $.City.ID))}}</b> {{t "city.no_reports_sub"}}</span></p>{{end}}
+        {{with $.Home.Preview}}
+        <svg class="h-map" id="pv" viewBox="0 0 {{.W}} {{.H}}" width="{{.W}}" height="{{.H}}" role="img" aria-label="{{t "home.preview_img"}}" data-bounds="{{.Bounds}}" data-city="{{$.City.ID}}">
+          <defs>
+            <pattern id="pv-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#F1F4F9"/><rect width="2" height="6" fill="#8A99B2"/></pattern>
+            <radialGradient id="pv-bg" cx="50%" cy="40%" r="75%"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E7F0FB"/></radialGradient>
+          </defs>
+          <rect width="{{.W}}" height="{{.H}}" fill="url(#pv-bg)"/>
+          <g class="pv-grid" stroke="#DCE7F5" stroke-width="1">{{range .Grid}}<path d="{{.}}"/>{{end}}</g>
+          <g id="pv-cells">{{range .Bands}}<path fill="{{.Fill}}" d="{{.D}}"/>{{end}}</g><g id="pv-live"></g>
+          <g class="pv-places">{{range .Places}}<g transform="translate({{.X}} {{.Y}})"><circle r="3.5"/><text x="7" y="4">{{.Name}}</text></g>{{end}}</g>
+        </svg>
+        {{end}}
+        <div class="h-preview-foot"><span>{{t "home.preview_foot"}}</span><span class="h-arrow" aria-hidden="true">{{template "icon-chev-right"}}</span></div>
+        </a>
+      </div>
     </div>
+    <p class="small muted lp-india-src" id="india-src">{{if .Live}}{{t "lp.india_src" .RainSrc .Updated}}{{else}}{{t "lp.india_offline"}}{{end}} {{t "lp.india_unknown"}}</p>
+    {{with .Photos}}
+    <h3 class="lp-photos-title">{{t "lp.photos_title"}}</h3>
+    <ul class="lp-photos" role="list">
+      {{range .}}<li class="card"><img src="{{.Thumb}}" alt="" loading="lazy" decoding="async"><div><p class="lp-photo-d"><b>{{.Depth}} cm</b> ± {{.Sigma}} <span class="chip{{if eq .Method "estimate"}} chip-violet{{end}}">{{.MethodLabel}}</span></p><p class="small">{{.Place}}{{if .Date}} · {{.Date}}{{end}}</p><p class="small muted">{{if .Source}}<a href="{{.Source}}" rel="noopener">{{.Credit}}</a>{{else}}{{.Credit}}{{end}}{{if .Verify}} · <a href="{{.Verify}}">{{t "result.verify_link"}}</a>{{end}}</p></div></li>
+      {{end}}
+    </ul>
+    {{end}}
   </section>
+  {{end}}
 
-  <section class="h-section" aria-labelledby="h-who">
+  <section class="lp-sec" aria-labelledby="h-who">
     <p class="eyebrow">{{t "home.who_eyebrow"}}</p>
-    <h2 id="h-who">{{t "home.who_title"}}</h2>
-    <ul class="h-who" role="list">
-      <li class="card">{{template "vehicle-icon-car"}}<h3>{{t "home.who_commuters"}}</h3><p>{{t "home.who_commuters_p"}}</p><a class="h-who-link" href="/alerts">{{t "home.who_link_alerts"}}</a></li>
-      <li class="card">{{template "vehicle-icon-bike"}}<h3>{{t "home.who_riders"}}</h3><p>{{t "home.who_riders_p"}}</p><a class="h-who-link" href="/developers">{{t "home.who_link_api"}}</a></li>
-      <li class="card">{{template "vehicle-icon-auto"}}<h3>{{t "home.who_autos"}}</h3><p>{{t "home.who_autos_p"}}</p></li>
-      <li class="card">{{template "icon-family"}}<h3>{{t "home.who_families"}}</h3><p>{{t "home.who_families_p"}}</p></li>
-      <li class="card">{{template "icon-control"}}<h3>{{t "home.who_control"}}</h3><p>{{t "home.who_control_p"}}</p><a class="h-who-link" href="{{if .Demo}}/control/demo{{else}}/control{{end}}">{{t "home.who_link_control"}}</a></li>
+    <h2 id="h-who">{{t "lp.who_title"}}</h2>
+    <ul class="lp-who" role="list">
+      <li class="card">{{template "vehicle-icon-bike"}}<h3>{{t "lp.who_riders"}}</h3><p>{{t "lp.who_riders_p"}}</p><a class="h-who-link" href="/developers">{{t "home.who_link_api"}}</a></li>
+      <li class="card">{{template "icon-ambulance"}}<h3>{{t "lp.who_crews"}}</h3><p>{{t "lp.who_crews_p"}}</p><a class="h-who-link" href="/route">{{t "lp.who_link_route"}}</a></li>
+      <li class="card">{{template "icon-family"}}<h3>{{t "lp.who_families"}}</h3><p>{{t "lp.who_families_p"}}</p><a class="h-who-link" href="/alerts">{{t "home.who_link_alerts"}}</a></li>
+      <li class="card">{{template "icon-control"}}<h3>{{t "home.who_control"}}</h3><p>{{t "lp.who_control_p"}}</p><a class="h-who-link" href="{{if .Demo}}/control/demo{{else}}/control{{end}}">{{t "home.who_link_control"}}</a></li>
+      <li class="card">{{template "icon-server"}}<h3>{{t "lp.who_sites"}}</h3><p>{{t "lp.who_sites_p"}}</p><a class="h-who-link" href="/sites">{{t "lp.who_link_sites"}}</a></li>
     </ul>
   </section>
 
   {{with .Home.Facts}}
-  <section class="h-section" aria-labelledby="h-numbers">
+  <section class="lp-sec" aria-labelledby="h-numbers">
     <p class="eyebrow">{{t "home.numbers_eyebrow"}}</p>
     <h2 id="h-numbers">{{t "home.numbers_title"}}</h2>
     <p class="h-sub">{{t "home.numbers_lead"}}</p>
@@ -123,7 +229,7 @@
   </section>
   {{end}}
 
-  <section class="h-section">
+  <section class="lp-sec lp-close">
     <div class="card h-safety" role="note">
       {{template "icon-alert"}}
       <div>
@@ -131,6 +237,7 @@
         <p>{{t "home.safety_p"}}</p>
       </div>
     </div>
+    <p class="lp-built">{{t "lp.built"}} <a href="{{.Build.Repo}}" rel="noopener">{{.Build.RepoLabel}}</a></p>
   </section>
 </div>
 {{end}}
@@ -139,6 +246,9 @@
 {{define "icon-chev-right"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>{{end}}
 {{define "icon-family"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="5" r="2"/><circle cx="17" cy="5" r="2"/><circle cx="12" cy="11" r="1.6"/><path d="M5 21v-6l-1-4 3-2 3 2-1 4v6"/><path d="M15 21v-6l-1-4 3-2 3 2-1 4v6"/><path d="M11 21v-4l-1-2h4l-1 2v4"/></svg>{{end}}
 {{define "icon-control"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="m6 12 3-3 3 2 5-4"/></svg>{{end}}
+{{define "icon-ambulance"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 16V7a1 1 0 0 1 1-1h11v10"/><path d="M14 9h4l3 4v3h-2"/><path d="M2 16h2m5 0h6"/><circle cx="6.5" cy="16.5" r="2"/><circle cx="17" cy="16.5" r="2"/><path d="M8 8.5v4M6 10.5h4"/></svg>{{end}}
+{{define "icon-server"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="7" rx="1.5"/><rect x="4" y="14" width="16" height="7" rx="1.5"/><path d="M8 6.5h.01M8 17.5h.01M12 10v4"/></svg>{{end}}
+{{define "icon-outline"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="4"/></svg>{{end}}
 {{define "vehicle-icon-car"}}{{template "vehicle-icon" "car"}}{{end}}
 {{define "vehicle-icon-bike"}}{{template "vehicle-icon" "two_wheeler"}}{{end}}
 {{define "vehicle-icon-auto"}}{{template "vehicle-icon" "auto"}}{{end}}
@@ -174,5 +284,32 @@
     el.classList.remove("pv-flash"); void el.getBBox(); el.classList.add("pv-flash");
   });
   addEventListener("pagehide", function () { es.close(); });
+})();
+/* Refresh the city numbers from /api/india once a minute; on any error the
+   numbers the server drew stay as they are. */
+(function () {
+  "use strict";
+  var list = document.getElementById("india");
+  if (!list || !window.fetch) return;
+  function mm(x) { return x == null ? null : (x < 10 ? x.toFixed(1) : x.toFixed(0)) + " mm"; }
+  function put(a, k, val) {
+    var el = a.querySelector('[data-k="' + k + '"]');
+    if (!el || val == null) return;
+    el.textContent = val;
+  }
+  function tick() {
+    fetch("/api/india", { headers: { Accept: "application/json" } }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (!d || !d.cities) return;
+      d.cities.forEach(function (c) {
+        var a = list.querySelector('[data-city="' + c.id + '"]');
+        if (!a) return;
+        put(a, "rain", mm(c.rain_mm_24h));
+        put(a, "reports", c.real_reports_24h == null ? null : String(c.real_reports_24h));
+        put(a, "deepest", c.deepest_cm == null ? null : Math.round(c.deepest_cm) + " cm");
+        put(a, "sites", c.critical_sites == null ? null : String(c.critical_sites));
+      });
+    }).catch(function () {});
+  }
+  setInterval(tick, 60000);
 })();
 </script>{{end}}

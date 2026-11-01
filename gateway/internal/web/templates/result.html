@@ -8,15 +8,22 @@
 <article class="card" aria-labelledby="res-title">
   <header class="res-head">
     <p class="eyebrow">
-      {{if eq .Status "fused"}}<span class="chip chip-ok">{{.Title}}</span>{{else if eq .Status "rejected"}}<span class="chip chip-amber">{{.Title}}</span>{{else}}<span class="chip chip-grey">{{.Title}}</span>{{end}}
+      {{if eq .Status "fused"}}<span class="chip chip-ok">{{.Title}}</span>{{else if eq .Status "rejected"}}<span class="chip chip-amber">{{.Title}}</span>{{else if eq .Status "sample"}}<span class="chip chip-sample">{{.Title}}</span>{{else}}<span class="chip chip-grey">{{.Title}}</span>{{end}}
       {{if eq .Method "geometry"}}<span class="chip method-chip">{{template "icon-ruler"}}{{.MethodLabel}}</span>{{end}}
       {{if eq .Method "person"}}<span class="chip method-chip">{{template "icon-person"}}{{.MethodLabel}}</span>{{end}}
       {{if eq .Method "estimate"}}<span class="chip chip-violet method-chip">{{template "icon-eye"}}{{.MethodLabel}}</span>{{end}}
       {{if eq .Source "voice"}}<span class="chip chip-violet method-chip">{{template "icon-mic"}}{{t "result.voice_estimate"}}</span>{{end}}
     </p>
     {{if .HasDepth}}
+    <div class="res-top">
+    <div class="res-main">
     <h2 id="res-title" class="res-depth"><b>{{.Depth}}<small>cm</small></b><span>± {{.Sigma}} cm</span><span class="visually-hidden">{{t "result.depth_a11y" .Sigma}}</span></h2>
     <p class="res-place">{{.Place}} · {{.When}}</p>
+    {{with .Sample}}<p class="sample-note">{{template "icon-flask"}}<span>{{if .Taken}}{{t "lp.res_sample_note" .Place .Taken}}{{else}}{{t "lp.res_sample_note_nodate" .Place}}{{end}}</span></p>{{end}}
+    {{if .CertificateURL}}<a class="res-cert" href="{{.CertificateURL}}">{{template "icon-shield"}}{{t "result.verify_link"}}</a>{{end}}
+    </div>
+    {{with .Figure}}{{template "depth_figure" .}}{{end}}
+    </div>
     {{if .EstimateNote}}<p class="estimate-note">{{template "icon-eye"}}<span>{{.EstimateNote}}</span></p>{{end}}
     {{if .PersonNote}}<div class="person-note">{{template "icon-person"}}<div><p><b>{{t "result.person_reference"}}.</b> {{.PersonNote}}</p>{{if .PersonFaces}}<p class="person-faces">{{.PersonFaces}}</p>{{end}}</div></div>{{end}}
     <div class="gauge{{if .Gauge.HasEstimate}} has-est{{end}}{{if or (eq .Method "estimate") (eq .Source "voice")}} is-est{{end}}" aria-hidden="true">
@@ -122,3 +129,36 @@
 {{define "reason_text"}}{{.Text}}{{if .Quote}} {{template "model_quote" .Quote}}{{end}}{{end}}
 
 {{define "model_quote"}}<span class="model-quote"><span class="mq-label">{{t "rc.model_said"}}</span> <q lang="en">{{.}}</q></span>{{end}}
+
+{{define "depth_figure"}}<figure class="dfig{{if .Estimate}} is-est{{end}}">
+  <svg viewBox="0 0 {{.W}} {{.H}}" role="img" aria-label="{{.Aria}}">
+    <defs>
+      <pattern id="dfig-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#EDE7FA"/><rect width="2.4" height="6" fill="#A78BDA"/></pattern>
+      <linearGradient id="dfig-water" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7DD3FC" stop-opacity=".62"/><stop offset="1" stop-color="#2563EB" stop-opacity=".62"/></linearGradient>
+    </defs>
+    <g class="dfig-ruler">
+      <line x1="40" x2="40" y1="{{.Ground}}" y2="16"/>
+      {{range .Ticks}}<line x1="{{if .Major}}31{{else}}35{{end}}" x2="40" y1="{{.Y}}" y2="{{.Y}}"/>{{if .Label}}<text x="28" y="{{.Y}}" dy="3.5">{{.Label}}</text>{{end}}{{end}}
+      <text x="40" y="11" class="dfig-unit">cm</text>
+    </g>
+    <g class="dfig-wheel">
+      <circle cx="{{.Wheel.CX}}" cy="{{.Wheel.CY}}" r="{{.Wheel.R}}" stroke-width="{{.Wheel.Tyre}}"/>
+      <circle class="rim" cx="{{.Wheel.CX}}" cy="{{.Wheel.CY}}" r="{{.Wheel.Rim}}"/>
+      <circle class="hub" cx="{{.Wheel.CX}}" cy="{{.Wheel.CY}}" r="{{.Wheel.Hub}}"/>
+    </g>
+    <g class="dfig-person" transform="{{.Person}}">
+      <rect x="-11" y="-80" width="9.6" height="80" rx="4.5"/><rect x="1.4" y="-80" width="9.6" height="80" rx="4.5"/>
+      <rect x="-15" y="-132" width="30" height="58" rx="9"/>
+      <rect x="-21.5" y="-129" width="6.5" height="58" rx="3.2"/><rect x="15" y="-129" width="6.5" height="58" rx="3.2"/>
+      <rect x="-3.6" y="-139" width="7.2" height="9"/>
+      <circle cx="0" cy="-147.6" r="11.2"/>
+    </g>
+    <rect class="dfig-water" x="41" y="{{.WaterY}}" width="258" height="{{.WaterH}}"/>
+    <rect class="dfig-band" x="41" y="{{.BandY}}" width="258" height="{{.BandH}}"/>
+    <g class="dfig-marks">{{range .Marks}}<g class="{{if .Under}}under{{end}}"><line x1="160" x2="214" y1="{{.Y}}" y2="{{.Y}}"/><text x="219" y="{{.Y}}" dy="3.5">{{.Label}} <tspan>{{.Cm}}</tspan></text></g>{{end}}</g>
+    <line class="dfig-line" x1="41" x2="299" y1="{{.LineY}}" y2="{{.LineY}}"/>
+    <line class="dfig-ground" x1="36" x2="299" y1="{{.Ground}}" y2="{{.Ground}}"/>
+    <g class="dfig-label" transform="translate(46 {{.LabelY}})"><rect x="0" y="-12" width="84" height="24" rx="12"/><text x="42" y="4.5" text-anchor="middle">{{.Depth}} ± {{.Sigma}} cm</text></g>
+  </svg>
+  <figcaption>{{if .Estimate}}<i class="k k-est"></i>{{t "fig.key_est" .Sigma}}{{else}}<i class="k k-band"></i>{{t "fig.key_band" .Sigma}}{{end}} {{t "fig.key_refs"}}</figcaption>
+</figure>{{end}}

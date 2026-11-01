@@ -1,0 +1,207 @@
+{
+ "id": "c1",
+ "city": "chennai",
+ "place": "Nandanam",
+ "photo": {
+  "title": "Chennai flood water logging near ofice nandanam4.jpg",
+  "author": "Vijayingarsal",
+  "licence": "CC0 1.0",
+  "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Chennai_flood_water_logging_near_ofice_nandanam4.jpg",
+  "taken": "2015-12-03"
+ },
+ "run": {
+  "date": "2026-10-30",
+  "doc": "eval/RESULTS_REAL.md",
+  "measurement_id": "m_01M65V3GXJZSVRT6Y5GMNFBN65",
+  "wall_s": 48.5,
+  "cost_usd": 0.03233,
+  "models": {
+   "scene": "muse-spark-open",
+   "masks": "sam-2.1-hiera-small"
+  }
+ },
+ "result": {
+  "method": "person_reference",
+  "depth_cm": 45.6,
+  "sigma_cm": 13.0,
+  "height_cm": 158.8,
+  "height_sigma_cm": 9.0,
+  "estimate_cm": 36.0,
+  "estimate_sigma_cm": 20.0,
+  "estimate_basis": "Water at knee level of adults and lower hub of scooters across flooded road"
+ },
+ "images": {
+  "photo": "showcase/c1-photo.webp",
+  "measured": "showcase/c1-measured.webp",
+  "person": "showcase/c1-person.webp",
+  "width": 1024,
+  "height": 576,
+  "person_box": [
+   0.0215,
+   0.4583,
+   0.0566,
+   0.6545
+  ]
+ },
+ "steps": [
+  {
+   "step": "scene",
+   "target": "photo",
+   "model": "muse-spark-open",
+   "input": "photo 1632x918 px",
+   "output": "water visible; references: two_wheeler_wheel, person, person, two_wheeler_wheel; own estimate 36 cm",
+   "decision": "search 2 vehicle boxes for wheels, check 2 wheels and segment the water",
+   "latency_ms": 8955
+  },
+  {
+   "step": "segment",
+   "target": "water",
+   "model": "sam-2.1-hiera-small",
+   "input": "box [335,578,980,859] px + points [[607, 713]]",
+   "output": "mask 139499 px (9% of photo)",
+   "decision": "verify",
+   "latency_ms": 1517
+  },
+  {
+   "step": "segment",
+   "target": "two wheeler 2 wheel",
+   "model": "sam-2.1-hiera-small",
+   "input": "lower part of the vehicle box [991,446,1063,478] px",
+   "output": "74 proposals from 24 grid points and 1 dark blobs; none wheel-like",
+   "decision": "give up",
+   "latency_ms": 3610
+  },
+  {
+   "step": "segment",
+   "target": "two wheeler 1 wheel",
+   "model": "sam-2.1-hiera-small",
+   "input": "lower part of the vehicle box [787,463,914,524] px",
+   "output": "75 proposals from 24 grid points and 1 dark blobs; best: wheel 0.29 = shape 0.35 (fit 0.97, arc 69 deg, ratio 0.67, spill 0.01) x dark 0.65 x size 1.00; wheel 0.16 = shape 0.28 (fit 1.00, arc 51 deg, ratio 0.39, spill 0.00) x dark 0.18 x size 1.00",
+   "decision": "verify the best two",
+   "latency_ms": 5825
+  },
+  {
+   "step": "verify",
+   "target": "water",
+   "model": "muse-spark-open",
+   "input": "photo with the proposed region tinted",
+   "output": "is_water=true, coverage partial; Magenta is water but only foreground, missing the flooded area around the wading people and motorbike.",
+   "decision": "refine with box [82,477,1077,597] px + point [653, 532]",
+   "latency_ms": 6465,
+   "thumb": "showcase/c1-water_try0.webp"
+  },
+  {
+   "step": "segment",
+   "target": "water",
+   "model": "sam-2.1-hiera-small",
+   "input": "box [82,477,1077,597] px + points [[653, 532]]",
+   "output": "mask 87835 px (6% of photo)",
+   "decision": "verify",
+   "latency_ms": 264
+  },
+  {
+   "step": "verify",
+   "target": "water",
+   "model": "muse-spark-open",
+   "input": "photo with the proposed region tinted",
+   "output": "is_water=true, coverage good; Magenta tint covers the brown floodwater surface surrounding the people and motorcycle within the yellow box.",
+   "decision": "accept",
+   "latency_ms": 4779,
+   "thumb": "showcase/c1-water_try1.webp"
+  },
+  {
+   "step": "verify",
+   "target": "two wheeler 1 wheel",
+   "model": "muse-spark-open",
+   "input": "crop [601,250,1086,735] px with 2 outlines A and B",
+   "output": "chose A, shape 0.35 (fit 0.97, arc 69 deg, ratio 0.67, spill 0.01), edge ratio 0.82, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.57, is_target=true, outline partial, view side, edge visible 0.55, waterline visible; B outline is in the water away from the wheel and completely wrong, A outline is on the rear wheel but is boxy and does not closely follow the round outer tyre ",
+   "decision": "refine with box [793,469,833,506] px + points [795,492], [804,476], [822,478], [830,492] - points [811,490], [844,476], [836,498]",
+   "latency_ms": 7408,
+   "thumb": "showcase/c1-two_wheeler_1_wheel_try0.webp"
+  },
+  {
+   "step": "segment",
+   "target": "two wheeler 1 wheel",
+   "model": "sam-2.1-hiera-small",
+   "input": "box [793,469,833,506] px + points [795,492], [804,476], [822,478], [830,492] - points [811,490], [844,476], [836,498]",
+   "output": "6 proposals, 6 distinct; best shapes 0.45, 0.37",
+   "decision": "verify the best two",
+   "latency_ms": 1519
+  },
+  {
+   "step": "verify",
+   "target": "two wheeler 1 wheel",
+   "model": "muse-spark-open",
+   "input": "crop [690,346,946,602] px with 2 outlines A and B",
+   "output": "chose A, shape 0.45 (fit 1.00, arc 81 deg, ratio 0.76, spill 0.00, closed ring), edge ratio 0.58, not a tyre edge: a darker ring lies just outside the outline (dark 0.55 outside, 0.22 inside): it follows the rim, inside the tyre, box agreement 0.24, is_target=false, outline wrong, view side, edge visible 0.35, waterline visible; A is tighter than B but its magenta still encloses red bodywork/mudguard above the black tyre and does not follow the tyre outer edge strictly.",
+   "decision": "refine with box [793,485,821,505] px + points [794,499], [802,487], [812,488], [819,499] - points [806,497], [815,487], [811,496]",
+   "latency_ms": 9689,
+   "thumb": "showcase/c1-two_wheeler_1_wheel_try1.webp"
+  },
+  {
+   "step": "segment",
+   "target": "two wheeler 1 wheel",
+   "model": "sam-2.1-hiera-small",
+   "input": "box [793,485,821,505] px + points [794,499], [802,487], [812,488], [819,499] - points [806,497], [815,487], [811,496]",
+   "output": "6 proposals, 6 distinct; best shapes 0.09, 0.06",
+   "decision": "verify the best two",
+   "latency_ms": 1397
+  },
+  {
+   "step": "verify",
+   "target": "two wheeler 1 wheel",
+   "model": "muse-spark-open",
+   "input": "crop [682,364,938,620] px with 2 outlines A and B",
+   "output": "chose NONE, is_target=false, outline wrong, view side, edge visible 0.20, waterline visible; Both magenta outlines enclose license plate/mudguard and bodywork above water instead of following the round black tyre outer edge with rim inside.",
+   "decision": "give up",
+   "latency_ms": 9652,
+   "thumb": "showcase/c1-two_wheeler_1_wheel_try2.webp"
+  },
+  {
+   "step": "segment",
+   "target": "people",
+   "model": "sam-2.1-hiera-small",
+   "input": "2 person boxes with head and body points",
+   "output": "2 masks",
+   "decision": "measure each against the stature prior",
+   "latency_ms": 2169
+  },
+  {
+   "step": "segment",
+   "target": "water below people",
+   "model": "sam-2.1-hiera-small",
+   "input": "2 bands just below people the verified water does not reach",
+   "output": "2 water masks",
+   "decision": "check that each outline ends at water",
+   "latency_ms": 1673
+  },
+  {
+   "step": "geometry",
+   "target": "person 1",
+   "model": "geometry",
+   "input": "person and water masks",
+   "output": "depth 45.6 cm, sigma 13.0 cm, 71% of stature above water; scene model says the water is at the knee (45 cm)",
+   "decision": "candidate",
+   "latency_ms": 6
+  },
+  {
+   "step": "geometry",
+   "target": "person 2",
+   "model": "geometry",
+   "input": "person and water masks",
+   "output": "depth 31.2 cm, sigma 15.4 cm, 80% of stature above water; scene model says the water is at the knee (45 cm)",
+   "decision": "candidate",
+   "latency_ms": 1
+  },
+  {
+   "step": "estimate",
+   "target": "photo",
+   "model": "geometry",
+   "input": "no measurable wheel; a measured person",
+   "output": "depth 45.6 cm, sigma 13.0 cm",
+   "decision": "use the person",
+   "latency_ms": 0
+  }
+ ]
+}

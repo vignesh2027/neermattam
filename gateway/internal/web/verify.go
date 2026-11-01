@@ -90,7 +90,7 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 	v.Decision = "unknown"
 	if d := st.Decision; d != nil {
 		switch d.Status {
-		case certs.DecisionFused, certs.DecisionRejected, certs.DecisionUnusable:
+		case certs.DecisionFused, certs.DecisionRejected, certs.DecisionUnusable, certs.DecisionSample:
 			v.Decision = d.Status
 		}
 		v.DecisionTrust = fmt.Sprintf("%.2f", d.Trust)

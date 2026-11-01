@@ -23,7 +23,8 @@
 
   <div class="sites-grid">
     <section class="sites-list" aria-label="{{t "sites.list_aria"}}">
-      {{if not .Cards}}<div class="card panel"><p>{{t "sites.none" (t (printf "sites.kind.%s" .Kind))}}</p><p class="small muted">{{t "sites.none_p"}}</p></div>{{end}}
+      {{if and (not .Cards) (not .Unknown)}}<div class="card panel"><p>{{t "sites.none" (t (printf "sites.kind.%s" .Kind))}}</p><p class="small muted">{{t "sites.none_p"}}</p></div>{{end}}
+      {{if and (not .Cards) .Unknown}}<div class="card panel sites-dry"><p><b>{{t "lp.sites_no_water" (len .Unknown)}}</b></p><p class="small muted">{{t "lp.sites_no_water_p"}}</p></div>{{end}}
       {{range .Cards}}
       <article class="card site-card{{if .Selected}} is-selected{{end}} st-{{.Status}}">
         <div class="site-head">
@@ -39,6 +40,19 @@
         </ul>
         <p class="site-links small"><a href="{{.Href}}">{{t "sites.details"}}</a>{{if .OSMHref}} <a href="{{.OSMHref}}" rel="noopener" target="_blank">{{t "sites.osm_link"}}</a>{{end}}</p>
       </article>
+      {{end}}
+      {{with .Unknown}}
+      <section class="card sites-unknown" aria-labelledby="sites-unknown-h">
+        <h2 id="sites-unknown-h">{{t "lp.sites_unknown_title" (len .)}}</h2>
+        <p class="small muted">{{t "lp.sites_unknown_p"}}</p>
+        <div class="table-wrap"><table class="sites-table">
+          <thead><tr><th scope="col">{{t "lp.sites_col_site"}}</th><th scope="col">{{t "lp.sites_col_reports"}}</th><th scope="col"><span class="visually-hidden">OpenStreetMap</span></th></tr></thead>
+          <tbody>
+          {{range .}}<tr{{if .Selected}} class="is-selected"{{end}}><th scope="row"><a href="{{.Href}}">{{.Name}}</a>{{if .Operator}}<small>{{.Operator}}</small>{{end}}</th><td class="num">{{.Coverage}}</td><td class="small">{{if .OSMHref}}<a href="{{.OSMHref}}" rel="noopener" target="_blank" aria-label="{{t "sites.osm_link"}}" title="{{t "sites.osm_link"}}">OSM</a>{{end}}</td></tr>
+          {{end}}
+          </tbody>
+        </table></div>
+      </section>
       {{end}}
       {{if gt .Total .Shown}}<p class="small muted">{{t "sites.more" .Shown .Total}}</p>{{end}}
     </section>

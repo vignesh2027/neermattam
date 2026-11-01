@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"math"
 	"net/url"
+	"sort"
 	"strings"
 
 	"neermattam/gateway/internal/i18n"
@@ -29,7 +30,8 @@ type SitesView struct {
 	City       string
 	Kind       string
 	Tabs       []SiteTab
-	Cards      []SiteCard
+	Cards      []SiteCard // sites with water reported near them, wettest first
+	Unknown    []SiteCard // sites with no recent reports near them, as a table
 	Total      int
 	Shown      int
 	OSMCount   int
@@ -78,6 +80,8 @@ type ZoneLine struct {
 	Fresh    string // "newest report 5 min ago" or ""
 	Trend    string // "rising", "falling", "steady" in words, or ""
 	OldDeep  string // a warning about expired deep reports, or ""
+	Known    int    // cells with recent reports
+	Cells    int    // cells in the ring
 }
 
 // SiteDetailView is the selected site.
@@ -153,6 +157,27 @@ func statusChip(s string) string {
 	return "chip-grey"
 }
 
+func statusRank(s string) int {
+	switch s {
+	case "over":
+		return 0
+	case "nearby":
+		return 1
+	case "under":
+		return 2
+	}
+	return 3
+}
+
+// Coverage is the outer ring's reported share, for the table of sites
+// with no recent reports.
+func (c SiteCard) Coverage() string {
+	if n := len(c.Zones); n > 0 {
+		return fmt.Sprintf("%d / %d", c.Zones[n-1].Known, c.Zones[n-1].Cells)
+	}
+	return ""
+}
+
 func radiusText(m float64) string {
 	if m >= 1000 {
 		return strings.TrimSuffix(fmt.Sprintf("%.1f", m/1000), ".0") + " km"
@@ -177,7 +202,7 @@ func zoneLines(lang string, s upstream.Site, threshold float64) []ZoneLine {
 	lim := f0(threshold)
 	for _, z := range s.Zones {
 		r := radiusText(z.RadiusM)
-		zl := ZoneLine{Radius: r, Status: z.Status, Chip: statusChip(z.Status)}
+		zl := ZoneLine{Radius: r, Status: z.Status, Chip: statusChip(z.Status), Known: z.CellsKnown, Cells: z.Cells}
 		switch z.Status {
 		case "over":
 			zl.Label = i18n.T(lang, "sites.zone_over", lim)
@@ -401,9 +426,17 @@ func NewSitesView(o SitesOptions, list *upstream.SiteList, detail *upstream.Site
 			v.DataUntil = (*list.OSM.DataUntil)[:10]
 		}
 		for _, s := range list.Sites {
-			v.Cards = append(v.Cards, siteCard(lang, o.City, o.Kind, s, list.ThresholdCm, o.Site))
+			c := siteCard(lang, o.City, o.Kind, s, list.ThresholdCm, o.Site)
+			if c.Status == "over" || c.Status == "nearby" || c.Status == "under" {
+				v.Cards = append(v.Cards, c)
+			} else {
+				v.Unknown = append(v.Unknown, c)
+			}
 			names[s.ID] = siteName(lang, s)
 		}
+		// Water near a site first; a site nobody has reported near is
+		// folded into one table instead of a card each.
+		sort.SliceStable(v.Cards, func(i, j int) bool { return statusRank(v.Cards[i].Status) < statusRank(v.Cards[j].Status) })
 	}
 	if detail != nil {
 		d := &SiteDetailView{

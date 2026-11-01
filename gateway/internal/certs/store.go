@@ -42,6 +42,9 @@ const (
 	DecisionFused    = "fused"
 	DecisionRejected = "rejected"
 	DecisionUnusable = "unusable"
+	// DecisionSample is one of the gateway's sample photos: measured live,
+	// never added to the map.
+	DecisionSample = "sample"
 )
 
 // Decision is the gateway's verdict on a measured report.

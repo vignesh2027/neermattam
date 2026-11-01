@@ -13,9 +13,12 @@ import (
 
 // HomeView is the landing page's data.
 type HomeView struct {
-	Preview PreviewView
-	Trace   *HomeTrace
-	Facts   *facts.Facts
+	Preview  PreviewView
+	Trace    *HomeTrace
+	Facts    *facts.Facts
+	Showcase *ShowcaseView
+	Samples  []SampleCard
+	India    *IndiaView
 }
 
 // HomeTrace is the recorded agent run shown as cards.
