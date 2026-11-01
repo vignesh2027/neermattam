@@ -44,13 +44,13 @@ On Modal a Go launcher adds a front proxy (:8000) and a model budget guard (:830
 | Model | Where it runs | What it does | Status |
 |---|---|---|---|
 | Muse Spark Open | Baseten (`meta-models/muse-spark-open-1026`) | Scene reading, the second waterline, verification of every wheel and water mask, voice notes | Running |
-| SAM 2.1 hiera-small | CPU, inside the container | Wheel, person and water masks | Running |
-| SAM 3.1 | Meta Model API adapter; loader in the Modal SAM service | Masks, and noun-phrase tracking of floating debris for surface speed | Written behind the same interface, not running |
+| SAM 2.1 hiera-small | CPU, inside the container | Wheel, person and water masks; its video predictor tracks floating debris for surface speed | Running (video speed is experimental) |
+| SAM 3.1 | Meta Model API adapter; loader in the Modal SAM service | Masks, and tracking debris by noun phrase instead of by box | Written behind the same interface, not running |
 | Muse Spark 1.3 | Meta Model API adapter | Scene reading on the hosted path | Written behind the same interface, not running |
 
 Muse Spark Open is the only reasoning model in the system, and it works as a judge as much as a reader: shown two candidate outlines, it has to say which follows the tyre, and why. It reads voice notes in twelve languages, mixed or not (Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Marathi, Gujarati, Punjabi, Odia, Urdu and English), and [`voice.py`](perception/src/neermattam_perception/voice.py) turns words like "knee deep" into a depth range.
 
-Why the rest is not running: SAM 3.1's weights are gated on Hugging Face and my access has not been approved (downloads answer 403, [docs/MODAL.md](docs/MODAL.md)), and the hosted Meta Model API account cannot make calls until a credit card is added. The adapters are in [`adapters.py`](perception/src/neermattam_perception/adapters.py) and [`sam_local.py`](perception/src/neermattam_perception/sam_local.py) and switch on with `NEERMATTAM_SCENE` and `NEERMATTAM_MASKS`. Muse Voice Transcribe on the hosted API is not written yet. Velocity from video waits on SAM 3.1, because SAM 2.1 tracks from prompts on a frame, not from a noun phrase.
+Why the rest is not running: SAM 3.1's weights are gated on Hugging Face and my access has not been approved (downloads answer 403, [docs/MODAL.md](docs/MODAL.md)), and the hosted Meta Model API account cannot make calls until a credit card is added. The adapters are in [`adapters.py`](perception/src/neermattam_perception/adapters.py) and [`sam_local.py`](perception/src/neermattam_perception/sam_local.py) and switch on with `NEERMATTAM_SCENE` and `NEERMATTAM_MASKS`. Muse Voice Transcribe on the hosted API is not written yet. Velocity from video runs on SAM 2.1: Muse Spark Open boxes the floating objects on a key frame and SAM 2.1's video predictor follows each box ([eval/RESULTS_VIDEO.md](eval/RESULTS_VIDEO.md)); with SAM 3.1 the noun phrase would be tracked instead.
 
 ## Safety by design
 
@@ -152,7 +152,8 @@ Every page, message and result card is available in English, Tamil, Hindi, Telug
 * The scene model's own estimates are uncalibrated, and moved by up to 60 cm between runs on one photo.
 * Latency depends on Baseten; on slow days it was two to six times longer.
 * No published source was found for the auto, two-wheeler or bus depth limits. The first two borrow the car figure.
-* Next: SAM 3.1 and video velocity once access is approved, and one ward pilot with a city control room ([docs/IMPACT.md](docs/IMPACT.md)).
+* Video speed is experimental: on five real clips none had both a measured reference and tracks good enough for a speed in metres per second ([eval/RESULTS_VIDEO.md](eval/RESULTS_VIDEO.md)).
+* Next: SAM 3.1 once access is approved, and one ward pilot with a city control room ([docs/IMPACT.md](docs/IMPACT.md)).
 
 ## Licence and data credits
 

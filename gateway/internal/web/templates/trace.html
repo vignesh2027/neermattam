@@ -10,6 +10,7 @@
     <div class="tfoot">
       {{if .Decision}}<span class="tdec">{{.Decision}}</span>{{end}}
       {{if .Detail}}<span class="tdetail">{{.Detail}}</span>{{end}}
+      {{if .Quote}}<span class="tdetail">{{template "model_quote" .Quote}}</span>{{end}}
       <span class="tmodel">{{.Model}}</span>{{if .Prompt}}<span class="tprompt" title="{{t "trace.prompt"}}">{{.Prompt}}</span>{{end}}
     </div>
     {{if .Input}}<p class="tin"><span>{{t "trace.input"}}</span> {{.Input}}</p>{{end}}

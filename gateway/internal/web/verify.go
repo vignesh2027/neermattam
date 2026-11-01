@@ -6,6 +6,7 @@ import (
 
 	"neermattam/gateway/internal/certs"
 	"neermattam/gateway/internal/i18n"
+	"neermattam/gateway/internal/reasons"
 	"neermattam/gateway/internal/upstream"
 )
 
@@ -25,7 +26,7 @@ type VerifyView struct {
 	Decision        string
 	DecisionTrust   string
 	DecisionAt      string
-	DecisionReasons []string
+	DecisionReasons []reasons.View
 
 	// Upload is "match", "mismatch" or "unknown": does the certificate's
 	// input hash equal the SHA-256 of the file the gateway received?
@@ -44,7 +45,7 @@ type VerifyView struct {
 	Depth      string
 	Sigma      string
 	Confidence string
-	Reasons    []string
+	Reasons    []reasons.View
 
 	Models   []VerifyModel
 	Prompts  []VerifyPrompt
@@ -70,6 +71,7 @@ type VerifyStep struct {
 	Index                           int
 	Kind, Label, Target, Model      string
 	Prompt, Decision, Latency, Tone string
+	Detail, Quote                   string
 }
 
 // NewVerifyView builds the page for a stored certificate and its check.
@@ -96,12 +98,16 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 			v.DecisionAt = When(lang, d.DecidedAt)
 		}
 		for _, r := range d.Reasons {
+			if r.Code != nil {
+				v.DecisionReasons = append(v.DecisionReasons, reasons.Reason(lang, r.Text[i18n.Default], r.Code))
+				continue
+			}
 			text := r.Text[lang]
 			if text == "" {
 				text = r.Text[i18n.Default]
 			}
 			if text != "" {
-				v.DecisionReasons = append(v.DecisionReasons, text)
+				v.DecisionReasons = append(v.DecisionReasons, reasons.View{Text: text})
 			}
 		}
 	}
@@ -147,7 +153,7 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 		v.Depth, v.Sigma = fmt.Sprintf("%.1f", *d.DepthCm), fmt.Sprintf("%.1f", *d.DepthSigmaCm)
 	}
 	v.Confidence = fmt.Sprintf("%.2f", d.Confidence)
-	v.Reasons = d.Reasons
+	v.Reasons = reasons.List(lang, d.Reasons, st.ReasonCodes)
 	for _, m := range rec.Models {
 		role := m.Role
 		switch m.Role {
@@ -166,8 +172,17 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 		v.Prompts = append(v.Prompts, VerifyPrompt{p.ID, sha})
 	}
 	for i, s := range rec.Steps {
-		ts := NewTraceStep(lang, i, upstream.AgentStep{Step: s.Step, Target: s.Target, Model: s.Model, Decision: s.Decision, LatencyMs: s.LatencyMs})
-		vs := VerifyStep{Index: i + 1, Kind: ts.Kind, Label: ts.Label, Target: s.Target, Model: s.Model, Decision: s.Decision, Latency: ts.Latency, Tone: ts.Tone}
+		step := upstream.AgentStep{Step: s.Step, Target: s.Target, Model: s.Model, Decision: s.Decision, LatencyMs: s.LatencyMs}
+		if len(st.StepCodes) == len(rec.Steps) {
+			step.DecisionCode = st.StepCodes[i]
+		}
+		ts := NewTraceStep(lang, i, step)
+		vs := VerifyStep{Index: i + 1, Kind: ts.Kind, Label: ts.Label, Target: ts.Target, Model: s.Model, Decision: s.Decision, Latency: ts.Latency, Tone: ts.Tone}
+		if step.DecisionCode != nil {
+			if d, ok := reasons.StepDecision(lang, step.DecisionCode); ok {
+				vs.Decision, vs.Detail, vs.Quote = d.Text, d.Detail, d.Quote
+			}
+		}
 		if s.PromptVersion != nil {
 			vs.Prompt = *s.PromptVersion
 		}

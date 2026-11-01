@@ -41,17 +41,18 @@ var Languages = []Lang{
 
 // Catalogs maps a language code to its messages.
 var Catalogs = map[string]map[string]string{
-	"en": merge(enPages, enOps, enVerify, enSites, enFixes), "ta": merge(ta, taOps, taVerify, taSites, taFixes), "hi": merge(hi, hiOps, hiVerify, hiSites, hiFixes),
-	"te": merge(te, teOps, teVerify, teSites, teFixes), "kn": merge(kn, knOps, knVerify, knSites, knFixes), "ml": merge(ml, mlOps, mlVerify, mlSites, mlFixes),
-	"bn": merge(bn, bnOps, bnVerify, bnSites, bnFixes), "mr": merge(mr, mrOps, mrVerify, mrSites, mrFixes),
+	"en": merge(enPages, enOps, enVerify, enSites, enFixes, enCodes), "ta": merge(ta, taOps, taVerify, taSites, taFixes, taCodes), "hi": merge(hi, hiOps, hiVerify, hiSites, hiFixes, hiCodes),
+	"te": merge(te, teOps, teVerify, teSites, teFixes, teCodes), "kn": merge(kn, knOps, knVerify, knSites, knFixes, knCodes), "ml": merge(ml, mlOps, mlVerify, mlSites, mlFixes, mlCodes),
+	"bn": merge(bn, bnOps, bnVerify, bnSites, bnFixes, bnCodes), "mr": merge(mr, mrOps, mrVerify, mrSites, mrFixes, mrCodes),
 }
 
 // merge joins a language's message files: the pages (messages_<code>.go),
 // the city, control room, alerts and developer texts
 // (messages_<code>_ops.go), the measurement certificate page
 // (messages_verify.go, every language in one file) and the Critical sites
-// page and its alerts (messages_<code>_sites.go), and the review fixes
-// (messages_fixes.go, every language in one file).
+// page and its alerts (messages_<code>_sites.go), the review fixes
+// (messages_fixes.go, every language in one file), and perception's reason
+// and decision codes (messages_codes_<code>.go).
 func merge(parts ...map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, p := range parts {
@@ -93,6 +94,17 @@ func T(lang, key string, args ...any) string {
 		return msg
 	}
 	return fmt.Sprintf(msg, args...)
+}
+
+// Lookup returns the raw message for key in lang, falling back to English,
+// and whether English has the key at all. Unlike T it never formats, so a
+// caller can fill named placeholders such as {depth_cm} itself.
+func Lookup(lang, key string) (string, bool) {
+	if msg, ok := Catalogs[lang][key]; ok {
+		return msg, true
+	}
+	msg, ok := Catalogs[Default][key]
+	return msg, ok
 }
 
 // HTML is T for messages that carry trusted markup (keys ending in ".html").

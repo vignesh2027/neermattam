@@ -43,10 +43,10 @@
     {{if eq .Decision "fused"}}<p>{{t "vfy.dec_fused" .DecisionTrust}}</p>
     {{else if eq .Decision "rejected"}}<p>{{t "vfy.dec_rejected"}}</p>
     {{if .DecisionReasons}}<p class="section-title">{{t "vfy.dec_why"}}</p>
-    <ul class="reasons">{{range .DecisionReasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    <ul class="reasons">{{range .DecisionReasons}}<li>{{template "reason_text" .}}</li>{{end}}</ul>{{end}}
     <p class="small muted">{{t "result.trust_rejected" .DecisionTrust}}</p>
     {{else if eq .Decision "unusable"}}<p>{{t "vfy.dec_unusable"}}</p>
-    {{if .DecisionReasons}}<ul class="reasons notes">{{range .DecisionReasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    {{if .DecisionReasons}}<ul class="reasons notes">{{range .DecisionReasons}}<li>{{template "reason_text" .}}</li>{{end}}</ul>{{end}}
     {{else}}<p>{{t "vfy.dec_unknown"}}</p>{{end}}
     {{if .DecisionAt}}<p class="small muted">{{t "vfy.dec_at" .DecisionAt}}</p>{{end}}
   </section>
@@ -67,7 +67,7 @@
         <div class="fact"><dt>{{t "vfy.received"}}</dt><dd>{{.ReceivedAt}}</dd></div>
       </dl>
       {{if .Reasons}}<p class="section-title">{{t "vfy.reasons"}}</p>
-      <ul class="reasons notes">{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+      <ul class="reasons notes">{{range .Reasons}}<li>{{template "reason_text" .}}</li>{{end}}</ul>{{end}}
     </section>
 
     <section class="card panel" aria-labelledby="vfy-input">
@@ -100,7 +100,7 @@
       {{range .Steps}}<li class="t-{{.Tone}}">
         <span class="vfy-n">{{.Index}}</span>
         <div><b>{{.Label}}</b> <span class="muted">{{.Target}}</span>
-          <p class="vfy-dec">{{.Decision}}</p>
+          <p class="vfy-dec">{{.Decision}}{{if .Detail}} <span class="muted">{{.Detail}}</span>{{end}}{{if .Quote}} {{template "model_quote" .Quote}}{{end}}</p>
           <p class="vfy-meta"><span>{{.Model}}</span>{{if .Prompt}}<code>{{.Prompt}}</code>{{end}}<span>{{.Latency}}</span></p>
         </div>
       </li>{{end}}

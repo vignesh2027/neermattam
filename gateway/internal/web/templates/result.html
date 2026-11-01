@@ -45,7 +45,7 @@
     {{if .Reasons}}
     <div>
       <p class="section-title">{{t "result.why"}}</p>
-      <ul class="reasons">{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>
+      <ul class="reasons">{{range .Reasons}}<li>{{template "reason_text" .}}</li>{{end}}</ul>
       <p class="small muted" style="margin-top:8px">{{t "result.tips"}}</p>
     </div>
     {{end}}
@@ -82,7 +82,7 @@
     {{with .Notes}}
     <div>
       <p class="section-title">{{t "result.reasons_title"}}</p>
-      <ul class="reasons notes">{{range .}}<li>{{.}}</li>{{end}}</ul>
+      <ul class="reasons notes">{{range .}}<li>{{template "reason_text" .}}</li>{{end}}</ul>
     </div>
     {{end}}
 
@@ -118,3 +118,7 @@
 </article>
 {{end}}
 {{end}}
+
+{{define "reason_text"}}{{.Text}}{{if .Quote}} {{template "model_quote" .Quote}}{{end}}{{end}}
+
+{{define "model_quote"}}<span class="model-quote"><span class="mq-label">{{t "rc.model_said"}}</span> <q lang="en">{{.}}</q></span>{{end}}

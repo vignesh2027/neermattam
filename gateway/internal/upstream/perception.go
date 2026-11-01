@@ -62,9 +62,13 @@ type Waterline struct {
 
 // Measurement is the response of POST /v1/measure (CONTRACTS.md 1).
 type Measurement struct {
-	MeasurementID    string             `json:"measurement_id"`
-	Usable           bool               `json:"usable"`
-	Reasons          []string           `json:"reasons"`
+	MeasurementID string   `json:"measurement_id"`
+	Usable        bool     `json:"usable"`
+	Reasons       []string `json:"reasons"`
+	// ReasonCodes holds one code per reason, in the same order
+	// (CONTRACTS.md 1.3), for showing the reasons in another language.
+	// Empty from an older perception.
+	ReasonCodes      []Code             `json:"reason_codes,omitempty"`
 	DepthCm          *float64           `json:"depth_cm"`
 	DepthSigmaCm     *float64           `json:"depth_sigma_cm"`
 	Reference        *Reference         `json:"reference"`
@@ -172,6 +176,18 @@ type AgentStep struct {
 	// as "verify-wheel@1d51d73f5037"; empty for other steps and from an
 	// older perception.
 	PromptVersion string `json:"prompt_version,omitempty"`
+	// DecisionCode is Decision as a code (CONTRACTS.md 1.3); nil from an
+	// older perception.
+	DecisionCode *Code `json:"decision_code,omitempty"`
+}
+
+// Code is one reason or step decision as perception codes it
+// (CONTRACTS.md 1.3): a stable code and its arguments, numbers as numbers
+// and everything else as strings. "detail", "basis" and "label" carry text
+// no client can translate.
+type Code struct {
+	Code string         `json:"code"`
+	Args map[string]any `json:"args"`
 }
 
 // Upload is one file part.

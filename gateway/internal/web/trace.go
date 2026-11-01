@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"neermattam/gateway/internal/i18n"
+	"neermattam/gateway/internal/reasons"
 	"neermattam/gateway/internal/upstream"
 )
 
@@ -20,6 +21,7 @@ type TraceStepView struct {
 	Output   string
 	Decision string // short label: Accept, Refine, Give up, ...
 	Detail   string // the rest of the decision, such as the new box
+	Quote    string // a model's own words that go with the decision, shown as they are
 	Tone     string // ok, refine, stop, neutral
 	Latency  string
 	Prompt   string // the prompt version a language-model step was sent
@@ -57,6 +59,22 @@ func NewTraceStep(lang string, i int, s upstream.AgentStep) TraceStepView {
 		Prompt: s.PromptVersion,
 	}
 	kind := strings.ToLower(strings.TrimSpace(s.Step))
+	if d, ok := reasons.StepDecision(lang, s.DecisionCode); ok {
+		// The decision from its code, in the page language.
+		v.Tone, v.Decision, v.Detail, v.Quote = d.Tone, d.Text, d.Detail, d.Quote
+		if kind == "verify" || kind == "confirm" {
+			switch d.Tone {
+			case "stop":
+				kind = "giveup"
+			case "refine":
+				kind = "refine"
+			}
+		}
+		if d.Tone == "neutral" && (kind == "scene" || kind == "segment") {
+			v.Decision = i18n.T(lang, "decision.next", d.Text)
+		}
+		return finishStep(lang, v, kind, s)
+	}
 	dec := strings.TrimSpace(s.Decision)
 	low := strings.ToLower(dec)
 	switch {
@@ -85,6 +103,11 @@ func NewTraceStep(lang string, i int, s upstream.AgentStep) TraceStepView {
 			v.Decision = i18n.T(lang, "decision.next", dec)
 		}
 	}
+	return finishStep(lang, v, kind, s)
+}
+
+// finishStep sets the step's kind and label and translates its target.
+func finishStep(lang string, v TraceStepView, kind string, s upstream.AgentStep) TraceStepView {
 	if !stepKinds[kind] {
 		kind = "other"
 	}
@@ -94,6 +117,7 @@ func NewTraceStep(lang string, i int, s upstream.AgentStep) TraceStepView {
 	} else {
 		v.Label = i18n.T(lang, "step."+kind)
 	}
+	v.Target = reasons.Target(lang, s.Target)
 	return v
 }
 

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"neermattam/gateway/internal/upstream"
 )
 
 // DirName is the folder under the data directory that holds certificates.
@@ -26,6 +28,13 @@ type Stored struct {
 	// the gateway's own record, outside the signed certificate, and is nil
 	// for certificates kept before decisions were recorded.
 	Decision *Decision `json:"decision,omitempty"`
+	// ReasonCodes and StepCodes are perception's codes for the reasons and
+	// step decisions the certificate records in English (CONTRACTS.md
+	// 1.3), one per reason and per step, so its page can show them in the
+	// visitor's language. They are outside the signed bytes, and empty for
+	// certificates kept before codes were.
+	ReasonCodes []upstream.Code  `json:"reason_codes,omitempty"`
+	StepCodes   []*upstream.Code `json:"step_codes,omitempty"`
 }
 
 // Decision statuses.
@@ -54,6 +63,10 @@ type DecisionReason struct {
 	Rule    string            `json:"rule,omitempty"`
 	Outcome string            `json:"outcome,omitempty"`
 	Text    map[string]string `json:"text"`
+	// Code is perception's code for one of its own reasons (status
+	// unusable), rendered in the page language when shown; nil for the
+	// gateway's checks, whose text is above.
+	Code *upstream.Code `json:"code,omitempty"`
 }
 
 // ErrNoCertificate is returned when a decision names a certificate the

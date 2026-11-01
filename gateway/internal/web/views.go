@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"neermattam/gateway/internal/i18n"
+	"neermattam/gateway/internal/reasons"
 	"neermattam/gateway/internal/report"
 	"neermattam/gateway/internal/upstream"
 	"neermattam/gateway/internal/verify"
@@ -66,7 +67,7 @@ type ResultView struct {
 	Gauge      Gauge
 	Overlay    template.URL
 	Facts      []Fact
-	Reasons    []string
+	Reasons    []reasons.View
 	Rules      []RuleView
 	Trust      string
 	TrustPct   string
@@ -91,7 +92,7 @@ type ResultView struct {
 	PersonFaces string
 	// Notes are perception's own reasons for a usable measurement, such as
 	// a wheel and a person in the same photo disagreeing.
-	Notes []string
+	Notes []reasons.View
 	// OverlayAlt and OverlayCaption describe the overlay image.
 	OverlayAlt, OverlayCaption string
 	// Readings lists the measured and the estimated depth when both exist.
@@ -156,7 +157,7 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 			v.Message = tr("result.photo_unusable")
 		}
 		if m != nil {
-			v.Reasons = m.Reasons // perception's own words
+			v.Reasons = reasons.List(lang, m.Reasons, m.ReasonCodes)
 		}
 	case report.StatusRejected:
 		v.Title = tr("result.title_rejected")
@@ -166,7 +167,7 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 	}
 	if m != nil {
 		if m.Usable && o.Status != report.StatusUnusable && len(m.Reasons) > 0 {
-			v.Notes = m.Reasons // perception's own words
+			v.Notes = reasons.List(lang, m.Reasons, m.ReasonCodes)
 		}
 		if r := m.Reference; r != nil {
 			val := tr("ref." + r.Kind)

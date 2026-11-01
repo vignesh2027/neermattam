@@ -540,6 +540,11 @@ tr:last-child td { border-bottom: 0; }
 .person-note p + p { margin-top: 6px; }
 .person-faces { color: var(--muted); font-size: 12.5px; }
 .reasons.notes { font-size: 13px; color: var(--muted); gap: 2px; }
+/* A model's own words next to a translated reason: kept as written, quoted. */
+.model-quote { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.model-quote .mq-label { font-weight: 650; margin-right: 2px; }
+.model-quote q { font-style: italic; }
+.tdetail .model-quote { display: inline; margin: 0; }
 .gauge.is-est .gauge-band { background: repeating-linear-gradient(135deg, rgba(76, 29, 149, .32) 0 6px, rgba(76, 29, 149, .16) 6px 12px); }
 .gauge.is-est .gauge-mark { background: var(--violet); }
 .gauge-est { position: absolute; top: 18px; height: 6px; border-radius: 99px; background: repeating-linear-gradient(135deg, rgba(76, 29, 149, .5) 0 4px, rgba(76, 29, 149, .18) 4px 8px); }

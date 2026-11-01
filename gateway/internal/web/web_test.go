@@ -114,7 +114,9 @@ func TestTracePanelRenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range []string{"How the models reached this answer", "two wheeler wheel 1", "18.0 s", "Accept", "crop &lt;b&gt;", "timeline reveal"} {
+	// The target is named in the page language: the agent writes the kind
+	// with spaces, and English shows it as "two-wheeler wheel 1".
+	for _, w := range []string{"How the models reached this answer", "two-wheeler wheel 1", "18.0 s", "Accept", "crop &lt;b&gt;", "timeline reveal"} {
 		if !strings.Contains(html, w) {
 			t.Errorf("panel lacks %q", w)
 		}

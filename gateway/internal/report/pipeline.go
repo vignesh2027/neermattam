@@ -542,7 +542,20 @@ func (p *Pipeline) attachCertificate(out *Outcome, m *upstream.Measurement, uplo
 	if p.Certificates == nil || !certs.ValidID(m.MeasurementID) {
 		return
 	}
-	err := p.Certificates.Put(m.MeasurementID, certs.Stored{Certificate: raw, UploadSHA256: uploadSHA, ReceivedAt: at.UTC()})
+	st := certs.Stored{Certificate: raw, UploadSHA256: uploadSHA, ReceivedAt: at.UTC()}
+	if len(m.ReasonCodes) == len(m.Reasons) {
+		st.ReasonCodes = m.ReasonCodes
+	}
+	for _, step := range m.AgentTrace {
+		if step.DecisionCode != nil {
+			st.StepCodes = make([]*upstream.Code, len(m.AgentTrace))
+			for i := range m.AgentTrace {
+				st.StepCodes[i] = m.AgentTrace[i].DecisionCode
+			}
+			break
+		}
+	}
+	err := p.Certificates.Put(m.MeasurementID, st)
 	if err != nil {
 		p.Log.Warn("certificate not kept", "error", err.Error())
 		return
@@ -579,9 +592,16 @@ func (p *Pipeline) recordDecision(out *Outcome, verdict verify.Result) {
 			d.Reasons = append(d.Reasons, certs.DecisionReason{Rule: r.Rule, Outcome: string(r.Outcome), Text: text})
 		}
 	case StatusUnusable:
-		for _, reason := range out.Measurement.Reasons {
-			// Perception's own words, in English on every page.
-			d.Reasons = append(d.Reasons, certs.DecisionReason{Text: map[string]string{"en": reason}})
+		m := out.Measurement
+		for i, reason := range m.Reasons {
+			// Perception's own words, with its code when it sent one, so
+			// the page can show it in the visitor's language.
+			r := certs.DecisionReason{Text: map[string]string{"en": reason}}
+			if len(m.ReasonCodes) == len(m.Reasons) {
+				c := m.ReasonCodes[i]
+				r.Code = &c
+			}
+			d.Reasons = append(d.Reasons, r)
 		}
 	}
 	if err := p.Certificates.SetDecision(out.Measurement.MeasurementID, d); err != nil {

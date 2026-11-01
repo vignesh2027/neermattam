@@ -148,6 +148,7 @@ Full-precision numbers are kept in `geometry` so `python -m neermattam_perceptio
 - `detail`, `basis` and `label` carry text a client cannot translate: a verifier's verdict, an image issue or the estimate's basis written by the scene model, a vehicle's catalogue name, or an error. Show them as they are.
 - `target` (in `wheel_not_confirmed`) is the trace target, such as `two-wheeler wheel 1` or `car 1 wheel`.
 - A sentence with no code would get `{"code": "other", "args": {"text": ...}}`. The service does not produce one; a client should show `text`.
+- The gateway shows them in the visitor's language (docs/GATEWAY.md, Languages). It keeps a measurement's `reason_codes` and its steps' `decision_code`s beside the stored certificate (`reason_codes`, `step_codes`), outside the signed bytes, for the verify page. A code, sub-code or word argument it does not know falls back to the English sentence.
 
 Reasons (`reason_codes[].code`):
 
