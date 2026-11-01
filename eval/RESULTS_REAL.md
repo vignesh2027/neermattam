@@ -4,63 +4,57 @@
 
 Rerun from `perception/` with `uv run --extra local python ../eval/real_photos.py` (live: Muse Spark Open on Baseten, SAM 2.1 hiera-small locally; add `--modal` for hiera-large on the Modal CPU service). The SAM size comparison is `../eval/sam_ab.py` (table in `RESULTS_SAM_AB.md`) and the latency breakdown is `../eval/latency.py`. The photos are downloaded from Wikimedia Commons into `eval/photos/` and are not in git; their source, author and licence are in `eval/commons_photos.json` and repeated per photo below. Overlays, response JSON and every image the verifier was shown go to `eval/out/` (also not in git). There are two sets. The Unsplash close-ups (`eval/unsplash_photos.json`, Unsplash License, photographers credited there) are the real use case: a resident photographing a vehicle a few metres away. The Commons set (`eval/commons_photos.json`) is the four wide street photos named in the first brief (c1 to c4) plus two with motorcycles standing in water side-on (x1, x2).
 
-**The current result is the generated section at the end of this file** (run of 2026-10-30, Muse Spark Open on Baseten and SAM 2.1 hiera-small locally). Of the eleven photos, none was measured from a wheel; two were measured from a person (c1 45.6 cm, sigma 13.0 cm, confidence 0.22; c3 102.9 cm, sigma 10.9 cm, confidence 0.28); the other nine got the scene model's labelled estimate (confidence 0.21 to 0.23). Wall time was 7.2 to 50.2 s per photo. A wheel-focused set of 22 more photos was added on 1 November; no wheel measurement on it met the bar for a demonstration, and the section "Photos chosen for the wheel method" says why. The hand-written sections below describe other runs, each with its date or output folder, and their numbers differ from the generated section because the scene reading is fresh on each run and the verifier is not deterministic.
+**The current result is the generated section at the end of this file** (run of 2026-10-30, Muse Spark Open on Baseten and SAM 2.1 hiera-small locally). Of the eleven photos, none was measured from a wheel; two were measured from a person (c1 45.6 cm, sigma 13.0 cm, confidence 0.22; c3 102.9 cm, sigma 10.9 cm, confidence 0.28); the other nine got the scene model's labelled estimate (confidence 0.21 to 0.23). Wall time was 7.2 to 50.2 s per photo. A wheel-focused set of 22 more photos was added on 1 November (section "Photos chosen for the wheel method", and its own generated block at the very end): one of them measured from a wheel reproducibly, and only with a fixed scene reading. The hand-written sections below describe other runs, each with its date or output folder, and their numbers differ from the generated section because the scene reading is fresh on each run and the verifier is not deterministic.
 
 ## Photos chosen for the wheel method (1 November)
 
-**Result: no wheel measurement on these photos meets the bar of an outline on the tyre's outer edge, a plausible depth, agreement with the scene model's estimate and three runs within sigma.** One photo was measured twice from a wheel (u_w8MXURXvqjQ, 15.2 and 12.2 cm), but its outline takes in the mudguard, so I do not count it. Every other wheel either was declined, or was measured and then set aside by the shallow-side guard. This section says what was collected, what happened to each photo and why. Nobody measured the water in any of these photos, so nothing here is accuracy. "By eye" means my own reading of the photo, which is not a measurement either.
+**Result: one real photo measured from a wheel with an outline on the tyre and a believable depth, and only while the scene reading stayed the same; three were needed.** w_kanchipuram (a parked motorcycle on a Kanchipuram market street, McKay Savage, CC BY 2.0) gave 4.5 cm from its rear wheel in all 6 runs that reused one scene reading, sigma 4.3 to 6.0 cm, two of them under the service's own 55 s budget. With a fresh scene reading it was not measured in 4 runs out of 4. Two other photos published a wheel depth in the full run, u_A-yqsrAME6g (23.5 cm) and p_21960691 (25.4 cm, the same in 4 of 4 runs), but from outlines that do not follow the tyre's outer edge, so I do not count them. Nobody measured the water in any of these photos, so nothing here is accuracy. "By eye" is my own reading of the photo, not a measurement.
 
-**What was collected.** 22 photos of vehicles standing in shallow to moderate water with a tyre seen from the side, listed in `eval/wheel_photos.json` with author, licence, source page and what I saw when I chose each one. They come from Wikimedia Commons (8: four more of McKay Savage's 2008 Chennai monsoon series and one of his Kanchipuram photos, CC BY 2.0; a Kerala police Tata Sumo and a Borivali state bus, CC BY-SA 2.0; mopeds in Quang Ngai, CC BY-SA 3.0; a hatchback in Iskenderun, CC BY 3.0), Unsplash (7, Unsplash License: six by Aldward Castillo, one by Dibakar Roy) and Pexels (7, Pexels License, all by Dibakar Roy in Kolkata). Run them with `uv run --extra local python ../eval/real_photos.py --sets wheel`; the photos are downloaded into `eval/photos/` and stay out of git. That run writes its own generated block (marker `wheel-eval`), which is not in this file yet because no complete run finished (below).
+**What was collected.** 22 photos of vehicles standing in shallow to moderate water with a tyre seen from the side, listed in `eval/wheel_photos.json` with author, licence, source page and what I saw when I chose each one: Wikimedia Commons (8: four more of McKay Savage's 2008 Chennai monsoon series and his Kanchipuram photo, CC BY 2.0; a Kerala police Tata Sumo and a Borivali state bus, CC BY-SA 2.0; mopeds in Quang Ngai, CC BY-SA 3.0; a hatchback in Iskenderun, CC BY 3.0), Unsplash (7, Unsplash License: six by Aldward Castillo, one by Dibakar Roy) and Pexels (7, Pexels License, all by Dibakar Roy in Kolkata). The photos are downloaded into `eval/photos/` and stay out of git.
 
-**Runs.** All with SAM 2.1 hiera-small on this laptop and Muse Spark Open on Baseten at scene effort `low`, and with the scene reading cached after the first run so that later runs differ only in the checks:
+**Runs.** SAM 2.1 hiera-small on this laptop, Muse Spark Open on Baseten at scene effort `low`. After the first run the scene readings came from a cache (`--scene-cache ../eval/out/scene-cache-wheel`), so later runs differ only in the checks, as a second upload of the same photo to the service would:
 
-| Output folder | Code | Settings | Photos finished |
+| Output folder | Code | Settings | What it shows |
 |---|---|---|---|
-| `eval/out/wheel-base` | main at 6b62807 | 55 s budget, as the service | 20 |
-| `eval/out/wheel-nob` | main at 6b62807 | no budget (diagnosis) | 17 |
-| `eval/out/wheel-v2`, `wheel-v3` | this branch, without the water change | no budget | 10 and 4 |
-| `eval/out/wheel-v4` | this branch, without the water change | no budget | 18, then stopped |
+| `eval/out/wheel-base` | main at 6b62807 | 55 s budget, 20 s per check, as the service | no wheel check finished on 20 photos (slow uplink, below) |
+| `eval/out/wheel-nob`, `wheel-v2`, `wheel-v3`, `wheel-v4` | main, then this branch as it grew | no budget, 20 s per check | diagnosis; many checks still timed out |
+| `eval/out/wheel-final` | this branch at cbb7408 | no budget, 120 s per check | the generated block at the end of this file; no check timed out |
+| `eval/out/wheel-rep1` to `rep3` | same | same | three repeats of the three photos that measured |
+| `eval/out/wheel-svc1`, `svc2` | same | 55 s budget, 20 s per check | w_kanchipuram under the service's settings |
+| `eval/out/wheel-fresh1`, `2`, `wheel-freshnob1`, `2` | same | fresh scene readings, with and without the budget | w_kanchipuram with a new scene reading each time |
 
-In the 55 s run no photo got a wheel check through: the checks were stopped by the budget on all 20. The other runs were for finding out why.
+The full run is `uv run --extra local python ../eval/real_photos.py --sets wheel --sam-size small --budget 0 --verify-timeout 120 --marker wheel-eval --scene-cache ../eval/out/scene-cache-wheel --out ../eval/out/wheel-final`, from `perception/`.
 
-**Why the runs could not finish: the uplink of this laptop.** On the evening of 1 November a text-only call to the same Baseten model answered in 1.6 and 1.9 s, while an image check (one or two 512 px JPEGs, 60 to 100 KB) took 10 to 45 s. Uploading 200 KB to an unrelated host ran at 2.3 to 7 KB/s, and at 3 to 29 KB/s over the following half hour; at one point another process on this machine was sending about 45 KB/s. A check is cut after 20 s and asked once more, so many checks failed with "gave no answer within 20 s", up to 5 per photo. The damage was worst on the water: when the water check failed, the photo had no verified water, and four wheels the agent had already accepted could not be measured (w_kanchipuram, p_23939154, p_21960691, u_lIkOxcck448), plus u_w8MXURXvqjQ in its third run. The deployed service calls Baseten from a data centre, so this is a limit of the evaluation machine, not a measurement of the service; it does mean the repeat runs this section needed could not be done here. After the first run the scene readings came from the cache, so the later runs' costs and times are those of the checks alone.
+**The full run** (`wheel-final`, generated block below): 3 photos answered by a wheel, 1 by a person, 18 by the scene model's labelled estimate. 34 wheels were searched for or checked, 8 outlines were accepted and 6 reached the geometry: 3 published, 3 set aside by the shallow-side guard (u_ic8V3A59gpg 2.7 cm against an estimate of 22 cm at that wheel; u_P7Z3HwNWPeQ 2.5 cm, which was a bicycle's wheel that the scene model called a two-wheeler's, against 26 cm; w_kerala4x4 15.3 cm, an outline taking in the mudguard and with its bottom on a bow wave, against 32 cm), and 2 were declined by the geometry (w_chennai01's moped, 99 degrees of rim visible; w_borivali_bus, water does not meet the wheel). Wall time 22 to 157 s per photo (median 61 s) without a budget; Baseten cost USD 0.62 for the run.
 
-**What the agent did with the wheels it could check.** Across the four diagnosis runs, the agent accepted 13 wheel outlines on 8 photos. I looked at every verifier image and every overlay:
+**w_kanchipuram, the one that held.** The outline follows the rear tyre's outer edge from the left round the bottom to the top; at the upper right the shock absorber crosses the wheel and the outline cuts across it in a straight line, which the geometry drops as an occluder (195 degrees of rim visible). The overlay's fitted circle sits on the tyre. Depth 4.5 cm with the generic two-wheeler size (55 cm, sigma 8.5; the scene model did not name the motorcycle's model); the scene model's second waterline agreed within 0.1 to 4.2 cm. The scene model's own estimate for the street is 12 cm, and it puts the water at the ankle (about 6 cm) of the man near the motorcycle; by eye the water just covers the bottom of the tyre. Depth plus 1.5 sigma is 11 to 14 cm, under the 15 cm car limit, so this reading would leave the street open to cars, which by eye is right for this street. A person in the same photo read 27 cm and was not used. Repeats with the same scene reading: 4.5, 4.5, 4.5, 4.5 cm (no budget) and 4.5, 4.5 cm (55 s budget, 50 and 34 s); the outline was the same each time, so the spread is 0.0 cm and the sigma varied (4.3 to 6.0) with the second waterline. With a fresh scene reading the wheel was not measured: twice the budget ran out (the scene reading took 19 and 24 s over this uplink), once the verifier called the same outline "partial" and the refinements gave rim outlines, and once the outline and the tyre box disagreed. So this measurement is reproducible only as long as the scene reading is, and I would not show it as a live first upload.
 
-| Photo | Scene model's estimate | What was accepted | What happened |
-|---|---|---|---|
-| u_w8MXURXvqjQ (motorcycle, front wheel) | 23 cm | the tyre's outer edge on the left and bottom, the chrome mudguard at the top and right | measured 15.2 cm (sigma 3.7) and 12.2 cm (sigma 6.8); the scene model's waterline differed by 1.7 and 6.3 cm. The front wheel is in its own splash. A full-reasoning check of the same image called the outline wrong ("bulges at the top to enclose the silver mudguard"). Not counted. |
-| u_ic8V3A59gpg (close-up of a car's front wheel) | 22 cm | a polygon inside the tyre: rim and the inner half of the rubber (a black tyre on a black car, so no edge to follow) | measured 2.7 cm (sigma 1.1) twice; set aside both times by the shallow-side guard. By eye the water is a little below the hub, a quarter to a third of the wheel. |
-| w_kerala4x4 (motorcycle beside the 4x4) | 35 cm | the front wheel, its bottom on the bow wave | 1.6 cm (sigma 4.4), set aside by the guard |
-| w_chennai01 (lorry's front tyre, called a bus wheel) | 15 cm | the tyre's outer edge, a good outline | measured 3.6 cm (sigma 16.2) against the 106 cm bus tyre, and published (main's code). A light truck's tyre is about 80 cm. Fixed below. |
-| w_chennai01 (lorry's rear tyre) | 15 cm | the tyre plus its mudflap | 12.1 cm (sigma 12.0), not chosen |
-| w_kerala4x4 (the 4x4's rear wheel) | 35 cm | the tyre above a splash | declined by the geometry: 90 degrees of rim visible |
-| p_23939154 (Pulsar walked through water) | 27 cm | the tyre, its mudguard and a patch of water | water check timed out, not measured. The outline was wrong. |
-| w_kanchipuram, p_21960691, u_lIkOxcck448 | 12, 27, 28 cm | outlines cut across the wheel by the fork (Kanchipuram) or on the rim (Swift) | water check timed out, not measured |
+**The two that published from wrong outlines.** p_21960691 (a Maruti Swift in Kolkata, black and white): 25.4 cm in 4 of 4 runs against the scene model's 27 cm, but the outline covers the rim and the right half of the rear tyre and misses its left side, and the fitted ellipse is narrower than the tyre. u_A-yqsrAME6g (a motorcycle ridden through water): 23.5 cm against 19 cm in the full run, from an outline that takes in the swingarm and shock absorber; in the repeats it was declined twice and measured 8.8 cm once, which the guard set aside. Both are on the deep side of the estimates, so they are not the dangerous kind of error, but they are not measurements of the tyre either.
 
-So of the outlines Muse Spark Open accepted at effort `low`, I would trust two (the lorry's front tyre and Kanchipuram's, the second with a fork cutting its corner). The numeric checks (shape, box agreement, darkness either side of the edge, tilt, size, the verifier's own points on the rubber) stopped many more, but not these. The shallow-side guard stopped every reading that was clearly too shallow except the lorry's, whose sigma was 16 cm.
+**Why outlines miss the tyre's outer edge.** From every verifier image and from all of SAM's proposals for the same prompts, rendered offline:
 
-**Why outlines miss the tyre's outer edge.** From the verifier images and from every SAM proposal for the same prompts, rendered offline (`dbg` renders, not kept):
+* *Two-wheelers:* the mudguard hugs the top of the tyre and SAM puts them in one mask whatever the prompt; a ring of points on the rubber with negative points just outside the tyre box (tried offline on u_w8MXURXvqjQ, w_chennai03, p_23939154) moved the outline onto the tyre on the left and top but kept the fork and mudguard on the right. The fork, brake disc, shock absorber and swingarm split the visible tyre, so the convex hull of the rubber is not the wheel either.
+* *Cars:* the wheel arch above the tyre is a dark, round, tyre-sized void; on p_26202090's front wheel SAM's best-ranked proposal (shape 0.92, darkness 0.97) is the arch. On a dark car the tyre has no edge against the body (u_ic8V3A59gpg) and the outline settles on the rim and the inner rubber.
+* *The verifier at reasoning effort `low`* calls such outlines good (u_w8MXURXvqjQ's front wheel with its mudguard, accepted in three runs, measured 15.2 and 12.2 cm). At full reasoning it rejected two of three that I had judged wrong but accepted p_23939154's, and each such check took 25 to 45 s and USD 0.018 to 0.033, too slow for the 55 s budget.
+* *The scene model's estimates run deep on shallow water,* and a correct shallow reading is then set aside. On p_26202090 it says 38 cm for the street and 42 cm at the rear wheel, where by eye the water is a little below the hub of a 62 cm tyre (about 25 to 30 cm); a correct reading there with a 4 cm sigma would not be published. That is the guard doing its job, and it limits the wheel path to photos where the estimate is not inflated.
+* *The scene model has no bicycle and no truck:* it called a bicycle's wheel a two-wheeler's (u_P7Z3HwNWPeQ, caught by the guard) and a lorry's tyre a bus's (w_chennai01, published at 3.6 cm by main's code, fixed below).
 
-* *Two-wheelers:* the mudguard hugs the top of the tyre, and SAM puts them in one mask whatever the prompt; a ring of points on the rubber with negative points just outside the verifier's tyre box (tried offline on u_w8MXURXvqjQ, w_chennai03, p_23939154) moved the outline onto the tyre on the left and top but kept the fork and mudguard on the right. The fork and brake disc split the visible tyre into two pieces, so the convex hull of the rubber is not the wheel either.
-* *Cars:* the wheel arch above the tyre is a dark, round, tyre-sized void. On p_26202090's front wheel SAM's best-ranked proposal (shape 0.92, darkness 0.97) is the arch, not the tyre; the verifier rejected it. On dark cars the tyre has no edge against the body (u_ic8V3A59gpg) and the outline settles on the rim.
-* *The verifier at reasoning effort `low`* calls such outlines good. At full reasoning it rejected two of three that I had judged wrong (u_ic8V3A59gpg, u_w8MXURXvqjQ) but accepted p_23939154's, and each such check took 25 to 45 s and USD 0.018 to 0.033 on this uplink, too slow for the 55 s budget.
-* *The scene model's own estimates run deep for shallow water:* on p_26202090 it says 38 cm for the street and 42 cm at the rear wheel, where by eye the water is a little below the hub of a 62 cm tyre (about 25 to 30 cm). A correct reading there of about 27 cm with a sigma of 4 cm would be set aside by the guard. That is the guard working as designed (a reading shallower than the estimate's evidence is not published), and it means the wheel path can only publish where the scene model is not overestimating.
+**The uplink of this laptop.** On the evening of 1 November a text-only call to the same model answered in 1.6 and 1.9 s while an image check (one or two 512 px JPEGs, 60 to 100 KB) took 10 to 45 s, and uploading 200 KB to an unrelated host ran at 2.3 to 29 KB/s; at one point another process on this machine was sending about 45 KB/s. With checks cut at 20 s, many failed, and when the water check failed the photo had no verified water: four wheels the agent had accepted were lost this way (w_kanchipuram, p_23939154, p_21960691 and u_lIkOxcck448 in the diagnosis runs). The deployed service calls Baseten from a data centre, so this measures the evaluation machine, not the service; the full run therefore cut each check at 120 s instead.
 
-**What I changed** (each with tests, `perception/tests/`):
+**What I changed** (each with tests in `perception/tests/`):
 
-1. *A truck's tyre is no longer measured as a bus wheel* (`pipeline.truck_wheels_dropped`). The scene model has no truck wheel to choose; a bus or auto-rickshaw wheel inside a truck's box is dropped with the existing reason "no wheel size is known for a truck", unless it also lies in a bus or auto box. This removed the only wrong reading that was published (w_chennai01, 3.6 cm).
-2. *The scene model's own wheels are prompted in the vehicle-box search* (`agent.find_vehicle_wheel`, `wheel_finder.grow_region`). Its wheel boxes and tyre points inside a vehicle used to be thrown away; on the close-up u_ic8V3A59gpg the tyre lay above the lower part of the car's box and the verifier was shown a fog light. With the hint the tyre was found and checked (and then correctly set aside, above).
-3. *A proposal four times larger than its tyre box is not shown to the verifier* (`agent.spills_far_beyond`). On p_26202090 a box around the tyre gave the whole side of the car as panel B.
-4. *A wheel found in a vehicle's box takes the position and the estimate of the scene model's wheel it overlaps* (`pipeline.matching_hint`), so front and rear tyres of a catalogue two-wheeler are not mixed, and the guard compares with the estimate at that wheel.
-5. *Water confirmed by an earlier check is kept when a later water check fails* (`agent.refine_water`), as it already was when the budget ran out; this is the failure that cost the four accepted wheels above.
-6. *Evaluation:* `real_photos.py` has the new set (`--sets wheel`), its own results block (`--marker wheel-eval`), and diagnosis flags `--budget 0` and `--verify-timeout`; Unsplash downloads fall back to `curl -4` when the HTTP client gets a 403.
+1. *A truck's tyre is not measured as a bus wheel* (`pipeline.truck_wheels_dropped`): a bus or auto-rickshaw wheel inside a truck's box is dropped with the existing reason "no wheel size is known for a truck", unless it also lies in a bus or auto box. This removed the only wrong reading that was published (w_chennai01, 3.6 cm against the 106 cm bus tyre).
+2. *The scene model's own wheels are prompted in the vehicle-box search* (`agent.find_vehicle_wheel`, `wheel_finder.grow_region`). They used to be thrown away; on the close-up u_ic8V3A59gpg the tyre lay above the lower part of the car's box and the verifier was shown a fog light. Now the tyre is found and checked (and set aside by the guard, above).
+3. *A proposal four times larger than its tyre box is not shown to the verifier* (`agent.spills_far_beyond`): on p_26202090 a box around the tyre gave the whole side of the car as panel B.
+4. *A wheel found in a vehicle's box takes the position and estimate of the scene model's wheel it overlaps* (`pipeline.matching_hint`), so front and rear tyres of a catalogue two-wheeler are not mixed, and the guard compares with the estimate at that wheel.
+5. *Water confirmed by an earlier check is kept when a later water check fails* (`agent.refine_water`), as it already was when the budget ran out.
+6. *Evaluation:* `real_photos.py` has the new set (`--sets wheel`), its own generated block (`--marker wheel-eval`), and diagnosis flags `--budget 0` and `--verify-timeout`; Unsplash downloads fall back to `curl -4` when the HTTP client gets a 403.
 
-None of the safety rules changed: the shallow-side guard, the brightness check across the edge, unknown is never safe, and labelling are as they were; changes 1 and 3 only remove things, and 2, 4 and 5 add prompts or keep evidence the model already confirmed.
+None of the safety rules changed: the shallow-side guard, the brightness check across the edge, unknown is never safe and the labelling are as they were. Changes 1 and 3 only remove candidates; 2, 4 and 5 add prompts or keep evidence the model already confirmed. In the runs above the guard set aside every wheel reading that was clearly too shallow.
 
-**Cost and time.** Baseten spend for everything in this section, including the offline checks of single images, was about USD 1.05 (sum of `cost_usd` over the runs, USD 0.95, plus probes). Wall time per photo in the diagnosis runs was 44 to 113 s (median 68 s, 45 photo runs), almost all of it waiting on uploads.
+**Cost.** Baseten spend for everything in this section was about USD 2.10: USD 1.99 summed over the runs' `cost_usd`, plus single-image probes and the full-reasoning comparison.
 
-**What it would take.** A run of `--sets wheel` from a machine with a normal uplink, with the code on this branch, to see how many wheels the agent accepts when every check gets an answer; three repeats of any photo that measures. On the evidence above I expect few: the outlines, not the geometry or the guard, are what fails. The two directions that look worth trying are a full-reasoning confirmation only for the one outline about to be measured (it caught two of three bad outlines here), and a tyre outline built from the rim, which SAM finds reliably, outwards to the dark rubber; a first try of the second on p_26202090 followed the wheel arch instead of the tyre, so it is not ready.
+**What it would take.** Three things stood between this branch and three demo photos: outlines that follow the tyre's outer edge on two-wheelers (the mudguard) and dark cars (the arch and body); a verifier that does not call those outlines good at low reasoning effort; and a scene reading whose estimate is not inflated on shallow water. A full-reasoning confirmation of only the outline about to be measured caught two of three bad outlines here and is the cheapest next step to try; a tyre outline grown from the rim, which SAM finds reliably, outwards to the dark rubber followed the wheel arch on p_26202090 in a first offline try and is not ready.
 
 ## What changed in this milestone
 
@@ -518,3 +512,744 @@ Overlay: `eval/out/x2_overlay.png`. Verifier images: `eval/out/x2_agent/`.
 | estimate | photo | muse-spark-open | no measurable wheel | 19 cm, sigma 20 cm | report model estimate | 0 |
 
 <!-- real-eval:end -->
+
+<!-- wheel-eval:begin -->
+Generated by `uv run --extra local python ../eval/real_photos.py` on 2026-11-01 with muse-spark-open (meta-models/muse-spark-open-1026 on Baseten, scene reasoning effort low) and sam-2.1-hiera-small on mps (ready in 5.6 s), no time budget, each check cut after 120 s. No ground truth exists for these photos; only qualitative behaviour is shown.
+
+### w_chennai01: India - Chennai - Monsoon - 01 (3058208937).jpg (Commons, chosen for the wheel method)
+
+Author McKay Savage (Flickr, https://www.flickr.com/photos/mckaysavage/3058208937/), licence CC BY 2.0 (https://creativecommons.org/licenses/by/2.0/), source https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_01_(3058208937).jpg.
+
+Result: **model_estimate**, depth 15.0 cm, sigma 20.0 cm, confidence 0.21.
+Scene model's own estimate: 15.0 cm (sigma 20.0 cm), basis: Ankle-deep on road, deeper at truck tyres, shallower on footpath..
+Captured at (EXIF): 2008-10-22T09:16:35.
+
+Reasons: standing water visible; no wheel size is known for a truck; two wheeler 2 wheel: the scene model did not confirm the mask (A follows the tyre arc but wrongly includes the shock absorber and frame, B is a tiny non-tyre blob, so A is better but still not tyre-only.); person 1: the measured depth is outside the plausible range (-42 cm); two-wheeler wheel: too little of the wheel rim is visible above water (99 degrees visible); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: Ankle-deep on road, deeper at truck tyres, shallower on footpath..
+
+Wall time 135.5 s (timings ms: scene 2, agent 134526, geometry 298); model cost USD 0.028798.
+
+Overlay: `eval/out/wheel-final/w_chennai01_overlay.png`. Verifier images: `eval/out/wheel-final/w_chennai01_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 2048x1536 px (cached reading) | water visible; references: bus_wheel, bus_wheel, two_wheeler_wheel, two_wheeler_wheel, person; own estimate 15 cm | search 2 vehicle boxes for wheels, check 4 wheels and segment the water | 2 |
+| segment | water | sam-2.1-hiera-small | box [573,891,1394,1414] px + points [[922, 1152]] | mask 343075 px (11% of photo) | verify | 1807 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [1294,549,1677,727] px | 90 proposals from 24 grid points, 2 scene model wheel boxes and 2 dark blobs; best: wheel 0.50 = shape 0.65 (fit 1.00, arc 117 deg, ratio 0.70, spill 0.00, closed ring) x dark 0.53 x size 1.00; wheel 0.44 = shape 0.53 (fit 0.92, arc 123 deg, ratio 0.90, spill 0.02, closed ring) x dark 0.69 x size 1.00 | verify the best two | 6414 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | lower part of the vehicle box [1306,1199,2048,1536] px | 81 proposals from 24 grid points and 3 dark blobs; best: wheel 0.21 = shape 0.29 (fit 0.81, arc 78 deg, ratio 0.44, spill 0.00, closed ring) x dark 0.45 x size 1.00; wheel 0.21 = shape 0.29 (fit 0.87, arc 69 deg, ratio 0.86, spill 0.00, closed ring) x dark 0.43 x size 1.00 | verify the best two | 10353 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [1382,531,1638,787] px with 1 outline | chose NONE, is_target=false, outline wrong, view side, edge visible 0.85, waterline visible; Magenta outline covers only the lower half of the tyre at the waterline and does not follow the round outer edge above water, missing most of the tyre. | refine with box [1468,566,1562,674] px + points [1474,628], [1511,573], [1548,621], [1556,654] - points [1514,627], [1491,617], [1514,655] | 20854 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [1468,566,1562,674] px + points [1474,628], [1511,573], [1548,621], [1556,654] - points [1514,627], [1491,617], [1514,655] | 6 proposals, 5 distinct; best shapes 0.66, 0.56 | verify the best two | 1680 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region aligns with flooded street water around person's feet and vehicles. | accept | 32873 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [870,615,2048,1536] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.60, waterline visible; Neither magenta outline follows the rear tyre; A encloses the rear mudguard and B encloses side bodywork, both miss the tyre's outer edge. | refine with box [1412,1269,1889,1536] px + points [1441,1407], [1518,1292], [1700,1287], [1848,1407] - points [1647,1449], [1465,1361], [1807,1398] | 87015 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [1412,1269,1889,1536] px + points [1441,1407], [1518,1292], [1700,1287], [1848,1407] - points [1647,1449], [1465,1361], [1807,1398] | 6 proposals, 6 distinct; best shapes 0.57, 0.42 | verify the best two | 2038 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [1343,450,1678,785] px with 2 outlines A and B | chose B, shape 0.56 (fit 0.91, arc 120 deg, ratio 0.81, spill 0.00, closed ring), edge ratio 1.12, box agreement 0.72, is_target=true, outline good, view side, edge visible 0.85, waterline visible; Outline B tightly follows the round outer tyre edge above the water with a straight waterline and excludes mudguard and suspension. | accept | 75785 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [805,612,2048,1536] px with 2 outlines A and B | chose B, shape 0.42 (fit 1.00, arc 75 deg, ratio 0.48, spill 0.00, closed ring), edge ratio 1.45, not a tyre edge: the outline is an oval tilted 27 degrees: a cut or partial outline, not an upright wheel, box agreement 0.52, is_target=true, outline good, view side, edge visible 0.60, waterline visible; B follows the black tyre outer edge closely above water while A includes the mudguard | refine with box [1476,1263,1843,1522] px + points [1501,1407], [1601,1296], [1750,1291], [1818,1397] - points [1656,1430], [1482,1347], [1793,1430] | 13451 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [1476,1263,1843,1522] px + points [1501,1407], [1601,1296], [1750,1291], [1818,1397] - points [1656,1430], [1482,1347], [1793,1430] | 6 proposals, 5 distinct; best shapes 0.55, 0.40 | verify the best two | 3434 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [1090,835,2048,1536] px with 2 outlines A and B | chose A, shape 0.55 (fit 0.98, arc 105 deg, ratio 0.38, spill 0.00, closed ring), edge ratio 0.70, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.79, is_target=false, outline partial, view side, edge visible 0.60, waterline visible; A follows the tyre arc but wrongly includes the shock absorber and frame, B is a tiny non-tyre blob, so A is better but still not tyre-only. | give up | 16312 |
+| segment | water at wheels | sam-2.1-hiera-small | 1 bands just below wheels where the waterline was seen | 8091 px of water added next to the tyres | join to the verified water | 1564 |
+| segment | people | sam-2.1-hiera-small | 1 person box with head and body points (segmented during the checks) | 1 masks | measure each against the stature prior | 955 |
+| segment | water below people | sam-2.1-hiera-small | 1 band just below people (segmented during the checks) | 1 water mask | check that each outline ends at water | 6352 |
+| geometry | person 1 | geometry | person mask | the measured depth is outside the plausible range (-42 cm) | declined | 4 |
+| geometry | two wheeler wheel 1 | geometry | wheel and water masks | too little of the wheel rim is visible above water (99 degrees visible) | rejected | 292 |
+| estimate | photo | muse-spark-open | no measurable wheel | 15 cm, sigma 20 cm | report model estimate | 0 |
+
+### w_chennai03: India - Chennai - Monsoon - 03 (3058213357).jpg (Commons, chosen for the wheel method)
+
+Author McKay Savage (Flickr, https://www.flickr.com/photos/mckaysavage/3058213357/), licence CC BY 2.0 (https://creativecommons.org/licenses/by/2.0/), source https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_03_(3058213357).jpg.
+
+Result: **model_estimate**, depth 27.0 cm, sigma 20.0 cm, confidence 0.21.
+Scene model's own estimate: 27.0 cm (sigma 20.0 cm), basis: water submerges lower third of parked motorcycle tyres and reaches auto wheel hubs on flooded street.
+Captured at (EXIF): 2008-10-22T09:17:44.
+
+Reasons: standing water visible; auto rickshaw 1 wheel: the scene model did not confirm the mask (Outline A best follows a tyre but it is the motorcycle rear tyre on the right, not the auto-rickshaw wheel on the left which is not visible, so it is the wrong ); two wheeler 2 wheel: the scene model did not confirm the mask (B is only mudguard, A follows tyre outer edge but incorrectly includes fork/mudguard inside outline so not tyre-only); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: water submerges lower third of parked motorcycle tyres and reaches auto wheel hubs on flooded street.
+
+Wall time 86.6 s (timings ms: scene 4, agent 86391, geometry 0); model cost USD 0.049653.
+
+Overlay: `eval/out/wheel-final/w_chennai03_overlay.png`. Verifier images: `eval/out/wheel-final/w_chennai03_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 2048x1536 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel, two_wheeler_wheel; own estimate 27 cm | search 3 vehicle boxes for wheels, check 3 wheels and segment the water | 4 |
+| segment | water | sam-2.1-hiera-small | box [1065,799,2045,1534] px + points [[1536, 1152]] | mask 534805 px (17% of photo) | verify | 1191 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | lower part of the vehicle box [944,277,1650,710] px | 102 proposals from 24 grid points, 3 scene model wheel boxes and 4 dark blobs; best: wheel 0.62 = shape 0.78 (fit 0.95, arc 156 deg, ratio 0.82, spill 0.00, closed ring) x dark 0.58 x size 1.00; wheel 0.57 = shape 0.65 (fit 0.99, arc 120 deg, ratio 0.88, spill 0.00, closed ring) x dark 0.75 x size 1.00 | verify the best two | 12768 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is floodwater but yellow box crops to lower right and misses water directly around and behind the auto-rickshaw. | refine with box [92,891,1198,1513] px + point [635, 1260] | 13264 |
+| segment | water | sam-2.1-hiera-small | box [92,891,1198,1513] px + points [[635, 1260]] | mask 452999 px (14% of photo) | verify | 572 |
+| segment | auto rickshaw 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [0,469,1151,1219] px | 84 proposals from 24 grid points and 4 dark blobs; best: wheel 0.32 = shape 0.49 (fit 0.89, arc 114 deg, ratio 0.56, spill 0.00, closed ring) x dark 0.78 x size 0.73; wheel 0.26 = shape 0.29 (fit 0.94, arc 105 deg, ratio 0.67, spill 0.09, closed ring) x dark 0.78 x size 1.00 | verify the best two | 22194 |
+| verify | auto rickshaw 1 wheel | muse-spark-open | crop [784,339,1206,761] px with 1 outline | chose A, shape 0.49 (fit 0.89, arc 114 deg, ratio 0.56, spill 0.00, closed ring), edge ratio 1.55, is_target=false, outline wrong, view side, edge visible 0.00, waterline not visible; Magenta outline traces the motorcycle rear tyre on the right, not the auto-rickshaw wheel which is not visible in this crop. | refine with box [948,469,1042,631] px - points [995,550], [847,634], [1100,487] | 15633 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is turbulent wake water but misses most flooded street around vehicles. | refine with box [1065,430,2017,1352] px + point [1536, 799] | 25246 |
+| segment | auto rickshaw 1 wheel | sam-2.1-hiera-small | box [948,469,1042,631] px - points [995,550], [847,634], [1100,487] | 3 proposals, 3 distinct; best shapes 0.48, 0.38 | verify the best two | 2640 |
+| segment | water | sam-2.1-hiera-small | box [1065,430,2017,1352] px + points [[1536, 799]] | mask 545124 px (17% of photo) | verify | 263 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [1146,79,1822,755] px with 2 outlines A and B | chose A, shape 0.78 (fit 0.95, arc 156 deg, ratio 0.82, spill 0.00, closed ring), edge ratio 0.89, box agreement 0.59, is_target=true, outline good, view side, edge visible 0.65, waterline visible; A follows the front tyre outer edge above water with rim inside and straight waterline, B is on engine area not the tyre. | refine with box [1389,346,1582,502] px + points [1406,458], [1467,360], [1541,360], [1568,431] - points [1487,447], [1447,380], [1474,420] | 28702 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [1389,346,1582,502] px + points [1406,458], [1467,360], [1541,360], [1568,431] - points [1487,447], [1447,380], [1474,420] | 6 proposals, 5 distinct; best shapes 0.74, 0.34 | verify the best two | 1999 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is floodwater but only covers right side and misses water around the auto-rickshaw. | accept (coverage partial) | 20514 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [1208,124,1796,712] px with 2 outlines A and B | chose A, shape 0.74 (fit 0.99, arc 138 deg, ratio 0.83, spill 0.01, closed ring), edge ratio 0.89, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.49, is_target=true, outline good, view side, edge visible 0.75, waterline visible; Outline A follows the tyre outer edge above water with rim inside and a straight waterline, while B only marks a small rim fragment. | refine with box [1390,330,1590,521] px + points [1397,453], [1481,336], [1573,453], [1528,356] - points [1493,459], [1487,321], [1434,421] | 18069 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [1390,330,1590,521] px + points [1397,453], [1481,336], [1573,453], [1528,356] - points [1493,459], [1487,321], [1434,421] | 6 proposals, 5 distinct; best shapes 0.55, 0.46 | verify the best two | 2375 |
+| verify | auto rickshaw 1 wheel | muse-spark-open | crop [762,308,1230,776] px with 2 outlines A and B | chose A, shape 0.48 (fit 1.00, arc 87 deg, ratio 0.77, spill 0.00, closed ring), edge ratio 1.22, is_target=false, outline wrong, view side, edge visible 0.00, waterline not visible; Best outline follows the motorcycle rear tyre, not the auto-rickshaw wheel which is not visible in the crop, so it is the wrong object for measuring the auto-ri | refine with box [948,469,1042,631] px - points [1005,542], [1066,495], [902,636] | 23736 |
+| segment | auto rickshaw 1 wheel | sam-2.1-hiera-small | box [948,469,1042,631] px - points [1005,542], [1066,495], [902,636] | 3 proposals, 3 distinct; best shapes 0.50, 0.10 | verify the best two | 544 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [1211,127,1793,710] px with 2 outlines A and B | chose A, shape 0.55 (fit 1.00, arc 99 deg, ratio 0.87, spill 0.00, closed ring), edge ratio 0.71, not a tyre edge: the outline is an oval tilted 41 degrees: a cut or partial outline, not an upright wheel, box agreement 0.47, is_target=false, outline partial, view side, edge visible 0.65, waterline visible; B is only mudguard, A follows tyre outer edge but incorrectly includes fork/mudguard inside outline so not tyre-only | give up | 18800 |
+| verify | auto rickshaw 1 wheel | muse-spark-open | crop [753,289,1247,783] px with 2 outlines A and B | chose A, shape 0.50 (fit 1.00, arc 90 deg, ratio 0.74, spill 0.00, closed ring), edge ratio 1.22, is_target=false, outline wrong, view side, edge visible 0.65, waterline visible; Outline A best follows a tyre but it is the motorcycle rear tyre on the right, not the auto-rickshaw wheel on the left which is not visible, so it is the wrong  | give up | 21342 |
+| estimate | photo | muse-spark-open | no measurable wheel | 27 cm, sigma 20 cm | report model estimate | 0 |
+
+### w_chennai12: India - Chennai - Monsoon - 12 (3100751476).jpg (Commons, chosen for the wheel method)
+
+Author McKay Savage (Flickr, https://www.flickr.com/photos/mckaysavage/3100751476/), licence CC BY 2.0 (https://creativecommons.org/licenses/by/2.0/), source https://commons.wikimedia.org/wiki/File:India_-_Chennai_-_Monsoon_-_12_(3100751476).jpg.
+
+Result: **model_estimate**, depth 12.0 cm, sigma 20.0 cm, confidence 0.2.
+Scene model's own estimate: 12.0 cm (sigma 20.0 cm), basis: ankle-deep water across street with splash from moving bike.
+Captured at (EXIF): 2008-11-27T16:49:20.
+
+Reasons: standing water visible; no wheel size is known for a truck; auto rickshaw 1 wheel: the scene model did not confirm the mask (tyre seen head-on, its outline cannot be measured); auto-rickshaw wheel 2: the scene model did not confirm the mask (tyre seen head-on, its outline cannot be measured); person 1: the person is too small in the photo to measure (57 px tall); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: ankle-deep water across street with splash from moving bike.
+
+Wall time 35.3 s (timings ms: scene 2, agent 35134, geometry 0); model cost USD 0.035216.
+
+Overlay: `eval/out/wheel-final/w_chennai12_overlay.png`. Verifier images: `eval/out/wheel-final/w_chennai12_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 2048x1536 px (cached reading) | water visible; references: auto_wheel, person, auto_wheel; own estimate 12 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 2 |
+| segment | water | sam-2.1-hiera-small | box [369,492,861,800] px + points [[614, 630]] | mask 175576 px (6% of photo) | verify | 2239 |
+| segment | auto wheel 2 | sam-2.1-hiera-small | box [1710,607,1813,723] px + points [1724,660], [1761,622], [1798,664] - points [1761,645], [1761,607] | 6 proposals, 4 distinct; best shapes 0.61, 0.22 | verify the best two | 3915 |
+| segment | auto rickshaw 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [0,231,560,520] px | 90 proposals from 24 grid points, 1 scene model wheel box and 4 dark blobs; best: wheel 0.46 = shape 0.46 (fit 0.96, arc 90 deg, ratio 0.51, spill 0.00, closed ring) x dark 0.99 x size 1.00; wheel 0.25 = shape 0.46 (fit 0.95, arc 93 deg, ratio 0.63, spill 0.00, closed ring) x dark 0.08 x size 1.00 | verify the best two | 7537 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta patch is water but only a small patch near the auto and misses the flooded area around the person and vehicles. | refine with box [655,799,1475,1352] px + point [1024, 1075] | 8755 |
+| segment | water | sam-2.1-hiera-small | box [655,799,1475,1352] px + points [[1024, 1075]] | mask 362806 px (12% of photo) | verify | 1201 |
+| verify | auto wheel 2 | muse-spark-open | crop [1525,443,1986,904] px with 2 outlines A and B | chose A, shape 0.61 (fit 0.98, arc 114 deg, ratio 0.52, spill 0.00, closed ring), edge ratio 0.94, not a tyre edge: the outline is an oval tilted 33 degrees: a cut or partial outline, not an upright wheel, box agreement 0.69, is_target=true, outline partial, view side, edge visible 0.55, waterline visible; A follows the small dark tyre under the green body above the water while B is a huge splash/water region far outside the tyre. | refine with box [1724,608,1816,682] px + points [1730,639], [1762,616], [1799,630], [1806,660] - points [1769,644], [1758,588], [1756,720] | 10078 |
+| segment | auto wheel 2 | sam-2.1-hiera-small | box [1724,608,1816,682] px + points [1730,639], [1762,616], [1799,630], [1806,660] - points [1769,644], [1758,588], [1756,720] | 6 proposals, 3 distinct; best shapes 0.57, 0.57 | verify the best two | 1014 |
+| verify | auto rickshaw 1 wheel | muse-spark-open | crop [72,40,664,632] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view head_on, edge visible 0.35, waterline visible; Neither outline follows the front tyre; A outlines the seat and B outlines the front bodywork/mudguard, both far from the partially submerged front wheel. | refine with box [467,357,529,401] px + points [476,386], [495,363], [516,386] - points [495,380], [495,339], [442,289] | 7461 |
+| segment | auto rickshaw 1 wheel | sam-2.1-hiera-small | box [467,357,529,401] px + points [476,386], [495,363], [516,386] - points [495,380], [495,339], [442,289] | 6 proposals, 6 distinct; best shapes 0.42, 0.31 | verify the best two | 1073 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region lies on the flooded street water around the pedestrian and vehicles. | accept | 6097 |
+| verify | auto wheel 2 | muse-spark-open | crop [1634,509,1910,784] px with 2 outlines A and B | chose B, shape 0.57 (fit 1.00, arc 102 deg, ratio 0.68, spill 0.00, closed ring), edge ratio 0.97, box agreement 0.52, is_target=true, outline good, view head_on, edge visible 0.55, waterline visible; B follows the narrow upright tyre seen edge-on while A is a large blob covering water and ground not the tyre | give up: tyre seen head-on, its outline cannot be measured | 9294 |
+| verify | auto rickshaw 1 wheel | muse-spark-open | crop [362,248,618,504] px with 2 outlines A and B | chose B, shape 0.31 (fit 0.60, arc 174 deg, ratio 0.56, spill 0.02), edge ratio 0.65, not a tyre edge: a darker ring lies just outside the outline (dark 0.27 outside, 0.00 inside): it follows the rim, inside the tyre, box agreement 0.01, is_target=false, outline wrong, view head_on, edge visible 0.35, waterline visible; Both outlines trace the yellow mudguard/fender above the wheel, not the black tyre rubber below it, so neither follows the tyre outer edge and would give wrong  | refine with box [454,404,532,440] px + points [461,427], [471,414], [512,416], [523,428] - points [491,423], [491,388], [413,338] | 9304 |
+| segment | auto rickshaw 1 wheel | sam-2.1-hiera-small | box [454,404,532,440] px + points [461,427], [471,414], [512,416], [523,428] - points [491,423], [491,388], [413,338] | 6 proposals, 6 distinct; best shapes 0.52, 0.41 | verify the best two | 1604 |
+| verify | auto rickshaw 1 wheel | muse-spark-open | crop [360,292,616,548] px with 2 outlines A and B | chose A, shape 0.52 (fit 0.95, arc 105 deg, ratio 0.44, spill 0.00), edge ratio 1.79, box agreement 0.81, is_target=true, outline good, view head_on, edge visible 0.35, waterline visible; A follows the black tyre rubber tightly above the waterline without including mudguard, B adds extra lobe on left side | give up: tyre seen head-on, its outline cannot be measured | 7912 |
+| segment | people | sam-2.1-hiera-small | 1 person box with head and body points (segmented during the checks) | 1 masks | measure each against the stature prior | 1408 |
+| segment | water below people | sam-2.1-hiera-small | 1 band just below people (segmented during the checks) | 1 water mask | check that each outline ends at water | 4194 |
+| geometry | person 1 | geometry | person mask | the person is too small in the photo to measure (57 px tall) | declined | 0 |
+| estimate | photo | muse-spark-open | no measurable wheel | 12 cm, sigma 20 cm | report model estimate | 0 |
+
+### w_kanchipuram: India - Kanchipuram - 010 (1885517933).jpg (Commons, chosen for the wheel method)
+
+Author McKay Savage (Flickr, https://www.flickr.com/photos/mckaysavage/1885517933/), licence CC BY 2.0 (https://creativecommons.org/licenses/by/2.0/), source https://commons.wikimedia.org/wiki/File:India_-_Kanchipuram_-_010_(1885517933).jpg.
+
+Result: **wheel_geometry**, depth 4.5 cm, sigma 5.6 cm, confidence 0.16.
+Scene model's own estimate: 12.0 cm (sigma 20.0 cm), basis: Ankle-deep water across road with tyre bottoms submerged.
+Captured at (EXIF): 2007-11-04T15:20:58.
+
+Reasons: standing water visible; two-wheeler wheel found; wheel size unknown, generic prior used; scene model waterline agrees within 3.7 cm; a person in the water gives 27 cm (sigma 12 cm), consistent with the wheel.
+
+Wall time 49.2 s (timings ms: scene 1, agent 48499, geometry 495); model cost USD 0.021687.
+
+Overlay: `eval/out/wheel-final/w_kanchipuram_overlay.png`. Verifier images: `eval/out/wheel-final/w_kanchipuram_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 2048x1536 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel, person, person; own estimate 12 cm | search 3 vehicle boxes for wheels, check 2 wheels and segment the water | 1 |
+| segment | water | sam-2.1-hiera-small | box [778,1044,1394,1491] px + points [[1049, 1247]] | mask 140290 px (4% of photo) | verify | 2942 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [657,734,995,881] px | 89 proposals from 24 grid points, 1 scene model wheel box and 4 dark blobs; best: wheel 0.67 = shape 0.77 (fit 1.00, arc 138 deg, ratio 0.90, spill 0.00, closed ring) x dark 0.74 x size 1.00; wheel 0.62 = shape 0.73 (fit 1.00, arc 132 deg, ratio 0.86, spill 0.00, closed ring) x dark 0.69 x size 1.00 | verify the best two | 7016 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | lower part of the vehicle box [1558,877,1970,1173] px | 90 proposals from 24 grid points, 1 scene model wheel box and 4 dark blobs; best: wheel 0.38 = shape 0.45 (fit 0.97, arc 123 deg, ratio 0.41, spill 0.06, closed ring) x dark 0.67 x size 1.00; wheel 0.33 = shape 0.51 (fit 0.97, arc 99 deg, ratio 0.86, spill 0.00, closed ring) x dark 0.30 x size 1.00 | verify the best two | 10795 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [618,672,874,928] px with 2 outlines A and B | chose A, shape 0.77 (fit 1.00, arc 138 deg, ratio 0.90, spill 0.00, closed ring), edge ratio 1.07, box agreement 0.88, is_target=true, outline good, view side, edge visible 0.75, waterline visible; A follows the outer black tyre edge above the water while B cuts inside the tyre on the upper right. | accept | 12077 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta tint lies on the brown floodwater covering the street around the standing people and motorcycles. | accept | 16435 |
+| validate | two wheeler 2 wheel | validator | answer to verify two wheeler 2 wheel | tyre_box: [[305, 185], [590, 695]] is not a box [x_min, y_min, x_max, y_max]; dropped; corrected_box: [[305, 185], [590, 695]] is not a box [x_min, y_min, x_max, y_max]; dropped | drop 2 fields that failed, use the rest | 0 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [1689,819,2040,1170] px with 2 outlines A and B | chose A, shape 0.45 (fit 0.97, arc 123 deg, ratio 0.41, spill 0.06, closed ring), edge ratio 0.86, not a tyre edge: 3 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, is_target=false, outline wrong, view oblique, edge visible 0.60, waterline visible; A is closer to front wheel but its magenta polygon cuts inside the rim and misses the outer tyre edge, so it does not follow the tyre for water-depth measuremen | refine with box [1797,942,1853,1054] px + points [1803,1002], [1821,928], [1866,937], [1880,994] - points [1831,989], [1879,966], [1829,1086] | 11477 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [1797,942,1853,1054] px + points [1803,1002], [1821,928], [1866,937], [1880,994] - points [1831,989], [1879,966], [1829,1086] | 6 proposals, 6 distinct; best shapes 0.47, 0.16 | verify the best two | 1445 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [1660,826,2006,1171] px with 2 outlines A and B | chose B, shape 0.16 (fit 0.74, arc 54 deg, ratio 0.63, spill 0.00, closed ring), edge ratio 1.21, not a tyre edge: 3 of 3 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.68, is_target=true, outline good, view head_on, edge visible 0.65, waterline visible; B follows the narrow upright tyre band closely while A strays onto the mudguard and fork, so B gives the correct water depth. | give up: tyre seen head-on, its outline cannot be measured | 23329 |
+| segment | water at wheels | sam-2.1-hiera-small | 1 bands just below wheels where the waterline was seen | 3723 px of water added next to the tyres | join to the verified water | 1227 |
+| segment | people | sam-2.1-hiera-small | 2 person boxes with head and body points (segmented during the checks) | 2 masks | measure each against the stature prior | 2070 |
+| segment | water below people | sam-2.1-hiera-small | 2 bands just below people (segmented during the checks) | 2 water masks | check that each outline ends at water | 7352 |
+| geometry | person 1 | geometry | person mask | the person is not standing upright (bending) | declined | 0 |
+| geometry | person 2 | geometry | person and water masks | depth 27.2 cm, sigma 12.0 cm, 83% of stature above water; scene model says the water is at the ankle (6 cm) | candidate | 3 |
+| geometry | two wheeler wheel 1 | geometry | wheel and water masks | depth 4.5 cm, sigma 4.3 cm, 195 degrees of rim visible | candidate | 494 |
+| estimate | photo | geometry | measurement 4.5 cm and model estimate 12 cm | difference 8 cm, two combined sigma 42 cm | use the measurement | 0 |
+| estimate | photo | geometry | wheel 4.5 cm and person 27.2 cm | difference 23 cm, two combined sigma 27 cm | use the wheel | 0 |
+
+### w_quangngai: Inundo-Quang Ngai-3.jpg (Commons, chosen for the wheel method)
+
+Author RG72, licence CC BY-SA 3.0 (https://creativecommons.org/licenses/by-sa/3.0/), source https://commons.wikimedia.org/wiki/File:Inundo-Quang_Ngai-3.jpg.
+
+Result: **model_estimate**, depth 30.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 30.0 cm (sigma 20.0 cm), basis: Water covers road and reaches shin on motorbike and ankle on pedestrian.
+Captured at (EXIF): 2013-11-16T14:02:03.
+
+Reasons: standing water visible; two wheeler 1 wheel: the scene model did not confirm the mask (tyre seen head-on, its outline cannot be measured); two wheeler 2 wheel: the scene model did not confirm the mask (Neither magenta outline follows the bicycle tyre; A encloses the person's leg and frame and B is a tiny sliver on the seat stay, both missing the round tyre edg); person 1: the person is not standing upright (sitting); person 2: measured 111 cm (sigma 11 cm), but the scene model sees about 6 cm there; not used; no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: Water covers road and reaches shin on motorbike and ankle on pedestrian.
+
+Wall time 90.1 s (timings ms: scene 3, agent 89960, geometry 0); model cost USD 0.046119.
+
+Overlay: `eval/out/wheel-final/w_quangngai_overlay.png`. Verifier images: `eval/out/wheel-final/w_quangngai_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 2048x1536 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel, two_wheeler_wheel, person, person; own estimate 30 cm | search 2 vehicle boxes for wheels, check 3 wheels and segment the water | 3 |
+| segment | water | sam-2.1-hiera-small | box [1106,1044,1680,1506] px + points [[1331, 1275]] | mask 345734 px (11% of photo) | verify | 2546 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | lower part of the vehicle box [1611,706,1988,923] px | 88 proposals from 24 grid points, 2 scene model wheel boxes and 2 dark blobs; best: wheel 0.59 = shape 0.68 (fit 1.00, arc 123 deg, ratio 0.43, spill 0.00, closed ring) x dark 0.74 x size 1.00; wheel 0.24 = shape 0.39 (fit 0.94, arc 81 deg, ratio 0.70, spill 0.00, closed ring) x dark 0.69 x size 0.71 | verify the best two | 6889 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [581,898,1091,1399] px | 90 proposals from 24 grid points, 1 scene model wheel box and 4 dark blobs; best: wheel 0.47 = shape 0.47 (fit 1.00, arc 84 deg, ratio 0.36, spill 0.00, closed ring) x dark 1.00 x size 1.00; wheel 0.29 = shape 0.29 (fit 0.77, arc 105 deg, ratio 0.62, spill 0.03) x dark 1.00 x size 1.00 | verify the best two | 10326 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta patch is water but only a small foreground square, missing most flooded street around people and vehicles. | refine with box [573,645,1884,1198] px + point [1126, 845] | 22868 |
+| validate | two wheeler 1 wheel | validator | answer to verify two wheeler 1 wheel | tyre_box: [[585, 470], [980, 830]] is not a box [x_min, y_min, x_max, y_max]; dropped; corrected_box: [[585, 470], [980, 830]] is not a box [x_min, y_min, x_max, y_max]; dropped | drop 2 fields that failed, use the rest | 0 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [417,754,1070,1407] px with 2 outlines A and B | chose B, shape 0.29 (fit 0.77, arc 105 deg, ratio 0.62, spill 0.03), edge ratio 1.38, not a tyre edge: 3 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, is_target=false, outline wrong, view side, edge visible 0.60, waterline visible; Neither outline follows the front tyre's outer edge; B is near the wheel but is a small sliver behind the fork, not the tyre, while A is on the bodywork. | refine with box [647,955,706,1162] px + points [815,1198], [894,1084], [995,1107], [1034,1198] - points [923,1234], [871,1045], [903,1182] | 16157 |
+| segment | water | sam-2.1-hiera-small | box [573,645,1884,1198] px + points [[1126, 845]] | mask 829822 px (26% of photo) | verify | 1178 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [647,955,706,1162] px + points [815,1198], [894,1084], [995,1107], [1034,1198] - points [923,1234], [871,1045], [903,1182] | 6 proposals, 5 distinct; best shapes 0.42, 0.34 | verify the best two | 1169 |
+| validate | two wheeler 2 wheel | validator | answer to verify two wheeler 2 wheel | tyre_box: [[595, 285], [1000, 625]] is not a box [x_min, y_min, x_max, y_max]; dropped; corrected_box: [[595, 285], [1000, 625]] is not a box [x_min, y_min, x_max, y_max]; dropped | drop 2 fields that failed, use the rest | 0 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [1457,541,1961,1046] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.55, waterline visible; Neither outline follows the rear bicycle tyre outer edge above water; A is a small fragment inside the wheel and B outlines the person's legs. | refine with box [1766,759,1806,837] px + points [1777,786], [1853,700], [1933,710] - points [1868,796], [1893,715], [1712,786] | 22829 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [1766,759,1806,837] px + points [1777,786], [1853,700], [1933,710] - points [1868,796], [1893,715], [1712,786] | 6 proposals, 4 distinct; best shapes 0.38, 0.00 | verify the best two | 1303 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [434,734,1126,1425] px with 2 outlines A and B | chose B, shape 0.34 (fit 0.74, arc 129 deg, ratio 0.61, spill 0.03), edge ratio 1.25, not a tyre edge: 3 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.19, is_target=false, outline wrong, view side, edge visible 0.45, waterline visible; B is closer than A but its magenta loop includes the red mudguard and silver fork and does not follow the black tyre outer edge. | refine with box [828,1093,1033,1266] px + points [839,1183], [877,1111], [977,1111], [1019,1183] - points [939,1204], [905,1080], [884,1183] | 21262 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [828,1093,1033,1266] px + points [839,1183], [877,1111], [977,1111], [1019,1183] - points [939,1204], [905,1080], [884,1183] | 6 proposals, 4 distinct; best shapes 0.33, 0.20 | verify the best two | 1471 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta overlay aligns with brown floodwater surrounding motorbike and bicycles. | accept | 35331 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [1658,668,1914,924] px with 2 outlines A and B | chose A, shape 0.38 (fit 1.00, arc 69 deg, ratio 0.30, spill 0.00, closed ring), edge ratio 3.65, not a tyre edge: 3 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.00, is_target=true, outline good, view side, edge visible 0.65, waterline visible; A follows the outer black tyre edge above water with rim inside while B is only a small mudguard fragment | refine with box [1658,717,1766,870] px + points [1771,816], [1791,740], [1858,722], [1906,765] - points [1876,834], [1817,735], [1824,776] | 34826 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [1658,717,1766,870] px + points [1771,816], [1791,740], [1858,722], [1906,765] - points [1876,834], [1817,735], [1824,776] | 6 proposals, 6 distinct; best shapes 0.53, 0.35 | verify the best two | 1510 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [617,866,1254,1504] px with 2 outlines A and B | chose A, shape 0.33 (fit 0.93, arc 69 deg, ratio 0.44, spill 0.00, closed ring), edge ratio 2.67, not a tyre edge: the outline is an oval tilted 27 degrees: a cut or partial outline, not an upright wheel, box agreement 0.56, is_target=true, outline partial, view head_on, edge visible 0.55, waterline visible; A follows the black tyre edge head-on without including fork/mudguard while B encloses fork and bodywork, but A only traces the right side so it is partial. | give up: tyre seen head-on, its outline cannot be measured | 24905 |
+| validate | two wheeler 2 wheel | validator | answer to verify two wheeler 2 wheel | tyre_box: [[575, 285], [1000, 685]] is not a box [x_min, y_min, x_max, y_max]; dropped; corrected_box: [[575, 285], [1000, 685]] is not a box [x_min, y_min, x_max, y_max]; dropped | drop 2 fields that failed, use the rest | 0 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [1507,569,1959,1021] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.55, waterline visible; Neither magenta outline follows the bicycle tyre; A encloses the person's leg and frame and B is a tiny sliver on the seat stay, both missing the round tyre edg | give up | 22351 |
+| segment | people | sam-2.1-hiera-small | 2 person boxes with head and body points (segmented during the checks) | 2 masks | measure each against the stature prior | 1728 |
+| segment | water below people | sam-2.1-hiera-small | 1 band just below people (segmented during the checks) | 1 water mask | check that each outline ends at water | 7023 |
+| geometry | person 1 | geometry | person mask | the person is not standing upright (sitting) | declined | 0 |
+| geometry | person 2 | geometry | person and water masks | depth 110.6 cm, sigma 10.5 cm, 30% of stature above water; scene model says the water is at the ankle (6 cm) | candidate | 5 |
+| estimate | people | geometry | 1 people measured | every one disagrees with the scene model beyond two sigma | do not publish a person measurement | 0 |
+| estimate | photo | muse-spark-open | no measurable wheel | 30 cm, sigma 20 cm | report model estimate | 0 |
+
+### w_kerala4x4: Kerala police 4x4 driving through a monsoon.jpg (Commons, chosen for the wheel method)
+
+Author Liji Jinaraj (Flickr), from Kochi, India, licence CC BY-SA 2.0 (https://creativecommons.org/licenses/by-sa/2.0/), source https://commons.wikimedia.org/wiki/File:Kerala_police_4x4_driving_through_a_monsoon.jpg.
+
+Result: **model_estimate**, depth 35.0 cm, sigma 20.0 cm, confidence 0.21.
+Scene model's own estimate: 35.0 cm (sigma 20.0 cm), basis: Water submerges lower third to half of vehicle tyres across the flooded street.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; no wheel size is known for a other; two-wheeler wheel found; wheel size unknown, generic prior used; scene model waterline agrees within 0.8 cm; car wheel 2: the scene model did not confirm the mask (outline and the tyre's box disagree); car wheel 3: the scene model did not confirm the mask (outline and the tyre's box disagree); the two-wheeler wheel measured 15.3 cm (sigma 5.0 cm), but the scene model estimates 32 cm at that wheel, above the measurement's two-sigma bound; a shallow reading that disagrees is not trusted, so the scene model's estimate is reported; estimate based on: Water submerges lower third to half of vehicle tyres across the flooded street.
+
+Wall time 157.0 s (timings ms: scene 4, agent 156142, geometry 640); model cost USD 0.05019.
+
+Overlay: `eval/out/wheel-final/w_kerala4x4_overlay.png`. Verifier images: `eval/out/wheel-final/w_kerala4x4_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1200 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel, car_wheel, car_wheel; own estimate 35 cm | search 1 vehicle box for wheels, check 4 wheels and segment the water | 4 |
+| segment | water | sam-2.1-hiera-small | box [227,722,1460,1197] px + points [[779, 1016]] | mask 494782 px (26% of photo) | verify | 1217 |
+| segment | car wheel 2 | sam-2.1-hiera-small | box [1021,606,1164,723] px + points [1040,630], [1091,606], [1144,636] - points [1091,642], [1091,618], [1168,660] | 6 proposals, 5 distinct; best shapes 0.63, 0.25 | verify the best two | 2887 |
+| segment | car wheel 3 | sam-2.1-hiera-small | box [1216,608,1329,709] px + points [1232,630], [1272,612], [1315,636] - points [1272,636], [1272,618], [1336,660] | 6 proposals, 6 distinct; best shapes 0.49, 0.40 | verify the best two | 3763 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [148,567,581,757] px | 96 proposals from 24 grid points, 2 scene model wheel boxes and 4 dark blobs; best: wheel 0.56 = shape 0.58 (fit 1.00, arc 105 deg, ratio 0.40, spill 0.00, closed ring) x dark 0.92 x size 1.00; wheel 0.53 = shape 0.62 (fit 1.00, arc 111 deg, ratio 0.84, spill 0.00, closed ring) x dark 0.73 x size 1.00 | verify the best two | 6569 |
+| verify | car wheel 2 | muse-spark-open | crop [754,232,1489,967] px with 2 outlines A and B | chose B, shape 0.25 (fit 0.70, arc 90 deg, ratio 0.54, spill 0.00, closed ring), edge ratio 1.00, box agreement 0.11, is_target=false, outline wrong, view side, edge visible 0.60, waterline visible; Both outlines include bodywork and side panel, B is smaller but still not tyre-only so depth would be wrong. | refine with box [978,625,1085,713] px + points [988,677], [1024,633], [1061,677], [1037,633] - points [1033,677], [1033,596], [989,732] | 15799 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region aligns with turbulent floodwater in foreground around the police vehicle and motorcycle. | accept | 18371 |
+| segment | car wheel 2 | sam-2.1-hiera-small | box [978,625,1085,713] px + points [988,677], [1024,633], [1061,677], [1037,633] - points [1033,677], [1033,596], [989,732] | 6 proposals, 6 distinct; best shapes 0.69, 0.51 | verify the best two | 1222 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [245,432,580,768] px with 1 outline | chose NONE, is_target=false, outline wrong, view side, edge visible 0.60, waterline visible; Magenta outline encloses engine/exhaust/frame area between wheels, not the round outer edge of either tyre. | refine with box [245,538,307,645] px + points [248,593], [270,550], [297,593] - points [270,600], [273,573], [352,607] | 13830 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [245,538,307,645] px + points [248,593], [270,550], [297,593] - points [270,600], [273,573], [352,607] | 6 proposals, 5 distinct; best shapes 0.60, 0.43 | verify the best two | 1024 |
+| verify | car wheel 2 | muse-spark-open | crop [857,497,1208,848] px with 2 outlines A and B | chose A, shape 0.69 (fit 0.94, arc 141 deg, ratio 0.87, spill 0.00, closed ring), edge ratio 0.77, box agreement 0.59, is_target=false, outline wrong, view side, edge visible 0.50, waterline visible; A is tighter than B but both dip into splash below waterline instead of straight waterline and do not follow tyre outer edge closely | refine with box [982,632,1076,701] px + points [986,674], [1006,639], [1052,639], [1072,674] - points [1027,674], [1027,716], [1032,616] | 11365 |
+| segment | car wheel 2 | sam-2.1-hiera-small | box [982,632,1076,701] px + points [986,674], [1006,639], [1052,639], [1072,674] - points [1027,674], [1027,716], [1032,616] | 6 proposals, 6 distinct; best shapes 0.48, 0.45 | verify the best two | 1349 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [60,357,509,806] px with 2 outlines A and B | chose B, shape 0.43 (fit 0.78, arc 132 deg, ratio 0.51, spill 0.01, closed ring), edge ratio 0.96, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.23, is_target=true, outline good, view side, edge visible 0.65, waterline visible; B follows the round outer edge of the front tyre above the water with flat waterline at bottom, while A cuts across fork and misses tyre. | refine with box [170,561,278,678] px + points [181,635], [213,582], [253,590], [269,635] - points [222,626], [222,573], [231,546] | 17623 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [170,561,278,678] px + points [181,635], [213,582], [253,590], [269,635] - points [222,626], [222,573], [231,546] | 6 proposals, 6 distinct; best shapes 0.56, 0.41 | verify the best two | 1524 |
+| verify | car wheel 2 | muse-spark-open | crop [806,464,1209,867] px with 2 outlines A and B | chose B, shape 0.45 (fit 0.90, arc 102 deg, ratio 0.67, spill 0.01, closed ring), edge ratio 0.87, not a tyre edge: 3 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.46, is_target=true, outline good, view side, edge visible 0.65, waterline visible; B follows the round outer edge of the tyre above the water while A includes the splash; B is tight to the tyre with rim inside. | give up: the outline covers a different area than the tyre (0.46) | 23453 |
+| verify | car wheel 3 | muse-spark-open | crop [1104,491,1429,816] px with 2 outlines A and B | chose A, shape 0.49 (fit 1.00, arc 96 deg, ratio 0.48, spill 0.02, closed ring), edge ratio 1.05, box agreement 0.54, is_target=true, outline good, view side, edge visible 0.55, waterline visible; A follows the tyre rubber above water with straight waterline while B includes splash water | refine with box [1229,587,1307,662] px + points [1237,636], [1258,603], [1288,610], [1296,636] - points [1266,639], [1266,678], [1266,584] | 55689 |
+| segment | car wheel 3 | sam-2.1-hiera-small | box [1229,587,1307,662] px + points [1237,636], [1258,603], [1288,610], [1296,636] - points [1266,639], [1266,678], [1266,584] | 6 proposals, 6 distinct; best shapes 0.38, 0.18 | verify the best two | 1429 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [72,461,390,778] px with 2 outlines A and B | chose A, shape 0.56 (fit 0.92, arc 120 deg, ratio 0.74, spill 0.00, closed ring), edge ratio 1.03, box agreement 0.83, is_target=true, outline good, view side, edge visible 0.72, waterline visible; A follows the black tyre outer edge above water without including the silver mudguard while B rides up onto the mudguard | accept | 28166 |
+| verify | car wheel 3 | muse-spark-open | crop [1089,408,1455,775] px with 2 outlines A and B | chose A, shape 0.38 (fit 1.00, arc 69 deg, ratio 0.86, spill 0.00, closed ring), edge ratio 0.98, box agreement 0.60, is_target=true, outline good, view side, edge visible 0.65, waterline visible; A follows the tyre's outer edge above water with straight waterline, B includes mudguard and bodywork | refine with box [1234,597,1318,661] px + points [1241,643], [1261,610], [1294,610], [1310,639] - points [1276,630], [1274,569], [1217,547] | 51327 |
+| segment | car wheel 3 | sam-2.1-hiera-small | box [1234,597,1318,661] px + points [1241,643], [1261,610], [1294,610], [1310,639] - points [1276,630], [1274,569], [1217,547] | 6 proposals, 6 distinct; best shapes 0.43, 0.42 | verify the best two | 1523 |
+| verify | car wheel 3 | muse-spark-open | crop [1146,501,1402,757] px with 2 outlines A and B | chose A, shape 0.43 (fit 1.00, arc 78 deg, ratio 0.59, spill 0.00, closed ring), edge ratio 1.02, box agreement 0.67, is_target=true, outline good, view side, edge visible 0.55, waterline visible; A follows the round outer edge of the black tyre above the water with rim inside, while B is a narrow sliver missing most of the tyre. | give up: the outline covers a different area than the tyre (0.67) | 40972 |
+| segment | water at wheels | sam-2.1-hiera-small | 1 bands just below wheels where the waterline was seen | 4997 px of water added next to the tyres | join to the verified water | 1259 |
+| geometry | two wheeler wheel 1 | geometry | wheel and water masks | depth 15.3 cm, sigma 4.9 cm, 183 degrees of rim visible | candidate | 639 |
+| estimate | photo | geometry | measurement 15.3 cm (sigma 5.0) and model estimate 32 cm | the estimate is 17 cm deeper, beyond the measurement's two-sigma bound of 25 cm | shallow reading not trusted: report the estimate | 0 |
+| estimate | photo | muse-spark-open | measurement not used | 35 cm, sigma 20 cm | report model estimate | 0 |
+
+### w_borivali_bus: An ST bus near the WEH flyover at Borivali (35520283).jpg (Commons, chosen for the wheel method)
+
+Author Rakesh from Bangalore (Flickr), licence CC BY-SA 2.0 (https://creativecommons.org/licenses/by-sa/2.0/), source https://commons.wikimedia.org/wiki/File:An_ST_bus_near_the_WEH_flyover_at_Borivali_(35520283).jpg.
+
+Result: **model_estimate**, depth 22.0 cm, sigma 20.0 cm, confidence 0.21.
+Scene model's own estimate: 22.0 cm (sigma 20.0 cm), basis: shallow standing water filling ruts and covering road base around bus wheels.
+Captured at (EXIF): 2005-07-28T13:58:55.
+
+Reasons: standing water visible; bus wheel: water does not meet the wheel; no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: shallow standing water filling ruts and covering road base around bus wheels.
+
+Wall time 27.6 s (timings ms: scene 14, agent 27495, geometry 20); model cost USD 0.007509.
+
+Overlay: `eval/out/wheel-final/w_borivali_bus_overlay.png`. Verifier images: `eval/out/wheel-final/w_borivali_bus_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1024x768 px (cached reading) | water visible; references: bus_wheel; own estimate 22 cm | search 1 vehicle box for wheels, check 1 wheel and segment the water | 14 |
+| segment | water | sam-2.1-hiera-small | box [43,475,409,686] px + points [[191, 594]] | mask 49261 px (6% of photo) | verify | 821 |
+| segment | bus 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [87,238,1024,684] px | 87 proposals from 24 grid points, 1 scene model wheel box and 3 dark blobs; best: wheel 0.62 = shape 0.63 (fit 0.83, arc 162 deg, ratio 0.97, spill 0.00, closed ring) x dark 0.97 x size 1.00; wheel 0.52 = shape 0.52 (fit 0.85, arc 129 deg, ratio 0.46, spill 0.00) x dark 1.00 x size 1.00 | verify the best two | 5547 |
+| verify | bus 1 wheel | muse-spark-open | crop [262,87,1024,768] px with 2 outlines A and B | chose A, shape 0.63 (fit 0.83, arc 162 deg, ratio 0.97, spill 0.00, closed ring), edge ratio 1.13, box agreement 0.79, is_target=true, outline good, view side, edge visible 0.85, waterline not visible; A follows the round outer edge of the rear bus tyre above ground while B outlines empty ground under the body | accept | 13669 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region aligns with muddy standing puddle in foreground adjacent to bus. | accept | 26652 |
+| geometry | bus wheel 1 | geometry | wheel and water masks | water does not meet the wheel | rejected | 18 |
+| estimate | photo | muse-spark-open | no measurable wheel | 22 cm, sigma 20 cm | report model estimate | 0 |
+
+### w_focus: Mehmet Abi, Allah Kolaylık Versin... - panoramio.jpg (Commons, chosen for the wheel method)
+
+Author Hakan SAVAŞ78 (Panoramio), licence CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/), source https://commons.wikimedia.org/wiki/File:Mehmet_Abi,_Allah_Kolayl%C4%B1k_Versin..._-_panoramio.jpg.
+
+Result: **model_estimate**, depth 33.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 33.0 cm (sigma 20.0 cm), basis: water reaches lower third of car tyres across flooded street.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; car 1 wheel: the scene model did not confirm the mask (outline and the tyre's box disagree); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: water reaches lower third of car tyres across flooded street.
+
+Wall time 85.1 s (timings ms: scene 1, agent 85073, geometry 0); model cost USD 0.019632.
+
+Overlay: `eval/out/wheel-final/w_focus_overlay.png`. Verifier images: `eval/out/wheel-final/w_focus_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 800x600 px (cached reading) | water visible; references: car_wheel, car_wheel; own estimate 33 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 1 |
+| segment | water | sam-2.1-hiera-small | box [8,438,793,595] px + points [[124, 519]] | mask 117921 px (25% of photo) | verify | 1282 |
+| segment | car 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [235,359,648,435] px | 93 proposals from 24 grid points, 2 scene model wheel boxes and 3 dark blobs; best: wheel 0.68 = shape 0.68 (fit 1.00, arc 126 deg, ratio 0.64, spill 0.01) x dark 1.00 x size 1.00; wheel 0.60 = shape 0.87 (fit 1.00, arc 156 deg, ratio 0.55, spill 0.00, closed ring) x dark 0.38 x size 1.00 | verify the best two | 4488 |
+| verify | car 1 wheel | muse-spark-open | crop [158,262,414,518] px with 1 outline | chose NONE, is_target=false, outline wrong, view side, edge visible 0.55, waterline visible; Magenta outline follows the wheel arch/bodywork cutout, not the round outer edge of the tyre itself, so it encloses bodywork and empty space and would give wron | refine with box [264,386,310,422] px + points [268,409], [286,391], [305,409] - points [287,407], [287,384], [287,436] | 22169 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [264,386,310,422] px + points [268,409], [286,391], [305,409] - points [287,407], [287,384], [287,436] | 6 proposals, 5 distinct; best shapes 0.45, 0.39 | verify the best two | 1380 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region lies on the brown floodwater surface in the foreground contiguous with water around the submerged car. | accept | 46159 |
+| verify | car 1 wheel | muse-spark-open | crop [163,276,419,532] px with 2 outlines A and B | chose A, shape 0.45 (fit 0.92, arc 96 deg, ratio 0.57, spill 0.00), edge ratio 1.71, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.30, is_target=true, outline good, view side, edge visible 0.60, waterline visible; Outline A follows the black tyre's outer arc above the water closely with a straight waterline and without straying onto bodywork. | refine with box [254,372,303,408] px + points [256,395], [269,377], [290,377], [300,395] - points [278,391], [278,368], [256,410] | 24480 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [254,372,303,408] px + points [256,395], [269,377], [290,377], [300,395] - points [278,391], [278,368], [256,410] | 6 proposals, 5 distinct; best shapes 0.54, 0.40 | verify the best two | 1372 |
+| verify | car 1 wheel | muse-spark-open | crop [154,262,410,518] px with 2 outlines A and B | chose B, shape 0.40 (fit 1.00, arc 72 deg, ratio 0.60, spill 0.00), edge ratio 4.85, box agreement 0.47, is_target=true, outline good, view side, edge visible 0.55, waterline visible; B tightly follows the black tyre's outer edge above the water while A strays onto the white mudguard/bodywork | give up: the outline covers a different area than the tyre (0.47) | 31110 |
+| estimate | photo | muse-spark-open | no measurable wheel | 33 cm, sigma 20 cm | report model estimate | 0 |
+
+### u_A-yqsrAME6g: Motorcyclist rides through flooded street during rain (Unsplash, chosen for the wheel method)
+
+Author Aldward Castillo (@aldwardcv31), licence Unsplash License (https://unsplash.com/license), source https://unsplash.com/photos/A-yqsrAME6g.
+
+Result: **wheel_geometry**, depth 23.5 cm, sigma 5.9 cm, confidence 0.16.
+Scene model's own estimate: 19.0 cm (sigma 20.0 cm), basis: Water covers lower quarter of motorcycle tyres across flooded carriageway.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; two-wheeler wheel found; wheel size unknown, generic prior used; scene model waterline agrees within 0.6 cm.
+
+Wall time 60.0 s (timings ms: scene 1, agent 59149, geometry 755); model cost USD 0.021228.
+
+Overlay: `eval/out/wheel-final/u_A-yqsrAME6g_overlay.png`. Verifier images: `eval/out/wheel-final/u_A-yqsrAME6g_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel; own estimate 19 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 1 |
+| segment | water | sam-2.1-hiera-small | box [928,626,1428,843] px + points [[1187, 733]] | mask 98469 px (6% of photo) | verify | 1210 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [403,531,867,750] px | 96 proposals from 24 grid points, 2 scene model wheel boxes and 4 dark blobs; best: wheel 0.66 = shape 0.80 (fit 0.94, arc 162 deg, ratio 0.58, spill 0.00, closed ring) x dark 0.65 x size 1.00; wheel 0.47 = shape 0.57 (fit 1.00, arc 102 deg, ratio 0.79, spill 0.00, closed ring) x dark 0.65 x size 1.00 | verify the best two | 4713 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [523,405,949,832] px with 2 outlines A and B | chose B, shape 0.57 (fit 1.00, arc 102 deg, ratio 0.79, spill 0.00, closed ring), edge ratio 3.94, not a tyre edge: 2 of 3 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.39, is_target=false, outline wrong, view side, edge visible 0.55, waterline visible; A includes swingarm chain and exhaust, B is only a small cap on the rear fender/tyre top and misses most of the tyre so neither follows the full tyre above wate | refine with box [683,561,823,648] px + points [698,621], [755,569], [808,621] - points [757,629], [781,569], [781,633] | 34846 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is water but offset to the right and misses the flooded area splashing around the motorcycle. | refine with box [288,640,832,790] px + point [560, 715] | 39563 |
+| segment | water | sam-2.1-hiera-small | box [288,640,832,790] px + points [[560, 715]] | mask 44699 px (3% of photo) | verify | 284 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [683,561,823,648] px + points [698,621], [755,569], [808,621] - points [757,629], [781,569], [781,633] | 6 proposals, 5 distinct; best shapes 0.47, 0.36 | verify the best two | 1515 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region lies on the flooded water surface around the motorcycle wheels and covers the immediate water area. | accept | 9530 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [549,418,945,813] px with 2 outlines A and B | chose B, shape 0.36 (fit 0.84, arc 93 deg, ratio 0.74, spill 0.00, closed ring), edge ratio 1.50, box agreement 0.73, is_target=true, outline good, view side, edge visible 0.60, waterline visible; B follows the round outer edge of the rear tyre above the water with rim inside, while A is only a small fragment of the tyre edge. | accept | 16760 |
+| segment | water at wheels | sam-2.1-hiera-small | 1 bands just below wheels where the waterline was seen | 397 px of water added next to the tyres | join to the verified water | 1151 |
+| geometry | two wheeler wheel 1 | geometry | wheel and water masks | depth 23.5 cm, sigma 5.9 cm, 180 degrees of rim visible | candidate | 754 |
+| estimate | photo | geometry | measurement 23.5 cm and model estimate 20 cm | difference 3 cm, two combined sigma 42 cm | use the measurement | 0 |
+
+### u_w8MXURXvqjQ: Man rides motorcycle through flooded street (Unsplash, chosen for the wheel method)
+
+Author Aldward Castillo (@aldwardcv31), licence Unsplash License (https://unsplash.com/license), source https://unsplash.com/photos/w8MXURXvqjQ.
+
+Result: **model_estimate**, depth 23.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 23.0 cm (sigma 20.0 cm), basis: water reaches lower third of motorcycle wheels across flooded street.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; two wheeler 1 wheel: the scene model did not confirm the mask (Both outlines include the silver mudguard above the tyre instead of following the black tyre edge only.); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: water reaches lower third of motorcycle wheels across flooded street.
+
+Wall time 61.4 s (timings ms: scene 2, agent 61291, geometry 0); model cost USD 0.022775.
+
+Overlay: `eval/out/wheel-final/u_w8MXURXvqjQ_overlay.png`. Verifier images: `eval/out/wheel-final/u_w8MXURXvqjQ_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel; own estimate 23 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 2 |
+| segment | water | sam-2.1-hiera-small | box [48,854,385,1036] px + points [[208, 939]] | mask 64503 px (4% of photo) | verify | 809 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [364,617,1157,844] px | 96 proposals from 24 grid points, 2 scene model wheel boxes and 4 dark blobs; best: wheel 0.75 = shape 1.00 (fit 1.00, arc 186 deg, ratio 0.95, spill 0.00, closed ring) x dark 0.49 x size 1.00; wheel 0.52 = shape 0.61 (fit 0.95, arc 120 deg, ratio 0.91, spill 0.00, closed ring) x dark 0.72 x size 1.00 | verify the best two | 5180 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta patch is water but small corner far from motorcycle, missing floodwater surrounding the rider. | refine with box [992,694,1440,907] px + point [1200, 800] | 8770 |
+| segment | water | sam-2.1-hiera-small | box [992,694,1440,907] px + points [[1200, 800]] | mask 90162 px (5% of photo) | verify | 1141 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [229,430,798,1000] px with 1 outline | chose NONE, is_target=false, outline wrong, view side, edge visible 0.75, waterline visible; Magenta outline encloses the chrome mudguard and fork along with the tyre instead of following the tyre outer edge only. | refine with box [403,649,590,798] px + points [410,738], [482,655], [556,661], [582,738] - points [496,749], [505,675], [539,686] | 7010 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [403,649,590,798] px + points [410,738], [482,655], [556,661], [582,738] - points [496,749], [505,675], [539,686] | 6 proposals, 6 distinct; best shapes 0.74, 0.38 | verify the best two | 1303 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is water but only a small patch behind the bike and misses the flooded water around the front wheel and foreground. | refine with box [48,747,1040,1024] px + point [480, 907] | 8213 |
+| segment | water | sam-2.1-hiera-small | box [48,747,1040,1024] px + points [[480, 907]] | mask 298394 px (17% of photo) | verify | 1156 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region aligns with flooded street water surrounding the motorcycle and rider. | accept | 10621 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [253,474,740,960] px with 2 outlines A and B | chose A, shape 0.74 (fit 0.92, arc 159 deg, ratio 0.84, spill 0.00, closed ring), edge ratio 3.26, not a tyre edge: the outline is an oval tilted 39 degrees: a cut or partial outline, not an upright wheel, box agreement 0.59, is_target=false, outline wrong, view side, edge visible 0.60, waterline visible; Magenta outline follows the silver mudguard at the top instead of the black tyre outer edge, adding non-tyre area. | refine with box [405,637,591,760] px + points [411,715], [470,647], [555,651], [579,710] - points [496,727], [496,639], [535,710] | 34782 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [405,637,591,760] px + points [411,715], [470,647], [555,651], [579,710] - points [496,727], [496,639], [535,710] | 6 proposals, 5 distinct; best shapes 0.58, 0.54 | verify the best two | 1433 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [228,422,800,994] px with 2 outlines A and B | chose A, shape 0.58 (fit 0.96, arc 129 deg, ratio 0.91, spill 0.03, closed ring), edge ratio 0.99, box agreement 0.72, is_target=false, outline wrong, view side, edge visible 0.75, waterline visible; Both outlines include the silver mudguard above the tyre instead of following the black tyre edge only. | give up | 11417 |
+| estimate | photo | muse-spark-open | no measurable wheel | 23 cm, sigma 20 cm | report model estimate | 0 |
+
+### u_qPaVJsINuQY: Person fixing motorcycle tire in floodwater (Unsplash, chosen for the wheel method)
+
+Author Aldward Castillo (@aldwardcv31), licence Unsplash License (https://unsplash.com/license), source https://unsplash.com/photos/qPaVJsINuQY.
+
+Result: **model_estimate**, depth 10.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 10.0 cm (sigma 20.0 cm), basis: Water covers lower tyre and ankles across flooded carriageway.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; two wheeler 1 wheel: the scene model did not confirm the mask (outline follows the rim, inside the tyre); person 1: the person is not standing upright (bending); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: Water covers lower tyre and ankles across flooded carriageway.
+
+Wall time 78.8 s (timings ms: scene 1, agent 78611, geometry 0); model cost USD 0.019913.
+
+Overlay: `eval/out/wheel-final/u_qPaVJsINuQY_overlay.png`. Verifier images: `eval/out/wheel-final/u_qPaVJsINuQY_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel, person; own estimate 10 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 1 |
+| segment | water | sam-2.1-hiera-small | box [48,747,481,1036] px + points [[240, 907]] | mask 162422 px (10% of photo) | verify | 2033 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [569,338,1368,789] px | 96 proposals from 24 grid points, 2 scene model wheel boxes and 4 dark blobs; best: wheel 0.35 = shape 0.65 (fit 0.93, arc 165 deg, ratio 0.38, spill 0.04, closed ring) x dark 0.09 x size 1.00; wheel 0.35 = shape 0.44 (fit 0.84, arc 114 deg, ratio 0.56, spill 0.00, closed ring) x dark 0.58 x size 1.00 | verify the best two | 7161 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta patch is water but tiny and misses the flooded area around the person and motorcycle. | refine with box [832,555,1472,939] px + point [1200, 694] | 8650 |
+| segment | water | sam-2.1-hiera-small | box [832,555,1472,939] px + points [[1200, 694]] | mask 161028 px (9% of photo) | verify | 1144 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [249,0,1452,1067] px with 2 outlines A and B | chose B, shape 0.44 (fit 0.84, arc 114 deg, ratio 0.56, spill 0.00, closed ring), edge ratio 0.62, box agreement 0.81, is_target=false, outline partial, view side, edge visible 0.65, waterline visible; B is on the rear wheel but its outline bulges to include the exhaust and suspension instead of following the tyre edge alone. | refine with box [920,408,1069,681] px + points [929,619], [983,432], [1049,512], [1055,619] - points [995,582], [1019,555], [989,517] | 9179 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [920,408,1069,681] px + points [929,619], [983,432], [1049,512], [1055,619] - points [995,582], [1019,555], [989,517] | 6 proposals, 5 distinct; best shapes 0.33, 0.32 | verify the best two | 1282 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region lies on the flooded street surface around the motorcycle and person. | accept | 7357 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [573,100,1423,951] px with 2 outlines A and B | chose B, shape 0.32 (fit 0.75, arc 102 deg, ratio 0.44, spill 0.00, closed ring), edge ratio 1.06, box agreement 0.48, is_target=true, outline good, view side, edge visible 0.65, waterline visible; B tightly follows the rear tyre outer edge above water while A includes exhaust and bodywork | refine with box [900,462,1002,713] px + points [909,628], [926,508], [977,526], [985,628] - points [947,632], [1015,632], [938,483] | 16671 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [900,462,1002,713] px + points [909,628], [926,508], [977,526], [985,628] - points [947,632], [1015,632], [938,483] | 6 proposals, 5 distinct; best shapes 0.60, 0.57 | verify the best two | 1413 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [615,250,1283,919] px with 2 outlines A and B | chose A, shape 0.60 (fit 0.90, arc 135 deg, ratio 0.67, spill 0.00, closed ring), edge ratio 0.59, not a tyre edge: a darker ring lies just outside the outline (dark 0.53 outside, 0.19 inside): it follows the rim, inside the tyre, box agreement 0.75, is_target=true, outline good, view side, edge visible 0.82, waterline visible; A follows the outer black tyre edge above the water with rim inside and straight waterline, B is only a small sliver on the tyre side. | give up: the outline sits inside the tyre (darker outside than inside, 0.59) | 42694 |
+| segment | people | sam-2.1-hiera-small | 1 person box with head and body points (segmented during the checks) | 1 masks | measure each against the stature prior | 1231 |
+| segment | water below people | sam-2.1-hiera-small | 1 band just below people (segmented during the checks) | 1 water mask | check that each outline ends at water | 3390 |
+| geometry | person 1 | geometry | person mask | the person is not standing upright (bending) | declined | 0 |
+| estimate | photo | muse-spark-open | no measurable wheel | 10 cm, sigma 20 cm | report model estimate | 0 |
+
+### u_ic8V3A59gpg: Car driving through floodwater splashes (Unsplash, chosen for the wheel method)
+
+Author Aldward Castillo (@aldwardcv31), licence Unsplash License (https://unsplash.com/license), source https://unsplash.com/photos/ic8V3A59gpg.
+
+Result: **model_estimate**, depth 22.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 22.0 cm (sigma 20.0 cm), basis: Waterline on front tyre shows shallow street flooding covering lower tyre.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; car wheel found; wheel size unknown, generic prior used; scene model waterline agrees within 1.3 cm; the car wheel measured 2.7 cm (sigma 1.7 cm), but the scene model estimates 22 cm at that wheel, above the measurement's two-sigma bound; a shallow reading that disagrees is not trusted, so the scene model's estimate is reported; estimate based on: Waterline on front tyre shows shallow street flooding covering lower tyre.
+
+Wall time 22.0 s (timings ms: scene 2, agent 19652, geometry 2282); model cost USD 0.009587.
+
+Overlay: `eval/out/wheel-final/u_ic8V3A59gpg_overlay.png`. Verifier images: `eval/out/wheel-final/u_ic8V3A59gpg_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: car_wheel; own estimate 22 cm | search 1 vehicle box for wheels, check 1 wheel and segment the water | 2 |
+| segment | water | sam-2.1-hiera-small | box [32,619,993,1063] px + points [[512, 875]] | mask 11325 px (1% of photo) | verify | 1227 |
+| segment | car 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [0,0,1600,670] px | 87 proposals from 24 grid points, 1 scene model wheel box and 3 dark blobs; best: wheel 0.50 = shape 0.63 (fit 0.87, arc 156 deg, ratio 0.79, spill 0.01, closed ring) x dark 0.58 x size 1.00; wheel 0.27 = shape 0.60 (fit 0.95, arc 120 deg, ratio 0.31, spill 0.00, closed ring) x dark 0.48 x size 0.61 | verify the best two | 8735 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is on water but is a tiny fragment missing most floodwater around the vehicle tire. | refine with box [29,619,995,1051] px + point [499, 809] | 9256 |
+| segment | water | sam-2.1-hiera-small | box [29,619,995,1051] px + points [[499, 809]] | mask 462715 px (27% of photo) | verify | 611 |
+| verify | car 1 wheel | muse-spark-open | crop [0,0,1290,1067] px with 2 outlines A and B | chose A, shape 0.63 (fit 0.87, arc 156 deg, ratio 0.79, spill 0.01, closed ring), edge ratio 1.81, box agreement 0.77, is_target=true, outline good, view side, edge visible 0.65, waterline visible; A follows the tyre outer edge above the water with rim inside and straight waterline, B is only a tiny rim fragment. | accept | 9845 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region lies entirely on the turbulent floodwater surface surrounding the vehicle tire. | accept | 7854 |
+| segment | water at wheels | sam-2.1-hiera-small | 1 bands just below wheels where the waterline was seen | 34078 px of water added next to the tyres | join to the verified water | 610 |
+| geometry | car wheel 1 | geometry | wheel and water masks | depth 2.7 cm, sigma 1.1 cm, 285 degrees of rim visible | candidate | 2281 |
+| estimate | photo | geometry | measurement 2.7 cm (sigma 1.7) and model estimate 22 cm | the estimate is 19 cm deeper, beyond the measurement's two-sigma bound of 6 cm | shallow reading not trusted: report the estimate | 0 |
+| estimate | photo | muse-spark-open | measurement not used | 22 cm, sigma 20 cm | report model estimate | 0 |
+
+### u_DhM9aChufzU: Cars driving through flooded street after heavy rain (Unsplash, chosen for the wheel method)
+
+Author Aldward Castillo (@aldwardcv31), licence Unsplash License (https://unsplash.com/license), source https://unsplash.com/photos/DhM9aChufzU.
+
+Result: **model_estimate**, depth 33.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 33.0 cm (sigma 20.0 cm), basis: Floodwater covers road and reaches mid-tyre of sedan in foreground.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; car 1 wheel: the scene model did not confirm the mask (No car wheel/tyre is visible in this crop; both magenta outlines cover flooded water/ground behind the car, not a tyre, so neither follows a tyre edge.); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: Floodwater covers road and reaches mid-tyre of sedan in foreground.
+
+Wall time 42.8 s (timings ms: scene 3, agent 42750, geometry 0); model cost USD 0.020602.
+
+Overlay: `eval/out/wheel-final/u_DhM9aChufzU_overlay.png`. Verifier images: `eval/out/wheel-final/u_DhM9aChufzU_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: car_wheel, car_wheel; own estimate 33 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 3 |
+| segment | water | sam-2.1-hiera-small | box [8,674,1598,1065] px + points [[243, 878]] | mask 402836 px (24% of photo) | verify | 1197 |
+| segment | car 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [284,461,1297,710] px | 90 proposals from 24 grid points, 2 scene model wheel boxes and 2 dark blobs; best: wheel 0.46 = shape 0.52 (fit 1.00, arc 93 deg, ratio 0.83, spill 0.00, closed ring) x dark 0.78 x size 1.00; wheel 0.43 = shape 0.66 (fit 0.96, arc 138 deg, ratio 0.30, spill 0.01, closed ring) x dark 0.30 x size 1.00 | verify the best two | 4885 |
+| verify | car 1 wheel | muse-spark-open | crop [1098,380,1389,672] px with 1 outline | chose NONE, is_target=false, outline wrong, view side, edge visible 0.00, waterline not visible; Magenta outline encloses flooded water/road surface beside car bumper, not any tyre or wheel. | refine with box [1190,470,1297,582] px - points [1229,526], [1244,555], [1214,497] | 6406 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [1190,470,1297,582] px - points [1229,526], [1244,555], [1214,497] | 3 proposals, 3 distinct; best shapes 0.41, 0.17 | verify the best two | 1394 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is floodwater but only covers foreground and misses the water surrounding the stranded silver car. | refine with box [192,598,560,726] px + point [320, 662] | 20240 |
+| segment | water | sam-2.1-hiera-small | box [192,598,560,726] px + points [[320, 662]] | mask 42143 px (2% of photo) | verify | 1218 |
+| verify | car 1 wheel | muse-spark-open | crop [1080,366,1418,704] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.00, waterline not visible; No car wheel/tyre is visible above water in the yellow box crop; both magenta outlines trace floodwater and splash beside the rear bumper, not a tyre edge. | refine with box [1190,470,1297,582] px - points [1242,552], [1242,586], [1283,569] | 12703 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [1190,470,1297,582] px - points [1242,552], [1242,586], [1283,569] | 3 proposals, 3 distinct; best shapes 0.44, 0.23 | verify the best two | 599 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta patch lies on the flooded street water directly beside the silver car’s front wheel. | accept | 13420 |
+| verify | car 1 wheel | muse-spark-open | crop [1079,367,1415,702] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.00, waterline not visible; No car wheel/tyre is visible in this crop; both magenta outlines cover flooded water/ground behind the car, not a tyre, so neither follows a tyre edge. | give up | 16681 |
+| estimate | photo | muse-spark-open | no measurable wheel | 33 cm, sigma 20 cm | report model estimate | 0 |
+
+### u_lIkOxcck448: Motorcycle rider on flooded street (Unsplash, chosen for the wheel method)
+
+Author Aldward Castillo (@aldwardcv31), licence Unsplash License (https://unsplash.com/license), source https://unsplash.com/photos/lIkOxcck448.
+
+Result: **model_estimate**, depth 28.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 28.0 cm (sigma 20.0 cm), basis: water covers road and reaches lower third to hub of motorcycle wheels.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; two wheeler 1 wheel: the scene model did not confirm the mask (outline and the tyre's box disagree); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: water covers road and reaches lower third to hub of motorcycle wheels.
+
+Wall time 64.4 s (timings ms: scene 2, agent 64314, geometry 0); model cost USD 0.022055.
+
+Overlay: `eval/out/wheel-final/u_lIkOxcck448_overlay.png`. Verifier images: `eval/out/wheel-final/u_lIkOxcck448_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel; own estimate 28 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 2 |
+| segment | water | sam-2.1-hiera-small | box [72,702,798,1064] px + points [[354, 878]] | mask 284033 px (17% of photo) | verify | 1246 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [790,568,1316,769] px | 96 proposals from 24 grid points, 2 scene model wheel boxes and 4 dark blobs; best: wheel 0.47 = shape 0.52 (fit 0.84, arc 132 deg, ratio 0.68, spill 0.00, closed ring) x dark 0.82 x size 1.00; wheel 0.24 = shape 0.36 (fit 0.98, arc 69 deg, ratio 0.62, spill 0.00, closed ring) x dark 0.31 x size 1.00 | verify the best two | 5256 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is water but in foreground corner and misses the flooded area directly around the motorcycle. | refine with box [512,555,1408,939] px + point [1088, 726] | 9859 |
+| segment | water | sam-2.1-hiera-small | box [512,555,1408,939] px + points [[1088, 726]] | mask 248309 px (15% of photo) | verify | 551 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [812,277,1540,1005] px with 2 outlines A and B | chose A, shape 0.52 (fit 0.84, arc 132 deg, ratio 0.68, spill 0.00, closed ring), edge ratio 2.06, not a tyre edge: 4 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.40, is_target=true, outline good, view side, edge visible 0.65, waterline visible; Outline A tightly follows the rear tyre's outer edge above the water with straight waterline, while B is off the bike in the water. | refine with box [1036,561,1201,674] px + points [1041,637], [1085,575], [1158,577], [1192,630] - points [1118,630], [1092,608], [1180,565] | 11337 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [1036,561,1201,674] px + points [1041,637], [1085,575], [1158,577], [1192,630] - points [1118,630], [1092,608], [1180,565] | 6 proposals, 5 distinct; best shapes 0.23, 0.20 | verify the best two | 1270 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region covers the flooded water surface and splash around the motorcycle. | accept | 19488 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [878,373,1372,867] px with 2 outlines A and B | chose B, shape 0.20 (fit 0.79, arc 57 deg, ratio 0.73, spill 0.00, closed ring), edge ratio 0.25, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.30, is_target=false, outline partial, view side, edge visible 0.60, waterline visible; B follows the rear tyre but its outline also encloses the shock absorber and side bodywork above the tyre. | refine with box [1043,622,1197,734] px + points [1053,699], [1090,642], [1157,640], [1187,694] - points [1118,687], [1068,667], [1098,622] | 33771 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [1043,622,1197,734] px + points [1053,699], [1090,642], [1157,640], [1187,694] - points [1118,687], [1068,667], [1098,622] | 6 proposals, 5 distinct; best shapes 0.62, 0.44 | verify the best two | 1477 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [865,422,1366,923] px with 2 outlines A and B | chose A, shape 0.62 (fit 0.83, arc 165 deg, ratio 0.69, spill 0.00, closed ring), edge ratio 1.80, box agreement 0.69, is_target=true, outline good, view side, edge visible 0.55, waterline visible; A tracks the black tyre outer edge above water tightly, B bulges left onto the shock spring. | give up: the outline covers a different area than the tyre (0.69) | 11000 |
+| estimate | photo | muse-spark-open | no measurable wheel | 28 cm, sigma 20 cm | report model estimate | 0 |
+
+### u_P7Z3HwNWPeQ: People riding bicycles through a flooded street (Unsplash, chosen for the wheel method)
+
+Author Dibakar Roy (@dibakar16roy), licence Unsplash License (https://unsplash.com/license), source https://unsplash.com/photos/P7Z3HwNWPeQ.
+
+Result: **model_estimate**, depth 27.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 27.0 cm (sigma 20.0 cm), basis: Water reaches mid-tyre to hub on multiple bikes and rickshaws across road.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; no wheel size is known for a other; two-wheeler wheel found; wheel size unknown, generic prior used; scene model waterline agrees within 8.5 cm; two wheeler 1 wheel: the scene model did not confirm the mask (Neither magenta outline follows the front tyre; A covers seat/engine and B is a tiny engine patch, both miss the tyre's outer edge entirely.); two wheeler 2 wheel: the scene model did not confirm the mask (B follows the right sidewall of the rear tyre while A traces splash water, but B covers only part of the tyre so it is partial not good.); the two-wheeler wheel measured 2.5 cm (sigma 8.7 cm), but the scene model estimates 26 cm at that wheel, above the measurement's two-sigma bound; a shallow reading that disagrees is not trusted, so the scene model's estimate is reported; estimate based on: Water reaches mid-tyre to hub on multiple bikes and rickshaws across road.
+
+Wall time 79.1 s (timings ms: scene 2, agent 78226, geometry 815); model cost USD 0.04898.
+
+Overlay: `eval/out/wheel-final/u_P7Z3HwNWPeQ_overlay.png`. Verifier images: `eval/out/wheel-final/u_P7Z3HwNWPeQ_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel, two_wheeler_wheel, two_wheeler_wheel, two_wheeler_wheel; own estimate 27 cm | search 2 vehicle boxes for wheels, check 5 wheels and segment the water | 2 |
+| segment | water | sam-2.1-hiera-small | box [8,760,638,1065] px + points [[237, 920]] | mask 153548 px (9% of photo) | verify | 1160 |
+| segment | two wheeler wheel 3 | sam-2.1-hiera-small | box [280,522,436,656] px + points [291,568], [355,525], [419,568] - points [360,585], [440,606] | 6 proposals, 6 distinct; best shapes 0.44, 0.41 | verify the best two | 2889 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | lower part of the vehicle box [227,386,292,478] px | 89 proposals from 24 grid points, 1 scene model wheel box and 4 dark blobs; best: wheel 0.09 = shape 0.21 (fit 0.95, arc 45 deg, ratio 0.65, spill 0.01) x dark 0.58 x size 0.53; wheel 0.01 = shape 0.01 (fit 0.64, arc 42 deg, ratio 0.60, spill 0.18) x dark 0.32 x size 0.88 | verify the best two | 4636 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [613,514,1286,946] px | 90 proposals from 24 grid points, 3 scene model wheel boxes and 0 dark blobs; best: wheel 0.44 = shape 0.52 (fit 0.89, arc 117 deg, ratio 0.73, spill 0.00, closed ring) x dark 0.70 x size 1.00; wheel 0.33 = shape 0.37 (fit 0.62, arc 177 deg, ratio 0.90, spill 0.01) x dark 0.76 x size 1.00 | verify the best two | 8646 |
+| verify | two wheeler wheel 3 | muse-spark-open | crop [155,385,561,791] px with 2 outlines A and B | chose B, shape 0.41 (fit 0.64, arc 231 deg, ratio 0.92, spill 0.00), edge ratio 1.64, box agreement 0.84, is_target=true, outline good, view side, edge visible 0.65, waterline visible; B follows the tyre outer edge above water while A cuts across the wheel, so B is the correct tyre outline. | accept | 17752 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [128,303,384,559] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.15, waterline visible; Both magenta outlines trace the motorcycle tail/license area not the tyre, the only visible tyre is the bicycle wheel at bottom right largely submerged. | refine with box [241,407,272,431] px + points [293,537], [320,550], [360,547] - points [346,553], [256,431], [256,418] | 20569 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [241,407,272,431] px + points [293,537], [320,550], [360,547] - points [346,553], [256,431], [256,418] | 6 proposals, 5 distinct; best shapes 0.20, 0.00 | verify the best two | 1397 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [529,214,1579,1067] px with 2 outlines A and B | chose B, shape 0.37 (fit 0.62, arc 177 deg, ratio 0.90, spill 0.01), edge ratio 1.06, not a tyre edge: 2 of 4 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.22, is_target=true, outline good, view side, edge visible 0.60, waterline visible; B follows the rear tyre's outer edge above water with flat waterline, A outlines engine and leg not a tyre | refine with box [1014,605,1235,753] px + points [1031,704], [1101,619], [1185,636], [1217,704] - points [1122,713], [1117,602], [1038,739] | 22559 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [1014,605,1235,753] px + points [1031,704], [1101,619], [1185,636], [1217,704] - points [1122,713], [1117,602], [1038,739] | 6 proposals, 5 distinct; best shapes 0.45, 0.38 | verify the best two | 1500 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is water but only a small foreground patch missing the flooded area around riders and rickshaws. | refine with box [560,694,1600,1062] px + point [1200, 907] | 32187 |
+| segment | water | sam-2.1-hiera-small | box [560,694,1600,1062] px + points [[1200, 907]] | mask 200119 px (12% of photo) | verify | 848 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [130,296,386,552] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.35, waterline visible; Neither outline follows the rear tyre; A traces bodywork beside the tail light and B is a tiny fragment, both miss the tyre's outer edge above the water. | refine with box [239,452,282,488] px + points [241,480], [249,462], [270,462], [278,479] - points [259,473], [259,450], [240,470] | 8709 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [239,452,282,488] px + points [241,480], [249,462], [270,462], [278,479] - points [259,473], [259,450], [240,470] | 6 proposals, 5 distinct; best shapes 0.39, 0.24 | verify the best two | 1062 |
+| validate | two wheeler 1 wheel | validator | answer to verify two wheeler 1 wheel | tyre_box: [[240, 620], [540, 850]] is not a box [x_min, y_min, x_max, y_max]; dropped; corrected_box: [[240, 620], [540, 850]] is not a box [x_min, y_min, x_max, y_max]; dropped | drop 2 fields that failed, use the rest | 0 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [759,313,1481,1036] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.35, waterline visible; Neither magenta outline follows the rear tyre; A is a tiny sliver on bodywork and B encloses seat and side panel, both far from the wheel's outer edge above wat | refine with box [1014,605,1235,753] px + points [965,841], [1012,790], [1084,797], [1120,841] - points [1041,855], [1033,732], [1134,783] | 11253 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [1014,605,1235,753] px + points [965,841], [1012,790], [1084,797], [1120,841] - points [1041,855], [1033,732], [1134,783] | 6 proposals, 5 distinct; best shapes 0.67, 0.52 | verify the best two | 606 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [132,350,388,606] px with 2 outlines A and B | chose B, shape 0.24 (fit 0.94, arc 48 deg, ratio 0.52, spill 0.00), edge ratio 0.61, not a tyre edge: 2 of 3 points the scene model put on the tyre rubber lie outside the outline: it sits inside the tyre, box agreement 0.18, is_target=false, outline partial, view head_on, edge visible 0.55, waterline visible; B follows the right sidewall of the rear tyre while A traces splash water, but B covers only part of the tyre so it is partial not good. | give up | 31207 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is water but only a small splash patch around foreground bike, missing flooded street around other riders. | refine with box [8,555,1600,1062] px + point [227, 809] | 33575 |
+| segment | water | sam-2.1-hiera-small | box [8,555,1600,1062] px + points [[227, 809]] | mask 546123 px (32% of photo) | verify | 484 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [700,336,1490,1067] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.65, waterline visible; Neither magenta outline follows the front tyre; A covers seat/engine and B is a tiny engine patch, both miss the tyre's outer edge entirely. | give up | 24733 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta overlay covers the flooded street water around the motorbike and bicycles in foreground. | accept | 8702 |
+| segment | water at wheels | sam-2.1-hiera-small | 1 bands just below wheels where the waterline was seen | 1572 px of water added next to the tyres | join to the verified water | 1117 |
+| geometry | two wheeler wheel 3 | geometry | wheel and water masks | depth 2.5 cm, sigma 2.0 cm, 240 degrees of rim visible | candidate | 814 |
+| estimate | photo | geometry | measurement 2.5 cm (sigma 8.7) and model estimate 26 cm | the estimate is 23 cm deeper, beyond the measurement's two-sigma bound of 20 cm | shallow reading not trusted: report the estimate | 0 |
+| estimate | photo | muse-spark-open | measurement not used | 27 cm, sigma 20 cm | report model estimate | 0 |
+
+### p_23939154: Motorcyclists navigate through a flooded street in Kolkata, India (Pexels, chosen for the wheel method)
+
+Author Dibakar Roy (Pexels, dibakar-roy-2432543), licence Pexels License (https://www.pexels.com/license/), source https://www.pexels.com/photo/men-riding-motorcycles-on-a-flooded-street-23939154/.
+
+Result: **model_estimate**, depth 27.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 27.0 cm (sigma 20.0 cm), basis: Water covers lower third of motorcycle wheels and shins of standing person.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; two wheeler 1 wheel: the scene model did not confirm the mask (outline is not the tyre's outer edge); two wheeler 2 wheel: the scene model did not confirm the mask (tyre seen head-on, its outline cannot be measured); person 1: the outline does not match the person the scene model boxed; no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: Water covers lower third of motorcycle wheels and shins of standing person.
+
+Wall time 50.9 s (timings ms: scene 4, agent 50763, geometry 0); model cost USD 0.030155.
+
+Overlay: `eval/out/wheel-final/p_23939154_overlay.png`. Verifier images: `eval/out/wheel-final/p_23939154_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel, two_wheeler_wheel, person; own estimate 27 cm | search 2 vehicle boxes for wheels, check 3 wheels and segment the water | 4 |
+| segment | water | sam-2.1-hiera-small | box [688,800,993,1036] px + points [[832, 923]] | mask 35029 px (2% of photo) | verify | 1667 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | lower part of the vehicle box [71,417,257,623] px | 78 proposals from 24 grid points, 1 scene model wheel box and 0 dark blobs; best: wheel 0.33 = shape 0.35 (fit 1.00, arc 63 deg, ratio 0.62, spill 0.00) x dark 0.90 x size 1.00; wheel 0.30 = shape 0.45 (fit 1.00, arc 84 deg, ratio 0.33, spill 0.01) x dark 0.33 x size 1.00 | verify the best two | 5353 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [268,557,1245,950] px | 96 proposals from 24 grid points, 2 scene model wheel boxes and 4 dark blobs; best: wheel 0.58 = shape 0.69 (fit 0.99, arc 132 deg, ratio 0.77, spill 0.01, closed ring) x dark 0.69 x size 1.00; wheel 0.58 = shape 0.65 (fit 1.00, arc 117 deg, ratio 0.75, spill 0.00, closed ring) x dark 0.78 x size 1.00 | verify the best two | 10191 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta patch is water but tiny and does not cover the flooded street around the motorcycles. | refine with box [80,694,1520,1046] px + point [1200, 534] | 9731 |
+| segment | water | sam-2.1-hiera-small | box [80,694,1520,1046] px + points [[1200, 534]] | mask 430095 px (25% of photo) | verify | 1167 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [13,331,348,666] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view head_on, edge visible 0.55, waterline visible; Both magenta outlines are in the water/reflection and do not follow the front tyre under the red mudguard; no outline traces the tyre's outer edge above water. | refine with box [108,437,155,475] px + points [115,467], [129,453], [145,467] - points [132,463], [130,426], [132,498] | 11474 |
+| segment | two wheeler 2 wheel | sam-2.1-hiera-small | box [108,437,155,475] px + points [115,467], [129,453], [145,467] - points [132,463], [130,426], [132,498] | 6 proposals, 6 distinct; best shapes 0.63, 0.43 | verify the best two | 1307 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta overlay aligns with flooded street water surrounding the motorcycles and riders. | accept | 8637 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [141,395,720,975] px with 1 outline | chose NONE, is_target=false, outline wrong, view oblique, edge visible 0.60, waterline visible; Magenta outline encloses the front mudguard/fender together with the tyre instead of following the tyre outer edge only. | refine with box [320,642,543,769] px + points [335,711], [422,653], [497,665], [520,711] - points [428,723], [457,688], [433,642] | 12359 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [320,642,543,769] px + points [335,711], [422,653], [497,665], [520,711] - points [428,723], [457,688], [433,642] | 6 proposals, 5 distinct; best shapes 0.70, 0.55 | verify the best two | 1539 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [140,410,722,993] px with 2 outlines A and B | chose A, shape 0.70 (fit 0.92, arc 147 deg, ratio 0.54, spill 0.00, closed ring), edge ratio 1.79, not a tyre edge: the outline is an oval tilted 27 degrees: a cut or partial outline, not an upright wheel, box agreement 0.64, is_target=true, outline good, view side, edge visible 0.60, waterline visible; A follows the outer black tyre edge above water while B includes the mudguard and fork | refine with box [318,640,457,751] px + points [323,710], [370,649], [422,652], [448,704] - points [384,716], [478,704], [434,693] | 10086 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [318,640,457,751] px + points [323,710], [370,649], [422,652], [448,704] - points [384,716], [478,704], [434,693] | 6 proposals, 5 distinct; best shapes 0.53, 0.44 | verify the best two | 1336 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [137,398,725,986] px with 2 outlines A and B | chose A, shape 0.53 (fit 0.88, arc 129 deg, ratio 0.69, spill 0.01, closed ring), edge ratio 1.41, not a tyre edge: the outline is 17% of the vehicle's width; a two wheeler wheel is 18 to 70%, box agreement 0.90, is_target=true, outline good, view side, edge visible 0.45, waterline visible; A follows the tyre outer edge tightly above water while B includes the mudguard and fender giving wrong depth. | give up: the outline is 17% of the vehicle's width; a two wheeler wheel is 18 to 70% | 8783 |
+| verify | two wheeler 2 wheel | muse-spark-open | crop [0,320,244,593] px with 2 outlines A and B | chose B, shape 0.43 (fit 0.71, arc 156 deg, ratio 0.93, spill 0.00), edge ratio 1.42, box agreement 0.49, is_target=true, outline good, view head_on, edge visible 0.55, waterline visible; B follows the narrow front tyre edge above water while A strays into water splash, B stays on tyre rubber for depth measurement. | give up: tyre seen head-on, its outline cannot be measured | 32514 |
+| segment | people | sam-2.1-hiera-small | 1 person box with head and body points (segmented during the checks) | 1 masks | measure each against the stature prior | 854 |
+| segment | water below people | sam-2.1-hiera-small | 1 band just below people (segmented during the checks) | 1 water mask | check that each outline ends at water | 5981 |
+| geometry | person 1 | geometry | person mask | the outline does not match the person the scene model boxed | declined | 2 |
+| estimate | photo | muse-spark-open | no measurable wheel | 27 cm, sigma 20 cm | report model estimate | 0 |
+
+### p_21961069: A man on a motorcycle struggles through a flooded street in Kolkata, India (Pexels, chosen for the wheel method)
+
+Author Dibakar Roy (Pexels, dibakar-roy-2432543), licence Pexels License (https://www.pexels.com/license/), source https://www.pexels.com/photo/man-dragging-a-motorcycle-through-the-flooding-21961069/.
+
+Result: **model_estimate**, depth 45.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 45.0 cm (sigma 20.0 cm), basis: Water submerges motorcycle up to seat/engine and reaches knee of standing adult..
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; person 1: the person is not standing upright (bending); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: Water submerges motorcycle up to seat/engine and reaches knee of standing adult..
+
+Wall time 30.3 s (timings ms: scene 2, agent 30196, geometry 0); model cost USD 0.009971.
+
+Overlay: `eval/out/wheel-final/p_21961069_overlay.png`. Verifier images: `eval/out/wheel-final/p_21961069_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: person; own estimate 45 cm | no wheel: measure 1 person against the stature prior and segment the water | 2 |
+| segment | water | sam-2.1-hiera-small | box [35,286,638,654] px + points [[285, 440]] | mask 229992 px (13% of photo) | verify | 2094 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta region is water but is offset to the left and misses the flooded water immediately around the person and motorcycle. | refine with box [720,694,1520,1014] px + point [1120, 854] | 10430 |
+| segment | water | sam-2.1-hiera-small | box [720,694,1520,1014] px + points [[1120, 854]] | mask 130656 px (8% of photo) | verify | 315 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is water but only a tiny patch under the motorcycle, missing most floodwater around it. | refine with box [48,277,608,662] px + point [288, 448] | 8036 |
+| segment | water | sam-2.1-hiera-small | box [48,277,608,662] px + points [[288, 448]] | mask 219119 px (13% of photo) | verify | 93 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is floodwater but is on the left background and misses the water immediately around the person and motorcycle. | accept (coverage partial) | 9072 |
+| segment | people | sam-2.1-hiera-small | 1 person box with head and body points (segmented during the checks) | 1 masks | measure each against the stature prior | 1234 |
+| segment | water below people | sam-2.1-hiera-small | 1 band just below people (segmented during the checks) | 1 water mask | check that each outline ends at water | 1725 |
+| geometry | person 1 | geometry | person mask | the person is not standing upright (bending) | declined | 0 |
+| estimate | photo | muse-spark-open | no measurable wheel | 45 cm, sigma 20 cm | report model estimate | 0 |
+
+### p_21960705: A motorcyclist in gear tackles urban flooding in Kolkata, India (Pexels, chosen for the wheel method)
+
+Author Dibakar Roy (Pexels, dibakar-roy-2432543), licence Pexels License (https://www.pexels.com/license/), source https://www.pexels.com/photo/side-view-of-a-man-on-a-motorcycle-21960705/.
+
+Result: **person_reference**, depth 6.9 cm, sigma 22.8 cm, confidence 0.09.
+Scene model's own estimate: 32.0 cm (sigma 20.0 cm), basis: Motorcycle wheels half submerged in foreground, ankle to shin depth in background street.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; two wheeler 1 wheel: the scene model did not confirm the mask (outline only partly right: B follows the rear tyre arc above water while A is only the mudguard, but B's top-left edge cuts slightly inside the tyre and includes swingarm area.); person 1: the shoulder line could not be found; person 2: the water just below was segmented locally, not checked by the scene model; a person standing in the water was measured against the adult stature prior (159 cm, sigma 9 cm); a person reference is coarse: expect about 10 to 15 cm of error; the scene model puts the water at the shin, about 25 cm (19 cm apart).
+
+Wall time 55.5 s (timings ms: scene 1, agent 55377, geometry 0); model cost USD 0.029463.
+
+Overlay: `eval/out/wheel-final/p_21960705_overlay.png`. Verifier images: `eval/out/wheel-final/p_21960705_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: two_wheeler_wheel, two_wheeler_wheel, person, person; own estimate 32 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 1 |
+| segment | water | sam-2.1-hiera-small | box [32,512,513,1047] px + points [[240, 747]] | mask 276950 px (16% of photo) | verify | 2595 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [592,640,1364,849] px | 96 proposals from 24 grid points, 2 scene model wheel boxes and 4 dark blobs; best: wheel 0.42 = shape 0.47 (fit 0.87, arc 114 deg, ratio 0.37, spill 0.00, closed ring) x dark 0.79 x size 1.00; wheel 0.38 = shape 0.40 (fit 1.00, arc 72 deg, ratio 0.43, spill 0.00, closed ring) x dark 0.90 x size 1.00 | verify the best two | 8054 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta region is floodwater but is confined to lower-left corner and misses the water surrounding the motorcycle and riders in the center. | refine with box [992,555,1568,939] px + point [1248, 726] | 9790 |
+| segment | water | sam-2.1-hiera-small | box [992,555,1568,939] px + points [[1248, 726]] | mask 34449 px (2% of photo) | verify | 350 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [741,360,1453,1067] px with 2 outlines A and B | chose A, shape 0.47 (fit 0.87, arc 114 deg, ratio 0.37, spill 0.00, closed ring), edge ratio 1.11, box agreement 0.53, is_target=false, outline wrong, view side, edge visible 0.50, waterline visible; A is nearer the rear tyre but includes suspension and misses the upper tyre arc, so it does not follow the tyre outer edge. | refine with box [1093,653,1250,777] px + points [1108,735], [1161,660], [1222,735], [1214,756] - points [1168,738], [1140,724], [1204,650] | 11546 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [1093,653,1250,777] px + points [1108,735], [1161,660], [1222,735], [1214,756] - points [1168,738], [1140,724], [1204,650] | 6 proposals, 6 distinct; best shapes 0.67, 0.49 | verify the best two | 1374 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [831,403,1458,1030] px with 2 outlines A and B | chose B, shape 0.49 (fit 0.91, arc 108 deg, ratio 0.53, spill 0.00, closed ring), edge ratio 0.58, box agreement 0.37, is_target=false, outline partial, view side, edge visible 0.65, waterline visible; A is only the shock spring, B is the rear wheel but its left edge bulges to include the suspension and bodywork instead of following the tyre's outer edge. | refine with box [1123,663,1251,764] px + points [1135,745], [1173,676], [1223,682], [1239,732] - points [1185,720], [1141,726], [1173,657] | 10162 |
+| segment | two wheeler 1 wheel | sam-2.1-hiera-small | box [1123,663,1251,764] px + points [1135,745], [1173,676], [1223,682], [1239,732] - points [1185,720], [1141,726], [1173,657] | 6 proposals, 6 distinct; best shapes 0.60, 0.25 | verify the best two | 1417 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=false, coverage wrong; Magenta region is the motorcycle rear, not the floodwater surface. | refine with box [80,747,560,1014] px + point [320, 907] | 26597 |
+| segment | water | sam-2.1-hiera-small | box [80,747,560,1014] px + points [[320, 907]] | mask 61676 px (4% of photo) | verify | 395 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta patch is water but small and far from motorcycle, missing water around subjects. | accept (coverage partial) | 9473 |
+| verify | two wheeler 1 wheel | muse-spark-open | crop [997,504,1407,914] px with 2 outlines A and B | chose B, shape 0.25 (fit 0.88, arc 66 deg, ratio 0.62, spill 0.02, closed ring), edge ratio 1.18, box agreement 0.62, is_target=true, outline partial, view side, edge visible 0.55, waterline visible; B follows the rear tyre arc above water while A is only the mudguard, but B's top-left edge cuts slightly inside the tyre and includes swingarm area. | give up: outline only partly right | 22613 |
+| segment | people | sam-2.1-hiera-small | 2 person boxes with head and body points (segmented during the checks) | 2 masks | measure each against the stature prior | 1762 |
+| segment | water below people | sam-2.1-hiera-small | 2 bands just below people (segmented during the checks) | 2 water masks | check that each outline ends at water | 4402 |
+| geometry | person 1 | geometry | person mask | the shoulder line could not be found | declined | 1 |
+| geometry | person 2 | geometry | person and water masks | depth 6.9 cm, sigma 22.8 cm, 96% of stature above water; scene model says the water is at the shin (25 cm) | candidate | 1 |
+| estimate | photo | geometry | no measurable wheel; a measured person | depth 6.9 cm, sigma 22.8 cm | use the person | 0 |
+
+### p_21960706: A car navigates a flooded street in Kolkata (Pexels, chosen for the wheel method)
+
+Author Dibakar Roy (Pexels, dibakar-roy-2432543), licence Pexels License (https://www.pexels.com/license/), source https://www.pexels.com/photo/a-car-driving-on-a-flooded-street-21960706/.
+
+Result: **model_estimate**, depth 35.0 cm, sigma 20.0 cm, confidence 0.22.
+Scene model's own estimate: 35.0 cm (sigma 20.0 cm), basis: Water reaches mid-wheel and lower doors of stranded car across flooded street.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; car 1 wheel: the scene model did not confirm the mask (tyre seen head-on, its outline cannot be measured); no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: Water reaches mid-wheel and lower doors of stranded car across flooded street.
+
+Wall time 67.6 s (timings ms: scene 1, agent 67432, geometry 0); model cost USD 0.027753.
+
+Overlay: `eval/out/wheel-final/p_21960706_overlay.png`. Verifier images: `eval/out/wheel-final/p_21960706_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: car_wheel, car_wheel; own estimate 35 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 1 |
+| segment | water | sam-2.1-hiera-small | box [8,304,500,532] px + points [[237, 440]] | mask 128187 px (8% of photo) | verify | 949 |
+| segment | car 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [375,523,1405,1020] px | 87 proposals from 24 grid points, 2 scene model wheel boxes and 1 dark blob; best: wheel 0.56 = shape 0.60 (fit 0.97, arc 114 deg, ratio 0.55, spill 0.00, closed ring) x dark 0.85 x size 1.00; wheel 0.48 = shape 0.58 (fit 0.76, arc 180 deg, ratio 0.72, spill 0.00, closed ring) x dark 0.65 x size 1.00 | verify the best two | 6465 |
+| verify | car 1 wheel | muse-spark-open | crop [841,587,1406,1067] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.35, waterline visible; Both magenta outlines trace water/splash beside the tyre, not the black tyre rubber arc above the water. | refine with box [1059,762,1126,846] px + points [1070,820], [1087,786], [1109,801], [1115,827] - points [1092,810], [1092,753], [1092,868] | 10058 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [1059,762,1126,846] px + points [1070,820], [1087,786], [1109,801], [1115,827] - points [1092,810], [1092,753], [1092,868] | 6 proposals, 5 distinct; best shapes 0.48, 0.25 | verify the best two | 1515 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta marks real floodwater but only a small patch behind the car and misses the water surrounding the vehicle. | refine with box [992,555,1568,939] px + point [1200, 726] | 18091 |
+| segment | water | sam-2.1-hiera-small | box [992,555,1568,939] px + points [[1200, 726]] | mask 180020 px (11% of photo) | verify | 139 |
+| verify | car 1 wheel | muse-spark-open | crop [964,677,1220,933] px with 2 outlines A and B | chose B, shape 0.25 (fit 1.00, arc 45 deg, ratio 0.63, spill 0.00, closed ring), edge ratio 0.78, not a tyre edge: the outline is an oval tilted 26 degrees: a cut or partial outline, not an upright wheel, box agreement 0.26, is_target=false, outline partial, view side, edge visible 0.45, waterline visible; B stays on the tyre rubber while A floods into water, but B captures only a narrow sliver of the sidewall not the full outer edge. | refine with box [1060,731,1127,834] px + points [1065,810], [1074,764], [1107,764], [1119,800] - points [1093,791], [1051,774], [1093,846] | 8150 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [1060,731,1127,834] px + points [1065,810], [1074,764], [1107,764], [1119,800] - points [1093,791], [1051,774], [1093,846] | 6 proposals, 6 distinct; best shapes 0.34, 0.14 | verify the best two | 1414 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta is water but only a small patch beside the car, missing most floodwater around and in front of it. | refine with box [24,747,928,1051] px + point [400, 907] | 9517 |
+| segment | water | sam-2.1-hiera-small | box [24,747,928,1051] px + points [[400, 907]] | mask 232814 px (14% of photo) | verify | 128 |
+| verify | car 1 wheel | muse-spark-open | crop [948,632,1239,924] px with 2 outlines A and B | chose B, shape 0.14 (fit 0.91, arc 93 deg, ratio 0.41, spill 0.13, closed ring), edge ratio 0.74, not a tyre edge: the outline is an oval tilted 27 degrees: a cut or partial outline, not an upright wheel, box agreement 0.84, is_target=true, outline good, view head_on, edge visible 0.55, waterline visible; B follows the narrow upright tyre band above the water while A covers only a thin sliver of the sidewall. | give up: tyre seen head-on, its outline cannot be measured | 15494 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region lies on open floodwater directly behind and around the submerged car. | accept | 38482 |
+| estimate | photo | muse-spark-open | no measurable wheel | 35 cm, sigma 20 cm | report model estimate | 0 |
+
+### p_26202090: Vehicles submerged in a flooded street in Kolkata, India during a heavy monsoon rainfall (Pexels, chosen for the wheel method)
+
+Author Dibakar Roy (Pexels, dibakar-roy-2432543), licence Pexels License (https://www.pexels.com/license/), source https://www.pexels.com/photo/cars-on-street-in-water-during-flood-26202090/.
+
+Result: **model_estimate**, depth 38.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 38.0 cm (sigma 20.0 cm), basis: Water covers half of car tyres and reaches shin on standing person.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; car 1 wheel: the scene model did not confirm the mask (outline and the tyre's box disagree); car 2 wheel: the scene model did not confirm the mask (outline and the tyre's box disagree); car wheel 3: the scene model did not confirm the mask (A is closer to tyre than B's tiny bumper sliver but A encloses mudguard/bodywork above tyre so it is not tyre-only and would give wrong water depth.); person 1: the shoulder line could not be found; no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: Water covers half of car tyres and reaches shin on standing person.
+
+Wall time 66.3 s (timings ms: scene 2, agent 66191, geometry 0); model cost USD 0.052394.
+
+Overlay: `eval/out/wheel-final/p_26202090_overlay.png`. Verifier images: `eval/out/wheel-final/p_26202090_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1064 px (cached reading) | water visible; references: car_wheel, car_wheel, car_wheel, person; own estimate 38 cm | search 2 vehicle boxes for wheels, check 3 wheels and segment the water | 2 |
+| segment | water | sam-2.1-hiera-small | box [22,749,302,1051] px + points [[134, 896]] | mask 73000 px (4% of photo) | verify | 2589 |
+| segment | car wheel 3 | sam-2.1-hiera-small | box [336,689,454,793] px + points [352,729], [392,702], [435,729] - points [403,768], [336,755], [453,755] | 6 proposals, 5 distinct; best shapes 0.38, 0.30 | verify the best two | 4684 |
+| segment | car 2 wheel | sam-2.1-hiera-small | lower part of the vehicle box [260,504,1014,719] px | 78 proposals from 24 grid points and 2 dark blobs; best: wheel 0.90 = shape 0.92 (fit 1.00, arc 165 deg, ratio 0.78, spill 0.00) x dark 0.97 x size 1.00; wheel 0.18 = shape 0.28 (fit 0.72, arc 96 deg, ratio 0.76, spill 0.00) x dark 0.28 x size 1.00 | verify the best two | 12041 |
+| verify | car wheel 3 | muse-spark-open | crop [191,544,597,949] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.00, waterline not visible; Both magenta outlines are in open flood water with no tyre inside the yellow box; the visible car tyres are outside the box and not outlined. | refine with box [336,689,454,793] px - points [394,746], [467,686], [536,726] | 8169 |
+| segment | car wheel 3 | sam-2.1-hiera-small | box [336,689,454,793] px - points [394,746], [467,686], [536,726] | 3 proposals, 3 distinct; best shapes 0.48, 0.28 | verify the best two | 355 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage partial; Magenta patch is water but is a tiny corner crop that misses the main floodwater around the stranded cars. | refine with box [512,798,1248,1059] px + point [880, 979] | 12135 |
+| segment | water | sam-2.1-hiera-small | box [512,798,1248,1059] px + points [[880, 979]] | mask 158837 px (9% of photo) | verify | 1144 |
+| segment | car 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [453,628,1538,973] px | 86 proposals from 24 grid points, 2 scene model wheel boxes and 1 dark blob; best: wheel 0.73 = shape 0.76 (fit 0.89, arc 174 deg, ratio 0.72, spill 0.00) x dark 0.93 x size 1.00; wheel 0.68 = shape 0.73 (fit 0.92, arc 156 deg, ratio 0.69, spill 0.00, closed ring) x dark 0.86 x size 1.00 | verify the best two | 18485 |
+| verify | car 2 wheel | muse-spark-open | crop [301,418,821,938] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.50, waterline visible; Both outlines follow the mudguard and bodywork, not the round outer edge of the black tyre above the water. | refine with box [491,722,634,790] px + points [504,761], [535,727], [592,727], [621,761] - points [561,774], [561,701], [483,722] | 9153 |
+| segment | car 2 wheel | sam-2.1-hiera-small | box [491,722,634,790] px + points [504,761], [535,727], [592,727], [621,761] - points [561,774], [561,701], [483,722] | 6 proposals, 6 distinct; best shapes 0.58, 0.26 | verify the best two | 2025 |
+| verify | car 1 wheel | muse-spark-open | crop [952,577,1505,1064] px with 2 outlines A and B | chose B, shape 0.73 (fit 0.92, arc 156 deg, ratio 0.69, spill 0.00, closed ring), edge ratio 0.26, box agreement 0.88, is_target=true, outline good, view side, edge visible 0.60, waterline visible; B follows the tyre outer edge above water with straight waterline while A incorrectly includes submerged part below water | refine with box [1122,802,1335,905] px + points [1134,857], [1227,810], [1295,818], [1324,857] - points [1233,867], [1231,784], [1372,823] | 8106 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region lies on the brown floodwater immediately surrounding the stranded white car. | accept | 12397 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [1122,802,1335,905] px + points [1134,857], [1227,810], [1295,818], [1324,857] - points [1233,867], [1231,784], [1372,823] | 6 proposals, 5 distinct; best shapes 0.47, 0.42 | verify the best two | 1840 |
+| verify | car 2 wheel | muse-spark-open | crop [349,541,771,962] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.50, waterline visible; Neither outline follows the tyre outer edge, both cover water or a tiny splash artifact instead of the tyre. | refine with box [482,699,613,758] px + points [490,737], [528,707], [579,707], [604,737] - points [547,745], [469,690], [545,770] | 8251 |
+| segment | car 2 wheel | sam-2.1-hiera-small | box [482,699,613,758] px + points [490,737], [528,707], [579,707], [604,737] - points [547,745], [469,690], [545,770] | 6 proposals, 5 distinct; best shapes 0.68, 0.53 | verify the best two | 1707 |
+| verify | car wheel 3 | muse-spark-open | crop [224,575,556,907] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.55, waterline visible; Both magenta outlines are on water/debris in centre, not on the white car's front tyre at right, so neither follows the tyre. | refine with box [224,680,500,759] px + points [511,736], [521,693], [544,691], [553,731] - points [533,723], [505,670], [490,756] | 32506 |
+| verify | car 1 wheel | muse-spark-open | crop [898,518,1561,1064] px with 2 outlines A and B | chose B, shape 0.42 (fit 0.82, arc 114 deg, ratio 0.68, spill 0.00, closed ring), edge ratio 8.30, box agreement 0.55, is_target=true, outline good, view side, edge visible 0.65, waterline visible; B follows the tyre's outer edge above the water with rim inside, while A is a small sliver on the bodywork not the tyre. | refine with box [1120,783,1339,870] px + points [1140,837], [1220,794], [1306,799], [1322,837] - points [1230,848], [1230,766], [1375,802] | 18600 |
+| segment | car wheel 3 | sam-2.1-hiera-small | box [224,680,500,759] px + points [511,736], [521,693], [544,691], [553,731] - points [533,723], [505,670], [490,756] | 6 proposals, 5 distinct; best shapes 0.76, 0.60 | verify the best two | 2638 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [1120,783,1339,870] px + points [1140,837], [1220,794], [1306,799], [1322,837] - points [1230,848], [1230,766], [1375,802] | 6 proposals, 5 distinct; best shapes 1.00, 0.97 | verify the best two | 2012 |
+| verify | car wheel 3 | muse-spark-open | crop [0,177,964,1064] px with 2 outlines A and B | chose A, shape 0.76 (fit 0.87, arc 198 deg, ratio 0.77, spill 0.00), edge ratio 14.30, box agreement 0.38, is_target=false, outline wrong, view side, edge visible 0.55, waterline visible; A is closer to tyre than B's tiny bumper sliver but A encloses mudguard/bodywork above tyre so it is not tyre-only and would give wrong water depth. | give up | 7952 |
+| verify | car 1 wheel | muse-spark-open | crop [903,507,1556,1064] px with 2 outlines A and B | chose B, shape 0.97 (fit 1.00, arc 174 deg, ratio 0.63, spill 0.00, closed ring), edge ratio 13.36, box agreement 0.40, is_target=true, outline good, view side, edge visible 0.55, waterline visible; B follows the tyre's outer rubber closely above the water while A dips into water and includes bodywork, so B gives correct water depth. | give up: the outline covers a different area than the tyre (0.40) | 12302 |
+| verify | car 2 wheel | muse-spark-open | crop [367,536,741,911] px with 2 outlines A and B | chose B, shape 0.53 (fit 0.86, arc 135 deg, ratio 0.55, spill 0.01, closed ring), edge ratio 0.78, box agreement 0.67, is_target=true, outline good, view side, edge visible 0.45, waterline visible; B follows the tyre outer edge above water with rim inside and straight waterline, while A covers only a small patch of sidewall. | give up: the outline covers a different area than the tyre (0.67) | 32801 |
+| segment | people | sam-2.1-hiera-small | 1 person box with head and body points (segmented during the checks) | 1 masks | measure each against the stature prior | 1647 |
+| segment | water below people | sam-2.1-hiera-small | 1 band just below people (segmented during the checks) | 1 water mask | check that each outline ends at water | 10236 |
+| geometry | person 1 | geometry | person mask | the shoulder line could not be found | declined | 0 |
+| estimate | photo | muse-spark-open | no measurable wheel | 38 cm, sigma 20 cm | report model estimate | 0 |
+
+### p_20989108: Flooded street in Kolkata with a car being pushed by a man through the waterlogged area (Pexels, chosen for the wheel method)
+
+Author Dibakar Roy (Pexels, dibakar-roy-2432543), licence Pexels License (https://www.pexels.com/license/), source https://www.pexels.com/photo/man-pushing-car-on-street-in-water-20989108/.
+
+Result: **model_estimate**, depth 50.0 cm, sigma 20.0 cm, confidence 0.23.
+Scene model's own estimate: 50.0 cm (sigma 20.0 cm), basis: Water covers lower half of car wheels and reaches waist of adult pusher.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; car 1 wheel: the scene model did not confirm the mask (Tyre is fully submerged below waterline and not visible above water; A follows fender/bodywork and B follows headlight, neither follows tyre rubber.); person 1: the shoulder line could not be found; no wheel could be measured; depth is the scene model's visual estimate, not a measurement; estimate based on: Water covers lower half of car wheels and reaches waist of adult pusher.
+
+Wall time 57.1 s (timings ms: scene 2, agent 56980, geometry 0); model cost USD 0.019173.
+
+Overlay: `eval/out/wheel-final/p_20989108_overlay.png`. Verifier images: `eval/out/wheel-final/p_20989108_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: car_wheel, car_wheel, person; own estimate 50 cm | search 1 vehicle box for wheels, check 2 wheels and segment the water | 2 |
+| segment | water | sam-2.1-hiera-small | box [992,512,1577,769] px + points [[1248, 619]] | mask 129342 px (8% of photo) | verify | 2210 |
+| segment | car 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [210,570,1295,959] px | 93 proposals from 24 grid points, 2 scene model wheel boxes and 3 dark blobs; best: wheel 0.49 = shape 0.63 (fit 0.87, arc 150 deg, ratio 0.45, spill 0.00, closed ring) x dark 0.56 x size 1.00; wheel 0.43 = shape 0.52 (fit 0.84, arc 135 deg, ratio 0.47, spill 0.00, closed ring) x dark 0.68 x size 1.00 | verify the best two | 7563 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region lies on the flooded street water surface adjacent to the submerged car and covers open water around it. | accept | 10349 |
+| verify | car 1 wheel | muse-spark-open | crop [0,0,1600,1067] px with 2 outlines A and B | chose B, shape 0.52 (fit 0.84, arc 135 deg, ratio 0.47, spill 0.00, closed ring), edge ratio 1.66, box agreement 0.34, is_target=false, outline partial, view oblique, edge visible 0.45, waterline visible; B is the wheel but its outline bulges to include the mudguard and bodywork above the tyre instead of the tyre edge alone. | refine with box [573,667,771,838] px + points [589,779], [648,694], [728,710], [752,779] - points [664,763], [664,667], [616,635] | 9463 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [573,667,771,838] px + points [589,779], [648,694], [728,710], [752,779] - points [664,763], [664,667], [616,635] | 6 proposals, 5 distinct; best shapes 0.32, 0.20 | verify the best two | 1459 |
+| verify | car 1 wheel | muse-spark-open | crop [351,446,981,1067] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.00, waterline not visible; No tyre rubber is visible above water, both outlines cover fender/headlight not tyre so neither follows tyre edge. | refine with box [573,667,771,838] px - points [578,756], [716,788], [616,850] | 27071 |
+| segment | car 1 wheel | sam-2.1-hiera-small | box [573,667,771,838] px - points [578,756], [716,788], [616,850] | 3 proposals, 3 distinct; best shapes 0.50, 0.35 | verify the best two | 956 |
+| verify | car 1 wheel | muse-spark-open | crop [300,393,1051,1067] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.00, waterline not visible; Tyre is fully submerged below waterline and not visible above water; A follows fender/bodywork and B follows headlight, neither follows tyre rubber. | give up | 10282 |
+| segment | people | sam-2.1-hiera-small | 1 person box with head and body points (segmented during the checks) | 1 masks | measure each against the stature prior | 1355 |
+| segment | water below people | sam-2.1-hiera-small | 1 band just below people (segmented during the checks) | 1 water mask | check that each outline ends at water | 3551 |
+| geometry | person 1 | geometry | person mask | the shoulder line could not be found | declined | 2 |
+| estimate | photo | muse-spark-open | no measurable wheel | 50 cm, sigma 20 cm | report model estimate | 0 |
+
+### p_21960691: Black and white image of a flooded street in Kolkata showing cars and a decorated bus (Pexels, chosen for the wheel method)
+
+Author Dibakar Roy (Pexels, dibakar-roy-2432543), licence Pexels License (https://www.pexels.com/license/), source https://www.pexels.com/photo/vehicles-driving-on-a-flooded-street-21960691/.
+
+Result: **wheel_geometry**, depth 25.4 cm, sigma 9.0 cm, confidence 0.09.
+Scene model's own estimate: 27.0 cm (sigma 20.0 cm), basis: Water covers lower third to half of car tyres across flooded street.
+Captured at (EXIF): not recorded.
+
+Reasons: standing water visible; car wheel found; wheel size from catalogue: Maruti Suzuki Swift; scene model waterline agrees within 7.3 cm.
+
+Wall time 46.0 s (timings ms: scene 3, agent 45386, geometry 546); model cost USD 0.025807.
+
+Overlay: `eval/out/wheel-final/p_21960691_overlay.png`. Verifier images: `eval/out/wheel-final/p_21960691_agent/`.
+
+| Step | Target | Model | Input | Output | Decision | ms |
+|---|---|---|---|---|---|---|
+| scene | photo | muse-spark-open | photo 1600x1067 px (cached reading) | water visible; references: car_wheel, car_wheel, car_wheel; own estimate 27 cm | search 1 vehicle box for wheels, check 3 wheels and segment the water | 3 |
+| segment | water | sam-2.1-hiera-small | box [512,800,1153,1052] px + points [[819, 920]] | mask 116283 px (7% of photo) | verify | 1755 |
+| segment | car wheel 2 | sam-2.1-hiera-small | box [1011,659,1044,697] px + points [1016,667], [1027,656], [1040,667] - point [1027,678] | 6 proposals, 5 distinct; best shapes 0.66, 0.49 | verify the best two | 3126 |
+| verify | water | muse-spark-open | photo with the proposed region tinted | is_water=true, coverage good; Magenta region lies entirely on the flooded roadway water surface in the foreground around the vehicles. | accept | 7009 |
+| segment | car 1 wheel | sam-2.1-hiera-small | lower part of the vehicle box [0,556,934,892] px | 90 proposals from 24 grid points, 2 scene model wheel boxes and 2 dark blobs; best: wheel 0.47 = shape 0.51 (fit 0.81, arc 138 deg, ratio 0.59, spill 0.00) x dark 0.83 x size 1.00; wheel 0.40 = shape 0.47 (fit 0.75, arc 159 deg, ratio 0.84, spill 0.01) x dark 0.70 x size 1.00 | verify the best two | 10155 |
+| verify | car 1 wheel | muse-spark-open | crop [650,590,906,846] px with 1 outline | chose A, shape 0.51 (fit 0.81, arc 138 deg, ratio 0.59, spill 0.00), edge ratio 1.27, box agreement 0.72, is_target=true, outline good, view side, edge visible 0.65, waterline visible; Magenta outline follows the round outer edge of the tyre above the water with rim inside and straight lower edge at waterline, no inclusion of bodywork. | accept | 6308 |
+| verify | car wheel 2 | muse-spark-open | crop [890,532,1146,788] px with 2 outlines A and B | chose A, shape 0.66 (fit 0.83, arc 186 deg, ratio 0.67, spill 0.01), edge ratio 1.19, box agreement 0.22, is_target=false, outline wrong, view side, edge visible 0.55, waterline visible; B outlines the door and bodywork while A is closer to the rear tyre but still strays onto sill and water and does not follow the round tyre edge. | refine with box [1008,671,1048,695] px + points [1012,686], [1027,675], [1044,686] - points [1028,687], [1028,665], [1028,701] | 15919 |
+| segment | car wheel 2 | sam-2.1-hiera-small | box [1008,671,1048,695] px + points [1012,686], [1027,675], [1044,686] - points [1028,687], [1028,665], [1028,701] | 6 proposals, 5 distinct; best shapes 0.32, 0.00 | verify the best two | 1326 |
+| verify | car wheel 2 | muse-spark-open | crop [900,552,1156,808] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.35, waterline visible; Neither outline follows the round outer edge of the rear tyre above water; A encloses sill/bodywork and water, B is only a tiny sliver at the waterline. | refine with box [1022,688,1063,712] px + points [1024,706], [1036,693], [1055,702] - points [1041,702], [1040,684], [1022,692] | 13256 |
+| segment | car wheel 2 | sam-2.1-hiera-small | box [1022,688,1063,712] px + points [1024,706], [1036,693], [1055,702] - points [1041,702], [1040,684], [1022,692] | 6 proposals, 5 distinct; best shapes 0.62, 0.00 | verify the best two | 1257 |
+| verify | car wheel 2 | muse-spark-open | crop [916,574,1172,830] px with 2 outlines A and B | chose NONE, is_target=false, outline wrong, view side, edge visible 0.60, waterline visible; Neither magenta outline follows the car tyre; both are in the flooded gap between vehicles, not on the car wheel at left | give up | 9178 |
+| segment | water at wheels | sam-2.1-hiera-small | 1 bands just below wheels where the waterline was seen | 3655 px of water added next to the tyres | join to the verified water | 1214 |
+| geometry | car wheel 1 | geometry | wheel and water masks | depth 25.4 cm, sigma 5.3 cm, 171 degrees of rim visible | candidate | 545 |
+| estimate | photo | geometry | measurement 25.4 cm and model estimate 26 cm | difference 1 cm, two combined sigma 44 cm | use the measurement | 0 |
+
+<!-- wheel-eval:end -->

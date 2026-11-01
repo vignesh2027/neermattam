@@ -1318,7 +1318,11 @@ class VerifyRefineAgent:
         best = await self._in_budget(asyncio.to_thread(rank))
         out_text = (
             f"{_count(len(raw), 'proposal')} from {_count(len(grid), 'grid point')}"
-            + (f", {_count(len(hint_boxes), 'scene model wheel box')}" if hint_boxes else "")
+            + (
+                f", {len(hint_boxes)} scene model wheel box" + ("es" if len(hint_boxes) > 1 else "")
+                if hint_boxes
+                else ""
+            )
             + f" and {_count(len(blobs), 'dark blob')}; "
             + ("best: " + "; ".join(sc.text() for sc, _ in best) if best else "none wheel-like")
         )

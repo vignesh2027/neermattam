@@ -235,7 +235,7 @@ async def run(args: argparse.Namespace) -> int:
     # (docs/VERIFY.md); replay one with
     #   uv run python -m neermattam_perception.replay ../eval/out/<id>.certificate.json
     signer = Signer.from_env()
-    out = Path(args.out)
+    out = Path(args.out).resolve()  # so the report can give paths from the repository root
     out.mkdir(parents=True, exist_ok=True)
     sections = []
     stats: dict[str, Any] = {}
