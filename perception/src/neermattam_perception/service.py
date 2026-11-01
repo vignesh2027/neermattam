@@ -27,7 +27,8 @@ import hashlib
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Callable
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -40,6 +41,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from .adapters import MetaApiAdapter, ModelError
 from .agent import TraceStep, VerifyRefineAgent
 from .certificate import Signer
+from .codes import decision_code
 from .media import (
     MAX_IMAGE_BYTES,
     MAX_VIDEO_BYTES,
@@ -58,6 +60,70 @@ from .references import RefKind
 from .sam_local import mask_model_from_config
 
 PORT = 8301
+
+
+class Readiness:
+    """Whether the models are reachable, checked in the background.
+
+    ``GET /readyz`` used to call Baseten and Modal on every probe; one slow round
+    trip (Baseten's check may take up to 10 s) failed the gateway's 3 s probe even
+    when the service was idle. Now a background task checks every
+    ``interval_s`` and the probe answers from the last result at once. A failed
+    check reports "unavailable" only when no check has succeeded within
+    ``grace_s``, so one slow or lost round trip does not flap readiness. When the
+    background task is not running (a test client without its lifespan), a
+    stale result is refreshed inline, bounded by ``inline_timeout_s``.
+    """
+
+    def __init__(
+        self,
+        check: Callable[[], Awaitable[tuple[bool, str]]],
+        *,
+        interval_s: float = 15.0,
+        timeout_s: float = 10.0,
+        inline_timeout_s: float = 2.5,
+        grace_s: float = 45.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.check = check
+        self.interval_s = interval_s
+        self.timeout_s = timeout_s
+        self.inline_timeout_s = inline_timeout_s
+        self.grace_s = grace_s
+        self.clock = clock
+        self.ok = False
+        self.why = "not checked yet"
+        self.checked_at: float | None = None
+        self.last_ok_at: float | None = None
+
+    async def refresh(self, timeout_s: float | None = None) -> None:
+        limit = self.timeout_s if timeout_s is None else timeout_s
+        try:
+            ok, why = await asyncio.wait_for(self.check(), limit)
+        except TimeoutError:
+            ok, why = False, f"readiness check took longer than {limit:.1f} s"
+        except Exception as exc:  # a check must never take the probe down
+            ok, why = False, f"readiness check failed: {type(exc).__name__}"
+        now = self.clock()
+        self.ok, self.why, self.checked_at = ok, why, now
+        if ok:
+            self.last_ok_at = now
+
+    async def run_forever(self) -> None:
+        while True:
+            await self.refresh()
+            await asyncio.sleep(self.interval_s)
+
+    async def state(self) -> tuple[bool, str]:
+        if self.checked_at is None or self.clock() - self.checked_at > 3 * self.interval_s:
+            await self.refresh(self.inline_timeout_s)
+        if self.ok:
+            return True, self.why
+        if self.last_ok_at is not None and self.clock() - self.last_ok_at <= self.grace_s:
+            return True, f"ok (the last check failed: {self.why})"
+        return False, self.why
+
+
 _IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _VIDEO_TYPES = {"video/mp4", "video/quicktime"}
 # Formats Muse Spark Open accepts (https://docs.baseten.co/inference/model-apis/audio).
@@ -175,15 +241,23 @@ def create_app(
     store_dir: str | None = None,
     transcriber: MuseSparkOpenAdapter | None = None,
 ) -> FastAPI:
+    readiness = Readiness(pipeline.ready)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         # Load local weights once, before serving (the first load downloads them).
         load = getattr(pipeline.masks, "load", None)
         if callable(load):
             await asyncio.to_thread(load)
-        yield
+        await readiness.refresh()
+        task = asyncio.create_task(readiness.run_forever())
+        try:
+            yield
+        finally:
+            task.cancel()
 
     app = FastAPI(title="Neermattam perception", version="0.2.0", lifespan=lifespan)
+    app.state.readiness = readiness
     app.add_middleware(BodyLimit)
     store = Path(store_dir) if store_dir else None
 
@@ -198,7 +272,7 @@ def create_app(
 
     @app.get("/readyz")
     async def readyz() -> JSONResponse:
-        ok, why = await pipeline.ready()
+        ok, why = await readiness.state()
         return JSONResponse(
             {"status": "ok" if ok else "unavailable", "reason": why}, status_code=200 if ok else 503
         )
@@ -283,7 +357,12 @@ def create_app(
         queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
 
         def on_step(step: TraceStep) -> None:
-            queue.put_nowait(("step", json.dumps(asdict(step))))
+            queue.put_nowait(
+                (
+                    "step",
+                    json.dumps({**asdict(step), "decision_code": decision_code(step.decision)}),
+                )
+            )
 
         async def work() -> None:
             try:

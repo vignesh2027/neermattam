@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -57,6 +58,13 @@ class ModelEstimateOut(_Strict):
     model: str
 
 
+class CodeOut(_Strict):
+    """A reason or a decision as a stable code and its values (codes.py, CONTRACTS.md 1.3)."""
+
+    code: str
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
 class AgentStepOut(_Strict):
     step: str
     target: str
@@ -66,6 +74,7 @@ class AgentStepOut(_Strict):
     decision: str
     latency_ms: int
     prompt_version: str | None = None  # on steps that called the language model
+    decision_code: CodeOut | None = None  # ``decision`` as a code, for translation
 
 
 class CertificateOut(_Strict):
@@ -105,6 +114,8 @@ class MeasureResponse(_Strict):
     measurement_id: str = Field(default_factory=new_measurement_id)
     usable: bool
     reasons: list[str]
+    # ``reasons`` as codes, one for one and in the same order (CONTRACTS.md 1.3).
+    reason_codes: list[CodeOut] = Field(default_factory=list)
     depth_cm: float | None = None
     depth_sigma_cm: float | None = None
     reference: ReferenceOut | None = None

@@ -206,3 +206,21 @@ def easy_case() -> SynthCase:
 
 def case_image(case: SynthCase) -> ImageInput:
     return image_from_rgb(case.image)
+
+
+@pytest.fixture(autouse=True)
+def _every_text_has_a_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every reason and step decision any test produces must map to a catalogued
+    code (codes.py): a new English template without a code fails the suite."""
+    from neermattam_perception import codes, pipeline
+
+    def strict(fn):  # type: ignore[no-untyped-def]
+        def wrapped(text: str):  # type: ignore[no-untyped-def]
+            out = fn(text)
+            assert out["code"] != "other", f"no code for: {text!r}"
+            return out
+
+        return wrapped
+
+    monkeypatch.setattr(pipeline, "reason_code", strict(codes.reason_code))
+    monkeypatch.setattr(pipeline, "decision_code", strict(codes.decision_code))

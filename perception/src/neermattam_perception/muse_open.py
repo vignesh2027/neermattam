@@ -698,6 +698,13 @@ class MuseSparkOpenAdapter:
     scene_effort: str | None = "low"
     verify_effort: str | None = "low"
     confirm_effort: str | None = None
+    # Sampling: greedy, with a fixed seed, so that the same photo gets the same
+    # reading as far as the server allows (the same photo read very differently
+    # over live runs with the server's default sampling). Baseten accepts both; that
+    # the model then answers identically is not guaranteed, and is measured in
+    # eval/RESULTS_REAL.md, not assumed. None leaves the server's default.
+    temperature: float | None = 0.0
+    seed: int | None = 7
     audio_attempts: int = 3
     name: str = "baseten-muse-spark-open"
     sleep: Callable[[float], Awaitable[None]] = field(default=asyncio.sleep, repr=False)
@@ -729,7 +736,9 @@ class MuseSparkOpenAdapter:
         """The exact model and settings: the Baseten model id and reasoning efforts."""
         return (
             f"{self.model} on Baseten, reasoning effort {self.scene_effort or 'default'} "
-            f"(scene), {self.verify_effort or 'default'} (checks)"
+            f"(scene), {self.verify_effort or 'default'} (checks), temperature "
+            f"{'default' if self.temperature is None else self.temperature}, seed "
+            f"{'none' if self.seed is None else self.seed}"
         )
 
     @property
@@ -817,6 +826,10 @@ class MuseSparkOpenAdapter:
         body: dict[str, Any] = {"model": self.model, "max_tokens": max_tokens, "messages": messages}
         if effort is not None:
             body["reasoning_effort"] = effort
+        if self.temperature is not None:
+            body["temperature"] = self.temperature
+        if self.seed is not None:
+            body["seed"] = self.seed
         t0 = time.perf_counter()
         last = ""
         max_retries = self.max_retries if retries is None else retries
@@ -920,6 +933,8 @@ class MuseSparkOpenAdapter:
         for part in (image.jpeg, SCENE_PROMPT.encode(), self.model.encode()):
             h.update(part)
         h.update(f"{self.scene_effort}:{self.max_image_side}".encode())
+        if self.temperature is not None or self.seed is not None:
+            h.update(f":t={self.temperature}:s={self.seed}".encode())
         return h.hexdigest()[:32]
 
     async def read_scene_json(self, image: ImageInput, *, fresh: bool = False) -> JsonReply:
@@ -941,7 +956,7 @@ class MuseSparkOpenAdapter:
             self._scene_cache[key] = hit
             self._scene_cache.move_to_end(key)
             return JsonReply(hit.data, Usage(), 0, hit.reasoning, hit.repaired, cached=True)
-        jpeg = jpeg_for_model(image, self.max_image_side)
+        jpeg = await asyncio.to_thread(jpeg_for_model, image, self.max_image_side)
         reply = await self.chat_json(
             [self._image_part(jpeg), {"type": "text", "text": SCENE_PROMPT}],
             max_tokens=self.scene_max_tokens,
@@ -1012,7 +1027,7 @@ class MuseSparkOpenAdapter:
 
     async def locate_debris_json(self, image: ImageInput) -> JsonReply:
         """Boxes on the floating objects and one fixed anchor in a video's key frame."""
-        jpeg = jpeg_for_model(image, self.max_image_side)
+        jpeg = await asyncio.to_thread(jpeg_for_model, image, self.max_image_side)
         return await self.chat_json(
             [self._image_part(jpeg), {"type": "text", "text": DEBRIS_PROMPT}],
             max_tokens=self.verify_max_tokens,

@@ -104,7 +104,10 @@ def test_blurred_image(easy_case) -> None:  # type: ignore[no-untyped-def]
         quality=replace(scene.reading.quality, score=0.1, blurred=True, issues=("motion blur",)),
     )
     r = run(p, image=case_image(easy_case))
-    assert not r.usable and "motion blur" in r.reasons
+    assert not r.usable and "image issue: motion blur" in r.reasons
+    assert {"code": "image_issue", "args": {"detail": "motion blur"}} in [
+        c.model_dump() for c in r.reason_codes
+    ]
 
 
 def test_wheel_without_mask_reports_submerged(easy_case) -> None:  # type: ignore[no-untyped-def]

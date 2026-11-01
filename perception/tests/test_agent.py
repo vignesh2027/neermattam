@@ -471,3 +471,49 @@ def test_time_budget_stops_open_checks_and_says_so(easy_case) -> None:  # type: 
     assert any("time budget of 1 s ran out" in x for x in r.reasons)
     assert any(t.step == "budget" for t in r.agent_trace)
     assert any("time budget reached" in x for x in r.reasons)
+
+
+def test_far_apart_proposals_are_shown_one_at_a_time() -> None:
+    from neermattam_perception.agent import Proposal, _near_each_other
+    from neermattam_perception.wheel_shape import ShapeScore
+
+    def prop(x0: int, y0: int, side: int) -> Proposal:
+        m = np.zeros((600, 1200), dtype=bool)
+        m[y0 : y0 + side, x0 : x0 + side] = True
+        return Proposal(m, ShapeScore(0.5, 0.9, 180.0, 0.9, 0.0, False), "test", 1.0, None)
+
+    near = [prop(100, 100, 80), prop(150, 120, 80)]
+    assert len(_near_each_other(near)) == 2
+    # A wheel and something 800 px away (the grille, another wheel): one panel only,
+    # so the crop is not stretched over most of the photo.
+    far = [prop(100, 100, 80), prop(900, 120, 80)]
+    assert _near_each_other(far) == far[:1]
+    assert _near_each_other(far[:1]) == far[:1]
+
+
+@dataclass
+class HangingSam(BoxSam):
+    """SAM that takes far longer than the time budget on every request."""
+
+    async def segment(self, image: ImageInput, objects: Sequence[ObjectPrompt]) -> MaskResult:
+        await asyncio.sleep(30)
+        return await super().segment(image, objects)
+
+
+def test_sam_work_stops_at_the_deadline(easy_case) -> None:  # type: ignore[no-untyped-def]
+    # The checks used to bound only the verifier's calls; a slow SAM search ran on
+    # (a c1 run spent 64 s in vehicle searches). Every target now ends at the
+    # deadline as "time budget reached", and the request still answers.
+    import time
+
+    img = case_image(easy_case)
+    sam = HangingSam({1: easy_case.wheel_mask}, easy_case.wheel_mask.shape)
+    agent = VerifyRefineAgent(ScriptedVerifier(lambda what, n: GOOD), sam)
+    obj = reading_for(easy_case).references[0]
+    t0 = time.perf_counter()
+    water, outs = asyncio.run(
+        agent.run(img, [(1, obj, 1)], (0, 300, 100, 400), [(50, 350)], 16, deadline=t0 + 0.3)
+    )
+    assert time.perf_counter() - t0 < 2.0
+    assert not water.accepted and water.verdict == "time budget reached"
+    assert len(outs) == 1 and not outs[0].accepted and outs[0].verdict == "time budget reached"

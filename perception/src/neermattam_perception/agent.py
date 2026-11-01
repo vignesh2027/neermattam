@@ -34,7 +34,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 import cv2
 import numpy as np
@@ -165,10 +165,29 @@ class WaterOutcome:
 # --------------------------------------------------------------------------- rendering
 
 
+def _count(n: int, noun: str) -> str:
+    """'1 dark blob', '2 dark blobs'."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def _jpeg(rgb: NDArray[np.uint8], quality: int = 90) -> bytes:
     buf = io.BytesIO()
     Image.fromarray(rgb).save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
+
+
+def _near_each_other(shown: list[Proposal], spread: float = 2.0) -> list[Proposal]:
+    """The two best proposals when they are near each other, else only the best:
+    near means the box around both is at most ``spread`` times the larger one's side."""
+    if len(shown) < 2:
+        return shown
+    bbs = [mask_bbox(p.mask) for p in shown[:2]]
+    if bbs[0] is None or bbs[1] is None:
+        return shown[:1]
+    a, b = bbs[0], bbs[1]
+    union = max(max(a[2], b[2]) - min(a[0], b[0]), max(a[3], b[3]) - min(a[1], b[1]))
+    larger = max(a[2] - a[0], a[3] - a[1], b[2] - b[0], b[3] - b[1])
+    return shown[:2] if union <= spread * larger else shown[:1]
 
 
 def crop_rect(
@@ -427,6 +446,7 @@ def _truthy(v: Any) -> bool:
 # The moment (``time.perf_counter()``) by which this request's checks must be
 # done; set by :meth:`VerifyRefineAgent.run` for the tasks it starts.
 _DEADLINE: ContextVar[float | None] = ContextVar("agent_deadline", default=None)
+T = TypeVar("T")
 # A check is not started with less time than this left: it would not finish.
 MIN_CALL_S = 6.0
 
@@ -505,6 +525,22 @@ class VerifyRefineAgent:
         except TimeoutError as exc:
             raise BudgetSpent("the time budget ran out during this check") from exc
 
+    async def _in_budget(self, aw: Awaitable[T]) -> T:
+        """A SAM request inside the request's time budget: not started after the
+        deadline, and abandoned when still running at it (BudgetSpent)."""
+        deadline = _DEADLINE.get()
+        if deadline is None:
+            return await aw
+        left = deadline - time.perf_counter()
+        if left <= 0:
+            if asyncio.iscoroutine(aw):
+                aw.close()
+            raise BudgetSpent("the time budget ran out before this segmentation")
+        try:
+            return await asyncio.wait_for(aw, left)
+        except TimeoutError as exc:
+            raise BudgetSpent("the time budget ran out during this segmentation") from exc
+
     async def _ask_checked(
         self,
         images: bytes | Sequence[bytes],
@@ -578,7 +614,7 @@ class VerifyRefineAgent:
         self, image: ImageInput, prompt: ObjectPrompt
     ) -> tuple[ObjectMask | None, int]:
         t0 = time.perf_counter()
-        res = await self.masks.segment(image, [prompt])
+        res = await self._in_budget(self.masks.segment(image, [prompt]))
         ms = round(1000 * (time.perf_counter() - t0))
         m = res.masks.get(prompt.object_id)
         if m is None or m.area == 0:
@@ -615,7 +651,7 @@ class VerifyRefineAgent:
         raw: list[tuple[NDArray[np.bool_], str]] = []
         many = getattr(self.masks, "candidates", None)
         if many is not None:
-            for c in await many(image, box, pts):
+            for c in await self._in_budget(many(image, box, pts)):
                 raw.append((c.mask, f"{c.variant} #{c.index + 1}"))
         else:  # a mask model with one answer per prompt
             m, _ = await self._segment(image, ObjectPrompt(object_id, pts, box))
@@ -630,7 +666,7 @@ class VerifyRefineAgent:
                 out.append(self._proposal(image, solid, wheel_shape(raw[i][0]), raw[i][1], vehicle))
             return sorted(out, key=lambda p: -p.shape.score)
 
-        props = await asyncio.to_thread(score)
+        props = await self._in_budget(asyncio.to_thread(score))
         return props, len(raw), round(1000 * (time.perf_counter() - t0))
 
     async def refine_reference(
@@ -685,7 +721,17 @@ class VerifyRefineAgent:
             # it, unless the best proposal already has a wheel's shape; later looks
             # are close, so the outline can be judged in detail.
             wide = attempt == 0 and not (shown and shown[0].shape.score >= self.accept_shape)
+            # Proposals found by searching a vehicle's box: that box is the lower half
+            # of the vehicle, not a wheel's, so a wide look around it showed the whole
+            # photo (x1: crop [516,1,2048,1536] for a tyre about 200 px wide). The
+            # look is close around the proposals, and when the two are far apart (two
+            # different wheels, or a wheel and the grille) only the best is shown.
+            searched = attempt == 0 and seed is not None
+            if searched:
+                wide = False
+                shown = _near_each_other(shown)
             context = self.first_context if wide else self.close_context
+            crop_box = None if searched else box
             union_bb = None
             if shown:
                 bbs = [b for b in (mask_bbox(p.mask) for p in shown) if b is not None]
@@ -696,14 +742,21 @@ class VerifyRefineAgent:
                         max(b[2] for b in bbs),
                         max(b[3] for b in bbs),
                     )
-            rect = crop_rect(image.width, image.height, box, union_bb, context=context)
+            rect = crop_rect(image.width, image.height, crop_box, union_bb, context=context)
             view = View(rect)
             if shown:
-                images, both = render_choice(
-                    image.rgb, [p.mask for p in shown], box, rect, self.crop_side
+                images, both = await asyncio.to_thread(
+                    render_choice,
+                    image.rgb,
+                    [p.mask for p in shown],
+                    crop_box,
+                    rect,
+                    self.crop_side,
                 )
             else:
-                both = render_crop(image.rgb, None, box, rect, self.crop_side)
+                both = await asyncio.to_thread(
+                    render_crop, image.rgb, None, box, rect, self.crop_side
+                )
                 images = [both]
             self._keep(both, f"{target.replace(' ', '_')}_try{attempt}.jpg")
             panels = max(1, len(shown))
@@ -759,7 +812,9 @@ class VerifyRefineAgent:
                 # outline is only accepted from a close look at it alone.
                 bb = mask_bbox(chosen.mask)
                 rect = crop_rect(image.width, image.height, None, bb, context=self.close_context)
-                jpeg = render_crop(image.rgb, chosen.mask, box, rect, self.crop_side)
+                jpeg = await asyncio.to_thread(
+                    render_crop, image.rgb, chosen.mask, box, rect, self.crop_side
+                )
                 self._keep(jpeg, f"{target.replace(' ', '_')}_try{attempt}_close.jpg")
                 try:
                     reply = await self._ask_checked(
@@ -810,7 +865,9 @@ class VerifyRefineAgent:
                 # A quick check said yes; the same question with full reasoning
                 # must agree before the outline is measured.
                 assert chosen is not None
-                one = render_crop(image.rgb, chosen.mask, box, rect, self.crop_side)
+                one = await asyncio.to_thread(
+                    render_crop, image.rgb, chosen.mask, box, rect, self.crop_side
+                )
                 try:
                     reply2 = await self._ask_checked(
                         one,
@@ -1056,7 +1113,9 @@ class VerifyRefineAgent:
                 ),
                 emit,
             )
-            jpeg = render_water(image.rgb, mask.mask if mask else None, box, max_side=768)
+            jpeg = await asyncio.to_thread(
+                render_water, image.rgb, mask.mask if mask else None, box, 768
+            )
             self._keep(jpeg, f"water_try{attempt}.jpg")
             try:
                 reply = await self._ask_checked(
@@ -1175,7 +1234,7 @@ class VerifyRefineAgent:
         vw = vehicle.box[2] - vehicle.box[0]
         t0 = time.perf_counter()
         grid = grid_points(region)
-        blobs = await asyncio.to_thread(dark_ellipse_boxes, image.rgb, region, vw)
+        blobs = await self._in_budget(asyncio.to_thread(dark_ellipse_boxes, image.rgb, region, vw))
         prompts: list[tuple[str, Box | None, Sequence[PointPrompt]]] = [
             ("grid", None, (PointPrompt(*p),)) for p in grid
         ] + [("dark blob", b, ()) for b in blobs]
@@ -1183,7 +1242,7 @@ class VerifyRefineAgent:
         many = getattr(self.masks, "region_candidates", None)
         raw: list[NDArray[np.bool_]] = []
         if many is not None:
-            raw = [c.mask for c in await many(image, region, prompts)]
+            raw = [c.mask for c in await self._in_budget(many(image, region, prompts))]
         else:  # one request per prompt
             for _, b, p in prompts:
                 one, _ = await self._segment(image, ObjectPrompt(object_id, tuple(p), b))
@@ -1211,9 +1270,10 @@ class VerifyRefineAgent:
                     break
             return best
 
-        best = await asyncio.to_thread(rank)
+        best = await self._in_budget(asyncio.to_thread(rank))
         out_text = (
-            f"{len(raw)} proposals from {len(grid)} grid points and {len(blobs)} dark blobs; "
+            f"{_count(len(raw), 'proposal')} from {_count(len(grid), 'grid point')} and "
+            f"{_count(len(blobs), 'dark blob')}; "
             + ("best: " + "; ".join(sc.text() for sc, _ in best) if best else "none wheel-like")
         )
         self._log(
@@ -1286,12 +1346,30 @@ class VerifyRefineAgent:
         emit: Emit | None,
         vehicles: Sequence[tuple[int, VehicleObject, RefKind, int]],
     ) -> tuple[WaterOutcome, list[RefOutcome]]:
-        water_job = self.refine_water(image, water_box, water_points, water_id, emit)
-        jobs = [
-            self.find_vehicle_wheel(image, v, kind, idx, oid, emit)
-            for idx, v, kind, oid in vehicles
-        ]
-        jobs += [self.refine_reference(image, obj, idx, oid, emit) for idx, obj, oid in refs]
-        water, *outs = await asyncio.gather(water_job, *jobs)
+        spent = "time budget reached"
+
+        async def water_job() -> WaterOutcome:
+            try:
+                return await self.refine_water(image, water_box, water_points, water_id, emit)
+            except BudgetSpent:
+                return WaterOutcome(False, None, 0, spent)
+
+        async def vehicle_job(idx: int, v: VehicleObject, kind: RefKind, oid: int) -> RefOutcome:
+            try:
+                return await self.find_vehicle_wheel(image, v, kind, idx, oid, emit)
+            except BudgetSpent:
+                centre = ((v.box[0] + v.box[2]) // 2, (v.box[1] + v.box[3]) // 2)
+                obj = SceneObject(kind, centre, v.box, vehicle=v.vehicle)
+                return RefOutcome(idx, obj, False, None, v.box, 0, verdict=spent)
+
+        async def ref_job(idx: int, obj: SceneObject, oid: int) -> RefOutcome:
+            try:
+                return await self.refine_reference(image, obj, idx, oid, emit)
+            except BudgetSpent:
+                return RefOutcome(idx, obj, False, None, obj.box, 0, verdict=spent)
+
+        jobs = [vehicle_job(idx, v, kind, oid) for idx, v, kind, oid in vehicles]
+        jobs += [ref_job(idx, obj, oid) for idx, obj, oid in refs]
+        water, *outs = await asyncio.gather(water_job(), *jobs)
         assert isinstance(water, WaterOutcome)
         return water, [r for r in outs if isinstance(r, RefOutcome)]

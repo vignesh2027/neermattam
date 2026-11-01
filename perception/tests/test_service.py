@@ -10,9 +10,10 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from neermattam_perception import media
-from neermattam_perception.adapters import ModelError
+from neermattam_perception.adapters import MaskResult, ModelError
 from neermattam_perception.geometry import GeometryConfig
 from neermattam_perception.pipeline import Pipeline, PipelineConfig
+from neermattam_perception.sam import ObjectMask
 from neermattam_perception.service import create_app
 
 from .conftest import FakeMasks, FakeScene, reading_for
@@ -158,3 +159,112 @@ def test_key_from_dotenv(tmp_path: Path) -> None:
     assert key_from_dotenv(nested) == "abc123"
     (tmp_path / ".env").write_text("OTHER=1\n")
     assert key_from_dotenv(nested) is None
+
+
+# --------------------------------------------------------------------------- probes
+
+
+def test_readiness_answers_from_the_last_check() -> None:
+    import asyncio
+
+    from neermattam_perception.service import Readiness
+
+    now = [100.0]
+    results = [(True, "ok")]
+
+    async def check() -> tuple[bool, str]:
+        return results[-1]
+
+    r = Readiness(check, interval_s=15.0, grace_s=45.0, clock=lambda: now[0])
+
+    async def go() -> tuple[bool, str]:
+        return await r.state()
+
+    assert asyncio.run(go()) == (True, "ok")
+    results.append((False, "Baseten did not answer within 10 s"))
+    asyncio.run(r.refresh())
+    now[0] += 30.0  # one failed check, 30 s after the last success: still ready
+    ok, why = asyncio.run(go())
+    assert ok and "last check failed" in why
+    now[0] += 20.0  # 50 s without a success: unavailable
+    assert asyncio.run(go()) == (False, "Baseten did not answer within 10 s")
+
+
+def test_readiness_check_that_hangs_is_cut() -> None:
+    import asyncio
+
+    from neermattam_perception.service import Readiness
+
+    async def hang() -> tuple[bool, str]:
+        await asyncio.sleep(10)
+        return True, "ok"
+
+    r = Readiness(hang, inline_timeout_s=0.05)
+    ok, why = asyncio.run(r.state())
+    assert not ok and why == "readiness check took longer than 0.1 s"
+
+
+@pytest.fixture()
+def slow_app(easy_case, tmp_path: Path):  # type: ignore[no-untyped-def]
+    import asyncio
+    import time
+
+    class SlowReadyScene(FakeScene):
+        ready_delay_s: float = 0.0
+
+        async def ready(self) -> tuple[bool, str]:
+            await asyncio.sleep(self.ready_delay_s)
+            return True, "ok"
+
+    class SlowMasks(FakeMasks):
+        async def segment(self, image, objects):  # type: ignore[no-untyped-def]
+            # Local SAM runs in a worker thread for about a second per request and
+            # hands back masks (the wire-format round trip of FakeMasks is skipped:
+            # it is test overhead, and the hosted adapter decodes in a thread).
+            await asyncio.to_thread(time.sleep, 1.0)
+            out = {}
+            for o in objects:
+                m = self.by_id.get(o.object_id)
+                if m is not None:
+                    ys, xs = np.nonzero(m)
+                    box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+                    out[o.object_id] = ObjectMask(str(o.object_id), 0, m, box, 0.9)
+            return MaskResult(out, 0.0)
+
+    scene = SlowReadyScene(reading_for(easy_case))
+    masks = SlowMasks({1: easy_case.wheel_mask, 2: easy_case.rim_mask, 16: easy_case.water_mask})
+    pipe = Pipeline(scene, masks, PipelineConfig(geometry=GeometryConfig(mc_draws=300)))
+    return create_app(pipe, str(tmp_path)), scene
+
+
+def test_probes_answer_fast_while_a_photo_is_measured(slow_app, easy_case) -> None:  # type: ignore[no-untyped-def]
+    import threading
+    import time
+
+    app, scene = slow_app
+    data = jpeg_with_exif(easy_case.image)
+    with TestClient(app) as client:
+        scene.ready_delay_s = 5.0  # Baseten is slow now: the probe must not wait for it
+        done: list[int] = []
+
+        def measure() -> None:
+            r = client.post("/v1/measure", files={"image": ("p.jpg", data, "image/jpeg")})
+            done.append(r.status_code)
+
+        worker = threading.Thread(target=measure)
+        worker.start()
+        time.sleep(0.2)
+        worst = 0.0
+        probes = 0
+        while worker.is_alive() and probes < 40:
+            for path in ("/healthz", "/readyz"):
+                t0 = time.perf_counter()
+                r = client.get(path)
+                worst = max(worst, time.perf_counter() - t0)
+                assert r.status_code == 200, (path, r.text)
+                probes += 1
+            time.sleep(0.05)
+        worker.join()
+    assert done == [200]
+    assert probes >= 4
+    assert worst < 0.2, f"a probe took {worst * 1000:.0f} ms"

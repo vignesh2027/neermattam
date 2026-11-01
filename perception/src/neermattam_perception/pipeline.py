@@ -28,7 +28,7 @@ import math
 import time
 from collections.abc import Callable, Sequence
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, cast
 
 import cv2
@@ -38,6 +38,7 @@ from numpy.typing import NDArray
 from .adapters import (
     AnswerRejected,
     MaskModel,
+    MaskResult,
     ModelError,
     SceneModel,
     SceneObject,
@@ -47,6 +48,7 @@ from .adapters import (
 )
 from .agent import TraceStep, VerifyRefineAgent
 from .certificate import FORMAT, Signer, utc_now
+from .codes import decision_code, reason_code
 from .flow import (
     BoxTracker,
     DebrisLocator,
@@ -69,6 +71,7 @@ from .media import ImageInput, VideoInput, image_from_rgb
 from .models import (
     AgentStepOut,
     CertificateOut,
+    CodeOut,
     MeasureResponse,
     ModelEstimateOut,
     ModelsOut,
@@ -141,6 +144,9 @@ class PipelineConfig:
     # are sampled at (flow.py). SAM 2.1 on a laptop takes seconds per frame.
     flow_window_s: float = 4.0
     flow_fps: float = 10.0
+    # Video tracking takes minutes with SAM 2.1 on a laptop, far beyond the time
+    # budget, so after the budget it is skipped unless this is set (evaluation).
+    video_beyond_budget: bool = False
 
 
 @dataclass
@@ -208,6 +214,220 @@ def person_final_sigma(sigma_cm: float, agreement_cm: float | None) -> float:
     if agreement_cm is not None and agreement_cm > 2.0 * sigma_cm:
         return math.hypot(sigma_cm, agreement_cm)
     return sigma_cm
+
+
+def _overlay_png(
+    rgb: NDArray[np.uint8],
+    faces: Sequence[tuple[int, int, int, int]],
+    m: DepthMeasurement | None,
+    person: PersonMeasurement | None,
+    **kw: Any,
+) -> str:
+    """The returned overlay, heads blurred, as base64 PNG. CPU work: callers run it
+    in a thread so the event loop (and the health checks) never wait on it."""
+    shown = blur_heads(rgb, faces)
+    if person is not None:
+        shown = draw_person_axis(shown, person)
+    return png_b64(render_overlay(shown, m, **kw))
+
+
+def _blurred_image(
+    rgb: NDArray[np.uint8], faces: Sequence[tuple[int, int, int, int]]
+) -> ImageInput:
+    return image_from_rgb(blur_heads(rgb, faces))
+
+
+@dataclass
+class _EarlyPeople:
+    """The people's SAM work done during the checks (Pipeline._people_early)."""
+
+    prompts: list[tuple[SceneObject, ObjectPrompt]]
+    seg: MaskResult
+    seg_ms: int
+    below: dict[int, NDArray[np.bool_]]  # person index: water in the band just below
+    n_below_jobs: int
+    below_ms: int
+    below_skipped: bool = False  # the time budget ran out before the bands were segmented
+
+
+_BelowJob = tuple[int, tuple[int, int, int, int], ObjectPrompt]
+
+
+# Share of a person's height the bands segmented during the checks reach above
+# the outline's bottom (see _below_jobs).
+EARLY_BAND_REACH_UP = 0.25
+
+
+def _beside_points(
+    box: tuple[int, int, int, int], w: int, h: int, water: NDArray[np.bool_] | None
+) -> list[tuple[int, int]]:
+    """Points just left and right of a person box at foot level, as negative prompts;
+    with ``water``, only those on it."""
+    x0, y0, x1, y1 = box
+    y = min(h - 1, max(0, y1 - max(2, (y1 - y0) // 20)))
+    gap = max(4, (x1 - x0) // 4)
+    out = []
+    for x in (x0 - gap, x1 + gap):
+        if 0 <= x < w and (water is None or water[y, x]):
+            out.append((int(x), int(y)))
+    return out
+
+
+def _below_jobs(
+    masks: Sequence[NDArray[np.bool_] | None],
+    water: NDArray[np.bool_] | None,
+    reach_up: float = 0.0,
+) -> list[_BelowJob]:
+    """A band just below each person, positive points in it and a negative point on
+    the legs; with ``water``, only for people whose outline does not end on it.
+
+    ``reach_up`` extends the band up over that share of the person's height. The
+    bands segmented during the checks use it: the outline measured later is cut
+    against the verified water and may end higher than the one the band was
+    placed under (c1: both people declined, their outlines ending above the band)."""
+    jobs: list[_BelowJob] = []
+    for i, mask in enumerate(masks):
+        if mask is None or (water is not None and water_below(mask, water) >= 0.5):
+            continue
+        band = below_band(mask)
+        if band is None:
+            continue
+        h, w = mask.shape
+        x0, y0, x1, _ = band
+        bw = x1 - x0
+        ys = np.nonzero(mask.any(axis=1))[0]
+        tall = int(ys.max() - ys.min() + 1)
+        box = (
+            max(0, x0 - bw // 2),
+            max(0, y0 - 2 - round(reach_up * tall)),
+            min(w, x1 + bw // 2),
+            min(h, y0 + max(8, tall // 6)),
+        )
+        # Positive points beside and below the feet, whatever the band's top.
+        ym = min(h - 1, (max(0, y0 - 2) + box[3]) // 2)
+        legs = np.nonzero(mask[max(0, y0 - 6) : y0])
+        pts = [PointPrompt(max(0, box[0] + 2), ym), PointPrompt(min(w - 1, box[2] - 3), ym)]
+        pts.append(PointPrompt((x0 + x1) // 2, min(h - 1, box[3] - 2)))
+        if legs[0].size:
+            pts.append(PointPrompt(int(np.median(legs[1])), max(0, y0 - 4), positive=False))
+        jobs.append((i, box, ObjectPrompt(WATER_BELOW_ID_BASE + i, tuple(pts), box)))
+    return jobs
+
+
+def _below_from(
+    seg: MaskResult,
+    jobs: Sequence[_BelowJob],
+    masks: Sequence[NDArray[np.bool_] | None],
+    shape: tuple[int, ...],
+) -> dict[int, NDArray[np.bool_]]:
+    """Per person, the water SAM found inside their band, minus the person."""
+    out: dict[int, NDArray[np.bool_]] = {}
+    for i, box, p in jobs:
+        m = seg.masks.get(p.object_id)
+        pm = masks[i]
+        if m is None or pm is None:
+            continue
+        inside = np.zeros(shape[:2], dtype=bool)
+        inside[box[1] : box[3], box[0] : box[2]] = True
+        out[i] = m.mask & inside & ~pm
+    return out
+
+
+def _below_step(
+    masks_name: str, n_jobs: int, found: int, ms: int, early: bool = False
+) -> TraceStep:
+    return TraceStep(
+        "segment",
+        "water below people",
+        masks_name,
+        f"{n_jobs} band{'s' if n_jobs > 1 else ''} just below people "
+        + ("(segmented during the checks)" if early else "the verified water does not reach"),
+        f"{found} water mask{'s' if found != 1 else ''}",
+        "check that each outline ends at water",
+        ms,
+    )
+
+
+def scene_conflict(depth_cm: float, sigma_cm: float, est_cm: float, est_sigma_cm: float) -> bool:
+    """The wheel guard on both sides: the scene model's estimate lies outside the
+    measurement's two-sigma interval, and by more than half the estimate's sigma."""
+    return abs(est_cm - depth_cm) > max(2.0 * sigma_cm, SHALLOW_EST_SIGMA_SHARE * est_sigma_cm)
+
+
+def choose_person(
+    found: Sequence[_PersonBest], est: ModelEstimate | None
+) -> tuple[_PersonBest | None, list[str]]:
+    """The person reading to publish, and a note for each one set aside.
+
+    A person reading is compared with what the scene model says at that person:
+    its own depth estimate there and the depth of the body landmark it named at
+    the waterline (either is enough), else its estimate for the street. A reading
+    the scene model clearly contradicts, on either side (:func:`scene_conflict`),
+    is not used:
+    a stature prior and a mask edge can be far off, as the c1 photo showed (a
+    person read 70 cm where the scene model saw water at the shin). Of the
+    readings left, the smallest sigma wins; None when every reading is
+    contradicted, so the caller reports the scene model's estimate instead.
+    """
+    kept: list[_PersonBest] = []
+    notes: list[str] = []
+    scene_here: dict[str, float | None] = {}
+    for item in found:
+        pm, obj, _mask, target = item
+        # What the scene model says at this person: its depth estimate there and
+        # the depth of the landmark it named at the waterline (it does not always
+        # agree with itself: on c1 a reading it found plausible at one person was
+        # far below the shin it named there); else its estimate for the street.
+        said = [v for v in (obj.depth_cm, pm.landmark_depth_cm) if v is not None]
+        if not said and est is not None:
+            said = [est.depth_cm]
+        scene_here[target] = float(np.mean(said)) if said else None
+        against = [
+            v for v in said if scene_conflict(pm.depth_cm, pm.depth_sigma_cm, v, estimate_sigma(v))
+        ]
+        if against:
+            here = max(against, key=lambda v: abs(v - pm.depth_cm))
+            notes.append(
+                f"{target}: measured {pm.depth_cm:.0f} cm (sigma {pm.depth_sigma_cm:.0f} cm), "
+                f"but the scene model sees about {here:.0f} cm there; not used"
+            )
+            continue
+        kept.append(item)
+    if not kept:
+        return None, notes
+    best = min(kept, key=lambda b: b[0].depth_sigma_cm)
+    if len(kept) == 1:
+        return best, notes
+    agree = [
+        k
+        for k in kept
+        if abs(k[0].depth_cm - best[0].depth_cm)
+        <= 2.0 * math.hypot(k[0].depth_sigma_cm, best[0].depth_sigma_cm)
+    ]
+    if len(agree) >= 2:
+        # Readings that agree are combined, weighted by 1/sigma^2. They share the
+        # stature prior, so the combined sigma is not allowed below the smallest
+        # single sigma. On c1 the choice by smallest sigma alone flipped between
+        # two people from run to run.
+        w = [1.0 / k[0].depth_sigma_cm ** 2 for k in agree]
+        depth = sum(wi * k[0].depth_cm for wi, k in zip(w, agree, strict=True)) / sum(w)
+        sigma = max(1.0 / math.sqrt(sum(w)), best[0].depth_sigma_cm)
+        names = " and ".join(k[3].removeprefix("person ") for k in agree)
+        notes.append(
+            f"people {names} agree: {depth:.0f} cm (sigma {sigma:.0f} cm), their readings combined"
+        )
+        pm = replace(best[0], depth_cm=depth, depth_sigma_cm=sigma)
+        return (pm, best[1], best[2], best[3]), notes
+
+    # Readings that disagree with each other: the one the scene model supports best.
+    def z(k: _PersonBest) -> float:
+        here = scene_here.get(k[3])
+        if here is None:
+            return k[0].depth_sigma_cm  # no scene value: fall back to the sigma
+        return abs(k[0].depth_cm - here) / math.hypot(k[0].depth_sigma_cm, estimate_sigma(here))
+
+    chosen = min(kept, key=z)
+    return chosen, notes
 
 
 def shallow_conflict(depth_cm: float, sigma_cm: float, est_cm: float, est_sigma_cm: float) -> bool:
@@ -383,6 +603,11 @@ def _box_tracker(masks: Any) -> BoxTracker | None:
     return None
 
 
+# Background work started for the request being measured (the people's SAM
+# requests); measure() cancels whatever is still running when it answers.
+_PENDING: ContextVar[list[asyncio.Task[Any]] | None] = ContextVar("pending", default=None)
+
+
 # The record of the request being measured. Pipeline.measure sets a fresh one for
 # each request (each runs in its own task, so concurrent requests never share it).
 _RECORD: ContextVar[_Record | None] = ContextVar("certificate_record", default=None)
@@ -483,8 +708,12 @@ class Pipeline:
         config: PipelineConfig | None = None,
         agent: VerifyRefineAgent | None = None,
         signer: Signer | None = None,
+        clock: Callable[[], float] = time.perf_counter,
     ):
         self.scene = scene
+        # The time source of the budget; tests pass a fake one. The agent's own
+        # checks compare the deadline with time.perf_counter, the default here.
+        self.clock = clock
         self.masks = masks
         self.config = config or PipelineConfig()
         self.agent = agent
@@ -562,9 +791,15 @@ class Pipeline:
             models=self.model_names,
             timings_ms=timings,
             cost_usd=round(cost, 6),
-            agent_trace=[AgentStepOut(**asdict(t)) for t in trace],
+            agent_trace=[
+                AgentStepOut(**asdict(t), decision_code=CodeOut(**decision_code(t.decision)))
+                for t in trace
+            ],
             captured_at=key.captured_at,
             input_sha256=None if rec is None else rec.input.get("sha256"),
+            reason_codes=[
+                CodeOut(**reason_code(r)) for r in cast(list[str], kw.get("reasons", []))
+            ],
             **kw,
         )
         if self.signer is not None and rec is not None:
@@ -631,7 +866,7 @@ class Pipeline:
             model_estimate=self._estimate_out(est),
         )
 
-    def _estimate_only(
+    async def _estimate_only(
         self,
         key: ImageInput,
         reasons: list[str],
@@ -666,14 +901,15 @@ class Pipeline:
             )
         )
         label = f"estimate {est.depth_cm:.0f} cm, sigma {est.sigma_cm:.0f} cm (not measured)"
-        overlay = png_b64(
-            render_overlay(
-                blur_heads(key.rgb, faces),
-                None,
-                label=label,
-                water_mask=None if water is None else water.mask,
-                object_masks=[w.mask for w in wheels],
-            )
+        overlay = await asyncio.to_thread(
+            _overlay_png,
+            key.rgb,
+            faces,
+            None,
+            None,
+            label=label,
+            water_mask=None if water is None else water.mask,
+            object_masks=[w.mask for w in wheels],
         )
         return self._response(
             key,
@@ -722,6 +958,8 @@ class Pipeline:
             }
         token = _RECORD.set(rec)
         flow_token = _FLOW_SINK.set(on_flow)
+        pending: list[asyncio.Task[Any]] = []
+        pending_token = _PENDING.set(pending)
         try:
             return await self._measure(
                 image=image,
@@ -731,6 +969,10 @@ class Pipeline:
                 on_step=on_step,
             )
         finally:
+            for task in pending:  # work for an answer already given
+                if not task.done():
+                    task.cancel()
+            _PENDING.reset(pending_token)
             _FLOW_SINK.reset(flow_token)
             _RECORD.reset(token)
 
@@ -744,7 +986,7 @@ class Pipeline:
         on_step: Callable[[TraceStep], None] | None,
     ) -> MeasureResponse:
         cfg = self.config
-        started = time.perf_counter()
+        started = self.clock()
         deadline = None if cfg.budget_s is None else started + cfg.budget_s - FINISH_RESERVE_S
         key = image if image is not None else (video.key_frame if video is not None else None)
         if key is None:
@@ -760,7 +1002,12 @@ class Pipeline:
         # to the caller: they are service faults, not a verdict on the photo.
         t0 = time.perf_counter()
         try:
-            reading = await self.scene.read_scene(key)
+            # The scene reading is bounded by the budget too: one stuck attempt and
+            # its retry once took 81 s on c1.
+            limit = None if deadline is None else max(0.0, deadline - self.clock())
+            reading = await asyncio.wait_for(self.scene.read_scene(key), limit)
+        except TimeoutError as exc:
+            raise ModelError("the scene model did not answer within the time budget") from exc
         except AnswerRejected as exc:
             # Asked twice, and both answers failed a check the decision rests on.
             timings["scene"] = _ms(t0)
@@ -849,7 +1096,14 @@ class Pipeline:
         q = reading.quality
         if q.score < cfg.min_quality or (q.blurred and q.score < 0.5):
             return self._unusable(
-                key, ["image is too blurred or dark to measure", *q.issues], trace, timings, cost
+                key,
+                [
+                    "image is too blurred or dark to measure",
+                    *(f"image issue: {i}" for i in q.issues),
+                ],
+                trace,
+                timings,
+                cost,
             )
         if not reading.water_visible:
             return self._unusable(key, ["no standing water visible"], trace, timings, cost)
@@ -865,7 +1119,7 @@ class Pipeline:
         ]
         if hint_kind == RefKind.KERB or (hint_kind == RefKind.PERSON and not persons):
             if est is not None:
-                return self._estimate_only(
+                return await self._estimate_only(
                     key, reasons, trace, timings, cost, est, q.score, faces=faces
                 )
             return self._unusable(
@@ -913,7 +1167,7 @@ class Pipeline:
             wheels, vehicle_jobs = [], []
         if not wheels and not vehicle_jobs and not persons:
             if est is not None:
-                return self._estimate_only(
+                return await self._estimate_only(
                     key,
                     [*reasons, "no wheel or person found to measure against"],
                     trace,
@@ -934,6 +1188,14 @@ class Pipeline:
             return self._unusable(
                 key, [*reasons, "could not locate the water surface"], trace, timings, cost, est
             )
+        # The people's SAM work runs during the checks, not after them (measure()
+        # cancels it if the request ends first).
+        early: asyncio.Task[_EarlyPeople] | None = None
+        if persons:
+            early = asyncio.create_task(self._people_early(key, persons, deadline))
+            pending = _PENDING.get()
+            if pending is not None:
+                pending.append(early)
 
         cands: list[_Candidate] = []
         for v, vkind in vehicle_jobs:
@@ -952,7 +1214,7 @@ class Pipeline:
         t0 = time.perf_counter()
         if self.agent is not None:
             # The verifier is shown crops of this photo: faces blurred first.
-            agent_key = image_from_rgb(blur_heads(key.rgb, faces)) if faces else key
+            agent_key = await asyncio.to_thread(_blurred_image, key.rgb, faces) if faces else key
             water, failures, extra_cost = await self._agent_masks(
                 agent_key, reading, cands, water_id, trace, deadline
             )
@@ -964,7 +1226,7 @@ class Pipeline:
                         "photo",
                         "pipeline",
                         f"time budget {cfg.budget_s:.0f} s",
-                        f"{_ms(started) / 1000:.0f} s used; checks still open were stopped",
+                        f"{self.clock() - started:.0f} s used; checks still open were stopped",
                         "answer with what was verified in time",
                         0,
                     )
@@ -985,13 +1247,15 @@ class Pipeline:
             empty = ObjectMask(
                 "water", 0, np.zeros((key.height, key.width), bool), (0, 0, 0, 0), None
             )
-            found = await self._measure_persons(key, persons, empty, trace, failures, faces)
+            found = await self._persons_in_time(
+                key, persons, empty, trace, failures, faces, deadline, est, early
+            )
             if found is not None:
                 reasons.append("the water surface as a whole could not be verified")
                 pvel, vcost = await self._person_velocity(
-                    video, reading, found, trace, timings, reasons
+                    video, reading, found, trace, timings, reasons, deadline
                 )
-                return self._person_result(
+                return await self._person_result(
                     key,
                     reasons,
                     failures,
@@ -1007,7 +1271,7 @@ class Pipeline:
                 )
         if water is None or water.area == 0:
             if est is not None:
-                return self._estimate_only(
+                return await self._estimate_only(
                     key,
                     [*reasons, *failures, "water could not be segmented"],
                     trace,
@@ -1023,7 +1287,9 @@ class Pipeline:
 
         person_best: _PersonBest | None = None
         if persons:
-            person_best = await self._measure_persons(key, persons, water, trace, failures, faces)
+            person_best = await self._persons_in_time(
+                key, persons, water, trace, failures, faces, deadline, est, early
+            )
 
         camera = None
         if cfg.perspective == "exif" and key.focal_35mm:
@@ -1103,10 +1369,10 @@ class Pipeline:
         timings["geometry"] = _ms(t0)
         if best is None and person_best is not None:
             pvel, vcost = await self._person_velocity(
-                video, reading, person_best, trace, timings, reasons
+                video, reading, person_best, trace, timings, reasons, deadline
             )
             cost += vcost
-            return self._person_result(
+            return await self._person_result(
                 key,
                 reasons,
                 failures,
@@ -1122,7 +1388,7 @@ class Pipeline:
             )
         if best is None:
             if est is not None:
-                return self._estimate_only(
+                return await self._estimate_only(
                     key,
                     [*reasons, *failures],
                     trace,
@@ -1193,7 +1459,7 @@ class Pipeline:
                         0,
                     )
                 )
-                return self._estimate_only(
+                return await self._estimate_only(
                     key,
                     [*reasons, *failures],
                     trace,
@@ -1263,7 +1529,9 @@ class Pipeline:
             )
 
         velocity: VelocityEstimate | None = None
-        if video is not None:
+        if video is not None and self._out_of_time(deadline) and not cfg.video_beyond_budget:
+            reasons.append("velocity not measured: the time budget ran out")
+        elif video is not None:
             t0 = time.perf_counter()
             velocity, why, vcost = await self._velocity(video, reading, wheel_scale(ref, m), trace)
             timings["velocity"] = _ms(t0)
@@ -1272,16 +1540,16 @@ class Pipeline:
                 reasons.append(why)
 
         label = f"depth {depth_cm:.1f} cm, sigma {sigma:.1f} cm"
-        overlay = png_b64(
-            await asyncio.to_thread(
-                render_overlay,
-                blur_heads(key.rgb, faces),
-                m,
-                label=label,
-                second_line=line2,
-                water_mask=water.mask,
-                object_masks=[c.wheel.mask for c in cands if c.wheel is not None],
-            )
+        overlay = await asyncio.to_thread(
+            _overlay_png,
+            key.rgb,
+            faces,
+            m,
+            None,
+            label=label,
+            second_line=line2,
+            water_mask=water.mask,
+            object_masks=[c.wheel.mask for c in cands if c.wheel is not None],
         )
         return self._response(
             key,
@@ -1405,8 +1673,8 @@ class Pipeline:
             seen = [
                 c for c, o in zip(cands, ref_outs, strict=True) if c.wheel and o.waterline_visible
             ]
-            if seen:
-                water = await self._water_at_wheels(key, water, seen, trace)
+            if seen and not self._out_of_time(deadline):
+                water = await self._water_at_wheels(key, water, seen, trace, deadline)
         spent = water_out.cost_usd + sum(o.cost_usd for o in ref_outs)
         return water, failures, spent
 
@@ -1416,6 +1684,7 @@ class Pipeline:
         water: ObjectMask,
         wheels: Sequence[_Candidate],
         trace: list[TraceStep],
+        deadline: float | None = None,
     ) -> ObjectMask:
         """Extend the verified water mask up to the wheels it should touch.
 
@@ -1449,7 +1718,21 @@ class Pipeline:
             )
             prompts.append((c, band, ObjectPrompt(40 + i, pts, band)))
         t0 = time.perf_counter()
-        seg = await self.masks.segment(key, [p for _, _, p in prompts])
+        got = await self._segment_in_time(key, [p for _, _, p in prompts], deadline)
+        if got is None:
+            trace.append(
+                TraceStep(
+                    "budget",
+                    "water at wheels",
+                    self.model_names.masks,
+                    f"{len(prompts)} bands just below wheels",
+                    "not finished before the time budget ran out",
+                    "keep the verified water as it is",
+                    _ms(t0),
+                )
+            )
+            return water
+        seg = got
         out = water.mask.copy()
         added = 0
         kernel = cv2.getStructuringElement(
@@ -1483,7 +1766,106 @@ class Pipeline:
         )
         return ObjectMask(water.object_id, 0, out, water.box, water.confidence)
 
+    def _out_of_time(self, deadline: float | None) -> bool:
+        """True once the budget's deadline has passed: no new model work may start."""
+        return deadline is not None and self.clock() >= deadline
+
+    async def _early_in_time(
+        self, task: asyncio.Task[_EarlyPeople], deadline: float | None
+    ) -> _EarlyPeople | None:
+        """The early person work, waited for until the deadline at most; cancelled
+        and None when it is not done by then (or failed)."""
+        try:
+            if deadline is None:
+                return await task
+            left = deadline - self.clock()
+            if left <= 0 and not task.done():
+                task.cancel()
+                return None
+            return await asyncio.wait_for(asyncio.shield(task), max(left, 0.0))
+        except TimeoutError:
+            task.cancel()
+            return None
+
+    async def _segment_in_time(
+        self, key: ImageInput, objects: Sequence[ObjectPrompt], deadline: float | None
+    ) -> MaskResult | None:
+        """A SAM request that is not started after the deadline and is abandoned when
+        it is still running at the deadline (a request started at 49 s must not hold
+        the answer for another 30 s). None when it did not finish in time."""
+        if deadline is None:
+            return await self.masks.segment(key, objects)
+        left = deadline - self.clock()
+        if left <= 0:
+            return None
+        try:
+            return await asyncio.wait_for(self.masks.segment(key, objects), left)
+        except TimeoutError:
+            return None
+
     # ------------------------------------------------------------------ people
+
+    async def _persons_in_time(
+        self,
+        key: ImageInput,
+        persons: Sequence[SceneObject],
+        water: ObjectMask,
+        trace: list[TraceStep],
+        failures: list[str],
+        faces: list[tuple[int, int, int, int]],
+        deadline: float | None,
+        est: ModelEstimate | None,
+        early: asyncio.Task[_EarlyPeople] | None = None,
+    ) -> _PersonBest | None:
+        """The person to measure against, or None: never started after the deadline,
+        and chosen by agreement with the scene model (:func:`choose_person`)."""
+        if self._out_of_time(deadline) and (early is None or not early.done()):
+            if early is not None:
+                early.cancel()
+            failures.append("people were not measured: the time budget ran out")
+            trace.append(
+                TraceStep(
+                    "budget",
+                    "people",
+                    "pipeline",
+                    f"{len(persons)} people found by the scene model",
+                    "the time budget ran out before they could be segmented",
+                    "skip the people",
+                    0,
+                )
+            )
+            return None
+        found = await self._measure_persons(
+            key, persons, water, trace, failures, faces, deadline, early
+        )
+        chosen, notes = choose_person(found, est)
+        failures.extend(notes)
+        if found and chosen is None:
+            trace.append(
+                TraceStep(
+                    "estimate",
+                    "people",
+                    "geometry",
+                    f"{len(found)} people measured",
+                    "every one disagrees with the scene model beyond two sigma",
+                    "do not publish a person measurement",
+                    0,
+                )
+            )
+        elif chosen is not None and len(found) > 1:
+            combined = next((n for n in notes if n.startswith("people ")), None)
+            trace.append(
+                TraceStep(
+                    "estimate",
+                    "people",
+                    "geometry",
+                    f"{len(found)} people measured",
+                    combined or f"{chosen[3]} is the reading the scene model supports best",
+                    "combine the people who agree" if combined else f"use {chosen[3]}",
+                    0,
+                )
+            )
+        return chosen
 
     async def _measure_persons(
         self,
@@ -1493,48 +1875,92 @@ class Pipeline:
         trace: list[TraceStep],
         failures: list[str],
         faces: list[tuple[int, int, int, int]],
-    ) -> _PersonBest | None:
+        deadline: float | None = None,
+        early: asyncio.Task[_EarlyPeople] | None = None,
+    ) -> list[_PersonBest]:
         """Segment every person the scene model boxed and measure the depth at each.
 
         SAM is prompted with the person's box, a point on the body and the head
         top, with the water points outside the box as negatives. The mask is cut
         to the box (a little wider, and higher for the hair), water pixels are
         removed and the largest piece kept. Each person's head region from the
-        mask joins ``faces`` so that it is blurred in every returned image. The
-        measurement with the smallest sigma wins.
+        mask joins ``faces`` so that it is blurred in every returned image. Every
+        measurement is returned; :func:`choose_person` picks one.
         """
-        prompts: list[tuple[SceneObject, ObjectPrompt]] = []
-        for i, p in enumerate(persons):
-            pts = [PointPrompt(*p.point)]
-            if p.head_top is not None:
-                pts.append(PointPrompt(*p.head_top))
-            if p.box is not None:
-                for wx, wy in self._water_points_outside(p.box, water.mask)[:2]:
-                    pts.append(PointPrompt(wx, wy, positive=False))
-            prompts.append((p, ObjectPrompt(PERSON_ID_BASE + i, tuple(pts), p.box)))
         t0 = time.perf_counter()
-        seg = await self.masks.segment(key, [op for _, op in prompts])
+        early_res: _EarlyPeople | None = None
+        if early is not None:
+            early_res = await self._early_in_time(early, deadline)
+            if early_res is None:
+                got = None
+            else:
+                prompts, got = early_res.prompts, early_res.seg
+        else:
+            prompts = self._person_prompts(persons, water.mask, key.width, key.height)
+            got = await self._segment_in_time(key, [op for _, op in prompts], deadline)
+        if got is None:
+            failures.append("people were not measured: the time budget ran out")
+            trace.append(
+                TraceStep(
+                    "budget",
+                    "people",
+                    self.model_names.masks,
+                    f"{len(persons)} person boxes",
+                    "segmentation not finished before the time budget ran out",
+                    "skip the people",
+                    _ms(t0),
+                )
+            )
+            return []
+        seg = got
         trace.append(
             TraceStep(
                 "segment",
                 "people",
                 self.model_names.masks,
                 f"{len(prompts)} person box{'es' if len(prompts) > 1 else ''} with head and body "
-                "points",
+                "points" + (" (segmented during the checks)" if early_res is not None else ""),
                 f"{sum(1 for _, op in prompts if op.object_id in seg.masks)} masks",
                 "measure each against the stature prior",
-                _ms(t0),
+                early_res.seg_ms if early_res is not None else _ms(t0),
             )
         )
         masks: list[NDArray[np.bool_] | None] = []
         for p, op in prompts:
             om = seg.masks.get(op.object_id)
-            mask = None if om is None else _clean_person_mask(om.mask, water.mask, p.box)
+            mask = (
+                None
+                if om is None
+                else await asyncio.to_thread(_clean_person_mask, om.mask, water.mask, p.box)
+            )
             if mask is not None:
                 faces.append(head_region(mask, None))
             masks.append(mask)
-        local_water = await self._water_below_people(key, water.mask, masks, trace)
-        best: _PersonBest | None = None
+        local_water: list[NDArray[np.bool_] | None] = [None] * len(masks)
+        if early_res is not None:
+            # The bands were segmented during the checks, for every person; the
+            # ones used are those whose outline does not end on the verified water.
+            need = {i for i, _, _ in _below_jobs(masks, water.mask)}
+            used = 0
+            for i in need:
+                band = early_res.below.get(i)
+                mask = masks[i]
+                if band is not None and mask is not None:
+                    local_water[i] = water.mask | (band & ~mask)
+                    used += 1
+            if need and early_res.below_skipped:
+                failures.append("water below people not segmented: the time budget ran out")
+            elif need:
+                trace.append(
+                    _below_step(
+                        self.model_names.masks, len(need), used, early_res.below_ms, early=True
+                    )
+                )
+        elif self._out_of_time(deadline):
+            failures.append("water below people not segmented: the time budget ran out")
+        else:
+            local_water = await self._water_below_people(key, water.mask, masks, trace, deadline)
+        found: list[_PersonBest] = []
         for i, (p, _op) in enumerate(prompts):
             target = f"person {i + 1}"
             mask = masks[i]
@@ -1595,9 +2021,8 @@ class Pipeline:
                     ms,
                 )
             )
-            if best is None or res.depth_sigma_cm < best[0].depth_sigma_cm:
-                best = (res, p, mask, target)
-        return best
+            found.append((res, p, mask, target))
+        return found
 
     async def _water_below_people(
         self,
@@ -1605,6 +2030,7 @@ class Pipeline:
         water: NDArray[np.bool_],
         masks: Sequence[NDArray[np.bool_] | None],
         trace: list[TraceStep],
+        deadline: float | None = None,
     ) -> list[NDArray[np.bool_] | None]:
         """Water segmented just below each person whose outline does not end on the
         verified water (SAM leaves out churned water at legs, and the verified mask
@@ -1612,77 +2038,88 @@ class Pipeline:
         person, positive points in it, a negative point on the legs, the result
         kept inside the band. Returns, per person, the verified water joined with
         that band, or None when the verified water already reaches them."""
-        h, w = water.shape
-        jobs: list[tuple[int, tuple[int, int, int, int], ObjectPrompt]] = []
-        for i, mask in enumerate(masks):
-            if mask is None or water_below(mask, water) >= 0.5:
-                continue
-            band = below_band(mask)
-            if band is None:
-                continue
-            x0, y0, x1, _ = band
-            bw = x1 - x0
-            ys = np.nonzero(mask.any(axis=1))[0]
-            tall = int(ys.max() - ys.min() + 1)
-            box = (
-                max(0, x0 - bw // 2),
-                max(0, y0 - 2),
-                min(w, x1 + bw // 2),
-                min(h, y0 + max(8, tall // 6)),
-            )
-            ym = min(h - 1, (box[1] + box[3]) // 2)
-            legs = np.nonzero(mask[max(0, y0 - 6) : y0])
-            pts = [PointPrompt(max(0, box[0] + 2), ym), PointPrompt(min(w - 1, box[2] - 3), ym)]
-            pts.append(PointPrompt((x0 + x1) // 2, min(h - 1, box[3] - 2)))
-            if legs[0].size:
-                pts.append(PointPrompt(int(np.median(legs[1])), max(0, y0 - 4), positive=False))
-            jobs.append((i, box, ObjectPrompt(WATER_BELOW_ID_BASE + i, tuple(pts), box)))
+        jobs = _below_jobs(masks, water)
         out: list[NDArray[np.bool_] | None] = [None] * len(masks)
         if not jobs:
             return out
         t0 = time.perf_counter()
-        seg = await self.masks.segment(key, [p for _, _, p in jobs])
-        found = 0
-        for i, box, p in jobs:
-            m = seg.masks.get(p.object_id)
-            if m is None:
-                continue
-            inside = np.zeros_like(water)
-            inside[box[1] : box[3], box[0] : box[2]] = True
-            pm = masks[i]
-            assert pm is not None
-            out[i] = water | (m.mask & inside & ~pm)
-            found += 1
-        trace.append(
-            TraceStep(
-                "segment",
-                "water below people",
-                self.model_names.masks,
-                f"{len(jobs)} band{'s' if len(jobs) > 1 else ''} just below people the "
-                "verified water does not reach",
-                f"{found} water mask{'s' if found != 1 else ''}",
-                "check that each outline ends at water",
-                _ms(t0),
+        got = await self._segment_in_time(key, [p for _, _, p in jobs], deadline)
+        if got is None:
+            trace.append(
+                TraceStep(
+                    "budget",
+                    "water below people",
+                    self.model_names.masks,
+                    f"{len(jobs)} bands just below people",
+                    "not finished before the time budget ran out",
+                    "use the verified water only",
+                    _ms(t0),
+                )
             )
-        )
+            return out
+        below = _below_from(got, jobs, masks, water.shape)
+        for i, m in below.items():
+            out[i] = water | m
+        trace.append(_below_step(self.model_names.masks, len(jobs), len(below), _ms(t0)))
         return out
 
-    @staticmethod
-    def _water_points_outside(
-        box: tuple[int, int, int, int], water: NDArray[np.bool_]
-    ) -> list[tuple[int, int]]:
-        """Water pixels just left and right of a person box, as negative prompts."""
-        h, w = water.shape
-        x0, y0, x1, y1 = box
-        y = min(h - 1, max(0, y1 - max(2, (y1 - y0) // 20)))
-        gap = max(4, (x1 - x0) // 4)
-        out = []
-        for x in (x0 - gap, x1 + gap):
-            if 0 <= x < w and water[y, x]:
-                out.append((int(x), int(y)))
-        return out
+    async def _people_early(
+        self, key: ImageInput, persons: Sequence[SceneObject], deadline: float | None
+    ) -> _EarlyPeople:
+        """The people's SAM work, started with the checks so that it is done when they
+        are: each person's mask, then the water in a band just below every person.
 
-    def _person_result(
+        The prompts are those of the measurement after the checks, except that the
+        negative points beside each person are not required to lie on the verified
+        water (it is not known yet); a negative point only has to be off the person.
+        Which band of water is used is decided after the checks, against the
+        verified water. A live c1 run spent 8.2 s and 8.1 s on these two requests
+        after the checks had used the whole budget."""
+        t0 = time.perf_counter()
+        prompts = self._person_prompts(persons, None, key.width, key.height)
+        seg = await self.masks.segment(key, [op for _, op in prompts])
+        seg_ms = _ms(t0)
+        empty = np.zeros((key.height, key.width), dtype=bool)
+        masks: list[NDArray[np.bool_] | None] = []
+        for p, op in prompts:
+            om = seg.masks.get(op.object_id)
+            masks.append(
+                None
+                if om is None
+                else await asyncio.to_thread(_clean_person_mask, om.mask, empty, p.box)
+            )
+        jobs = _below_jobs(masks, None, reach_up=EARLY_BAND_REACH_UP)
+        below: dict[int, NDArray[np.bool_]] = {}
+        below_ms = 0
+        skipped = bool(jobs) and self._out_of_time(deadline)
+        if jobs and not skipped:
+            t1 = time.perf_counter()
+            got = await self.masks.segment(key, [p for _, _, p in jobs])
+            below = _below_from(got, jobs, masks, empty.shape)
+            below_ms = _ms(t1)
+        return _EarlyPeople(prompts, seg, seg_ms, below, len(jobs), below_ms, skipped)
+
+    def _person_prompts(
+        self,
+        persons: Sequence[SceneObject],
+        water: NDArray[np.bool_] | None,
+        w: int,
+        h: int,
+    ) -> list[tuple[SceneObject, ObjectPrompt]]:
+        """Each person's box, a point on the body and the head top, and as negatives
+        the points just beside the box at foot level (on the water, when known)."""
+        prompts: list[tuple[SceneObject, ObjectPrompt]] = []
+        for i, p in enumerate(persons):
+            pts = [PointPrompt(*p.point)]
+            if p.head_top is not None:
+                pts.append(PointPrompt(*p.head_top))
+            if p.box is not None:
+                for wx, wy in _beside_points(p.box, w, h, water)[:2]:
+                    pts.append(PointPrompt(wx, wy, positive=False))
+            prompts.append((p, ObjectPrompt(PERSON_ID_BASE + i, tuple(pts), p.box)))
+        return prompts
+
+    async def _person_result(
         self,
         key: ImageInput,
         reasons: list[str],
@@ -1739,15 +2176,15 @@ class Pipeline:
             )
         )
         label = f"depth {depth_cm:.0f} cm, sigma {sigma:.0f} cm (person)"
-        shown = draw_person_axis(blur_heads(key.rgb, faces), pm)
-        overlay = png_b64(
-            render_overlay(
-                shown,
-                None,
-                label=label,
-                water_mask=None if water is None else water.mask,
-                object_masks=[mask],
-            )
+        overlay = await asyncio.to_thread(
+            _overlay_png,
+            key.rgb,
+            faces,
+            None,
+            pm,
+            label=label,
+            water_mask=None if water is None else water.mask,
+            object_masks=[mask],
         )
         return self._response(
             key,
@@ -1786,9 +2223,13 @@ class Pipeline:
         trace: list[TraceStep],
         timings: dict[str, int],
         reasons: list[str],
+        deadline: float | None = None,
     ) -> tuple[VelocityEstimate | None, float]:
         """With a video, the velocity scaled by the measured person; (estimate, cost)."""
         if video is None:
+            return None, 0.0
+        if self._out_of_time(deadline) and not self.config.video_beyond_budget:
+            reasons.append("velocity not measured: the time budget ran out")
             return None, 0.0
         t0 = time.perf_counter()
         pscale = person_scale(person[0])

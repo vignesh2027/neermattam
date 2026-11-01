@@ -17,6 +17,7 @@ Response 200:
   "measurement_id": "m_01J...",
   "usable": true,
   "reasons": ["standing water visible", "two-wheeler wheel found"],
+  "reason_codes": [{"code": "water_visible", "args": {}}, {"code": "reference_found", "args": {"kind": "two_wheeler_wheel"}}],
   "depth_cm": 23.4,
   "depth_sigma_cm": 3.1,
   "reference": {"kind": "two_wheeler_wheel", "diameter_cm": 43.4, "diameter_sigma_cm": 2.0, "source": "catalogue:90/100-10", "height_cm": null, "height_sigma_cm": null},
@@ -31,8 +32,8 @@ Response 200:
   "method": "wheel_geometry",
   "model_estimate": {"depth_cm": 30.0, "depth_sigma_cm": 20.0, "basis": "water reaches the lower half of the scooter wheels", "model": "muse-spark-open"},
   "agent_trace": [
-    {"step": "segment", "target": "two wheeler wheel 1", "model": "sam-2.1-hiera-small", "input": "box [612,580,660,628] px + point [636,600]", "output": "mask 1450 px, bbox [610,578,661,626] px, score 0.91", "decision": "verify", "latency_ms": 70, "prompt_version": null},
-    {"step": "verify", "target": "two wheeler wheel 1", "model": "muse-spark-open", "input": "crop [520,488,752,720] px with the outline drawn", "output": "is_target=true, outline good, waterline visible", "decision": "accept", "latency_ms": 18000, "prompt_version": "verify-wheel@5d0c3a9e41b7"}
+    {"step": "segment", "target": "two wheeler wheel 1", "model": "sam-2.1-hiera-small", "input": "box [612,580,660,628] px + point [636,600]", "output": "mask 1450 px, bbox [610,578,661,626] px, score 0.91", "decision": "verify", "latency_ms": 70, "prompt_version": null, "decision_code": {"code": "verify", "args": {}}},
+    {"step": "verify", "target": "two wheeler wheel 1", "model": "muse-spark-open", "input": "crop [520,488,752,720] px with the outline drawn", "output": "is_target=true, outline good, waterline visible", "decision": "accept", "latency_ms": 18000, "prompt_version": "verify-wheel@5d0c3a9e41b7", "decision_code": {"code": "accept", "args": {}}}
   ],
   "captured_at": "2015-12-02T07:56:12",
   "input_sha256": "9f2c...64 hex digits",
@@ -52,10 +53,11 @@ When `usable` is false, `depth_cm` is null and `reasons` explains why (no water,
 - `waterline.method`: `sam_mask_intersection` for a wheel; `person_mask_bottom` for a person (where the person's mask meets the water). `agreement_cm` compares it with the scene model's own waterline; for a person, with the depth at the body landmark (knee, waist, chest and so on) the scene model named at the waterline.
 - Faces: every image the service returns (`overlay_png_b64`) or stores has the head of every person it found blurred (people the scene model or SAM found; a face neither finds is not covered, see docs/GEOMETRY.md section 9.6). The photo itself is still sent to the scene model and to SAM, which run inside the service.
 - `model_estimate`: the scene model's own estimate whenever it gave one (null otherwise), reported alongside a geometry measurement too. When both exist the map uses the geometry; if they differ by more than twice their combined sigma, `confidence` is lowered and `reasons` says so. Shallow side: when the estimate lies above the wheel measurement's two-sigma upper bound (`depth_cm + 2 x depth_sigma_cm`) and by more than half the estimate's sigma, the measurement is not published; `method` is `model_estimate` and `reasons` gives the wheel's reading. Calling deep water shallow is the dangerous error, so this side is the cautious one.
-- Time budget: the service stops starting or waiting for the scene model's checks 50 s after a request starts (a 55 s budget, 5 s kept to finish) and answers with what was verified by then; `reasons` then says the time budget ran out, and `agent_trace` has a `budget` step.
+- Time budget: 50 s after a request starts (a 55 s budget, 5 s kept to finish), the service starts no new model request (scene model or SAM) and stops waiting for any still running, and answers with what was verified by then; `reasons` then says the time budget ran out, and `agent_trace` has a `budget` step for each part cut short (`photo` for the checks, `people`, `water below people`, `water at wheels`). The people's SAM requests are started together with the checks, so that they are done when the checks are. With a `video`, tracking is not started after the budget either (`velocity not measured: the time budget ran out`).
 - `waterline.agreement_cm`: when the scene model's waterline and the mask waterline disagree, the difference is added in quadrature to `depth_sigma_cm`, so disagreement widens the uncertainty as well as lowering `confidence`.
 - `agent_trace`: every model step that led to the answer, in the order the steps happened (checks of different objects run in parallel and interleave): the scene reading, each mask proposal (`segment`), each check of a mask by the scene model (`verify`, with decision `accept`, `refine with box ...` or `give up`), each geometry attempt, the estimate, and a `budget` step when the time budget stopped open checks. With a `video`, three more steps follow: `debris` (Muse Spark Open boxes the floating objects and one fixed anchor on the key frame), `track` (SAM 2.1's video predictor follows each box forward through the clip; with SAM 3.1 the noun phrase is tracked instead) and `velocity` (the speed from the tracks, or why there is none, with how many tracks were kept and why the others were rejected). `latency_ms` is the wall time of that step. On the single-request hosted path there is one `segment` step for all objects and no `verify` steps.
 - `captured_at`: EXIF `DateTimeOriginal` of the photo (RFC 3339; UTC with `Z` when the camera recorded a zone offset, otherwise local time without an offset), or null. Also sent as the `X-Captured-At` response header.
+- `reason_codes`, `agent_trace[].decision_code`: the reasons and decisions as codes for translation, section 1.3.
 - `agent_trace[].prompt_version`: on every step that called Muse Spark Open (the scene reading, each `verify` and `confirm`, including a check that failed), the version of the prompt it was sent: a short name, `@`, and the first 12 hex digits of the SHA-256 of the prompt's text (for a prompt with parts filled in per object, of its template). Null on steps that call no language model. The names are `scene`, `scene-hosted` (the Meta Model API path), `verify-wheel`, `verify-water`, `locate-debris` (the `debris` step of a video) and `transcribe`.
 - `validate` steps: every Muse Spark Open answer passes deterministic checks before it is used (section 1.1). When a check fails, a step with `step` `validate` and `model` `validator` says what failed and what was done: `retry` (the question is asked once more), `drop ...` (one element or field is left out and the rest used) or `give up` (that target, or the whole photo, is declined). A failed check is never passed silently. No step is added when every check passes.
 - `input_sha256`: lower-case hex SHA-256 of the file measured (the image; the video when no image is sent) exactly as received, before any decoding or re-encoding.
@@ -137,6 +139,157 @@ Each `/v1/measure` answer carries a certificate: a compact record of what was me
 - `decision`: `usable`, `method`, `depth_cm`, `depth_sigma_cm`, `confidence`, `reasons`, as in the response.
 
 Full-precision numbers are kept in `geometry` so `python -m neermattam_perception.replay <certificate.json>` can check the signature and recompute the depth and sigma with the service's own geometry code and no model call (docs/VERIFY.md). The masks are not in the certificate; the bootstrap part of a wheel's sigma is recorded, and everything built on it is recomputed.
+
+### 1.3 Reason and decision codes
+
+`reasons` and each `agent_trace[].decision` are English sentences. Next to them, for clients that show another language, `reason_codes` holds one `{"code", "args"}` per reason, in the same order, and each step has `decision_code` (also on the `step` events of the stream). The English text stays, unchanged, for compatibility. The catalogue below is the whole set, kept in `perception/src/neermattam_perception/codes.py`; a test fails when the pipeline produces a sentence without a code, or when this list and the catalogue differ. Codes are stable: a changed template keeps its code if its meaning is the same, and a new meaning gets a new code.
+
+- `args` values are numbers where the template has a number, otherwise strings. `kind` is a `RefKind` value (`two_wheeler_wheel`, `car_wheel`, `auto_wheel`, `bus_wheel`, `kerb`, `person`).
+- `detail`, `basis` and `label` carry text a client cannot translate: a verifier's verdict, an image issue or the estimate's basis written by the scene model, a vehicle's catalogue name, or an error. Show them as they are.
+- `target` (in `wheel_not_confirmed`) is the trace target, such as `two-wheeler wheel 1` or `car 1 wheel`.
+- A sentence with no code would get `{"code": "other", "args": {"text": ...}}`. The service does not produce one; a client should show `text`.
+
+Reasons (`reason_codes[].code`):
+
+| Code | English template | Args |
+|---|---|---|
+| `water_visible` | standing water visible |  |
+| `no_water` | no standing water visible |  |
+| `image_unusable` | image is too blurred or dark to measure |  |
+| `image_issue` | image issue: {detail} | `detail` |
+| `scene_answer_rejected` | the scene model's answer failed its checks twice ({detail}) | `detail` |
+| `reference_not_supported` | depth from a {kind} is not supported yet; photograph a vehicle wheel | `kind` |
+| `no_reference` | no wheel or person found to measure against |  |
+| `water_not_located` | could not locate the water surface |  |
+| `light_truck_car_wheels` | a light truck on car-size wheels: generic car wheel size used |  |
+| `no_wheel_size_for_vehicle` | no wheel size is known for a {vehicle} | `vehicle` |
+| `budget_ran_out` | the time budget of {budget_s} s ran out before every check was done; this is the best answer reached in time | `budget_s` |
+| `people_not_measured_budget` | people were not measured: the time budget ran out |  |
+| `water_below_people_budget` | water below people not segmented: the time budget ran out |  |
+| `velocity_budget` | velocity not measured: the time budget ran out |  |
+| `water_partial_budget` | water: only the part confirmed before the time budget ran out is used |  |
+| `water_not_confirmed` | water mask not confirmed ({detail}) | `detail` |
+| `water_surface_unverified` | the water surface as a whole could not be verified |  |
+| `water_not_segmented` | water could not be segmented |  |
+| `wheel_not_confirmed` | {target}: the scene model did not confirm the mask ({detail}) | `target`, `detail` |
+| `wheel_not_segmented` | {kind} could not be segmented (it may be fully submerged) | `kind` |
+| `reference_found` | {kind} found | `kind` |
+| `wheel_size_catalogue` | wheel size from catalogue: {label} | `label` |
+| `wheel_size_generic` | wheel size unknown, generic prior used |  |
+| `tyre_squash` | tyre squash of {squash_cm} cm subtracted (sigma {sigma_cm} cm) | `squash_cm`, `sigma_cm` |
+| `waterline_agrees` | scene model waterline agrees within {cm} cm | `cm` |
+| `estimate_disagrees` | the scene model's own estimate ({estimate_cm} cm) disagrees with the measurement by more than two sigma; confidence lowered | `estimate_cm` |
+| `person_agrees_with_wheel` | a person in the water gives {depth_cm} cm (sigma {sigma_cm} cm), consistent with the wheel | `depth_cm`, `sigma_cm` |
+| `person_disagrees_with_wheel` | a person in the water gives {depth_cm} cm (sigma {sigma_cm} cm), more than two sigma from the wheel; confidence lowered | `depth_cm`, `sigma_cm` |
+| `shallow_not_trusted` | the {kind} measured {depth_cm} cm (sigma {sigma_cm} cm), but the scene model estimates {estimate_cm} cm {where}, above the measurement's two-sigma bound; a shallow reading that disagrees is not trusted, so the scene model's estimate is reported | `kind`, `depth_cm`, `sigma_cm`, `estimate_cm`, `where` |
+| `estimate_only` | no wheel could be measured; depth is the scene model's visual estimate, not a measurement |  |
+| `estimate_basis` | estimate based on: {basis} | `basis` |
+| `person_measured` | a person standing in the water was measured against the adult stature prior ({height_cm} cm, sigma {sigma_cm} cm) | `height_cm`, `sigma_cm` |
+| `person_coarse` | a person reference is coarse: expect about 10 to 15 cm of error |  |
+| `person_landmark` | the scene model puts the water at the {landmark}, about {depth_cm} cm ({apart_cm} cm apart) | `landmark`, `depth_cm`, `apart_cm` |
+| `person_contradicted` | person {person}: measured {depth_cm} cm (sigma {sigma_cm} cm), but the scene model sees about {scene_cm} cm there; not used | `person`, `depth_cm`, `sigma_cm`, `scene_cm` |
+| `person_local_water` | person {person}: the water just below was segmented locally, not checked by the scene model | `person` |
+| `persons_combined` | people {people} agree: {depth_cm} cm (sigma {sigma_cm} cm), their readings combined | `people` (such as `1 and 2`), `depth_cm`, `sigma_cm` |
+| `person_declined` | person {person}: {failure} | `person`, `failure` (a sub-code below), `detail` (optional) |
+| `velocity_measured` | surface velocity {surface_mps} m/s (sigma {surface_sigma_mps}) from {used} tracked objects, {rejected} rejected; depth-averaged {mean_mps} m/s (sigma {mean_sigma_mps}) | `surface_mps`, `surface_sigma_mps`, `used`, `rejected`, `mean_mps`, `mean_sigma_mps` |
+| `velocity_measured_tracks` | surface velocity from {used} tracked objects | `used` |
+| `velocity_no_scale` | velocity unavailable: the person gives no scale |  |
+| `velocity_unavailable` | velocity unavailable: {failure} | `failure` (a sub-code below), `detail` (optional) |
+| `flow_no_frame_rate` | the video has no frame rate |  |
+| `flow_locator_failed` | the debris locator failed: {detail} | `detail` |
+| `flow_nothing_floating` | the scene model found nothing floating to track |  |
+| `flow_nothing_distinct` | no box from the scene model held an object distinct from the water |  |
+| `flow_tracking_failed` | tracking failed: {detail} | `detail` |
+| `wheel_failed` | {kind}: {failure} | `kind`, `failure` (a sub-code below), `detail` (optional) |
+
+Step decisions (`agent_trace[].decision_code.code`):
+
+| Code | English template | Args |
+|---|---|---|
+| `accept` | accept |  |
+| `accept_partial` | accept (coverage partial) |  |
+| `refine` | refine with box {box} px, then optionally ` + ` and the points | `box`, `points` (optional) |
+| `give_up` | give up |  |
+| `give_up_reason` | give up: {detail} | `detail` |
+| `verify` | verify |  |
+| `verify_best` | verify the best {n} | `n` |
+| `measure` | measure |  |
+| `candidate` | candidate |  |
+| `declined` | declined |  |
+| `rejected` | rejected |  |
+| `retry` | retry |  |
+| `drop` | drop |  |
+| `drop_fields` | drop {n} field(s) that failed, use the rest | `n` |
+| `snap` | snap |  |
+| `scene_stop_no_water` | stop: no water |  |
+| `scene_stop_no_wheel` | stop: no wheel |  |
+| `scene_stop_unchecked` | stop: no checked scene reading |  |
+| `scene_report_estimate` | no wheel: report own estimate |  |
+| `scene_measure_persons` | no wheel: measure {n} person(s) against the stature prior and segment the water | `n` |
+| `scene_verify_wheels` | segment and verify {n} wheel(s) and the water | `n` |
+| `scene_search_vehicles` | search {vehicles} vehicle box(es) for wheels, optionally `, check {wheels} wheel(s)`, and segment the water | `vehicles`, `wheels` (optional) |
+| `join_water` | join to the verified water |  |
+| `check_water_below` | check that each outline ends at water |  |
+| `measure_people` | measure each against the stature prior |  |
+| `use_measurement` | use the measurement |  |
+| `use_wheel` | use the wheel |  |
+| `use_person` | use the person |  |
+| `use_person_n` | use person {person} | `person` |
+| `combine_people` | combine the people who agree |  |
+| `report_estimate` | report model estimate |  |
+| `shallow_not_trusted` | shallow reading not trusted: report the estimate |  |
+| `person_not_published` | do not publish a person measurement |  |
+| `budget_answer` | answer with what was verified in time |  |
+| `budget_skip_people` | skip the people |  |
+| `budget_keep_water` | keep the verified water as it is |  |
+| `budget_verified_water_only` | use the verified water only |  |
+| `track` | track |  |
+| `flow_stop_nothing_floating` | stop: nothing floating to track |  |
+| `check_tracks` | check the tracks |  |
+| `subtract_camera_motion` | subtract its motion from every track |  |
+| `camera_motion_kept` | camera motion not removed |  |
+| `report_velocity` | report velocity |  |
+| `no_speed` | no speed |  |
+| `no_speed_rejected` | no speed ({rejected} tracks rejected) | `rejected` |
+
+Wheel geometry failures (`wheel_failed`):
+
+| Sub-code | English |
+|---|---|
+| `wheel_mask_empty` | wheel mask is empty |
+| `wheel_too_small` | wheel is too small in the image to measure |
+| `no_water_contact` | water does not meet the wheel |
+| `ellipse_fit_failed` | could not fit the wheel outline |
+| `implausible_ellipse` | fitted wheel outline is implausible |
+| `arc_too_short` | too little of the wheel rim is visible above water |
+| `waterline_ambiguous` | waterline on the wheel is ambiguous |
+| `waterline_below_wheel` | waterline lies below the wheel |
+| `fully_submerged` | wheel appears fully submerged |
+| `ambiguous_outline` | visible part of the wheel fits several wheel sizes |
+
+Person declines (`person_declined`):
+
+| Sub-code | English |
+|---|---|
+| `posture` | the person is not standing upright |
+| `child` | the person looks like a child; the stature prior is for adults |
+| `mask_empty` | the person could not be outlined |
+| `too_small` | the person is too small in the photo to measure |
+| `no_shoulders` | the shoulder line could not be found |
+| `merged` | the outline joins more than one person at the head |
+| `box_mismatch` | the outline does not match the person the scene model boxed |
+| `no_water_below` | the person's outline does not end at the water |
+| `implausible` | the measured depth is outside the plausible range |
+
+Velocity failures (`velocity_unavailable`; `other` with `detail` for a model or tracker error):
+
+| Sub-code | English |
+|---|---|
+| `no_frame_rate` | frame rate unknown |
+| `tracks_too_short` | no floating object was tracked for long enough |
+| `nothing_moved` | no tracked object moved measurably |
+| `no_common_direction` | tracks move in no common direction |
+| `tracks_disagree` | tracks disagree on the flow |
 
 ## 2. Engine (Rust, port 8302)
 

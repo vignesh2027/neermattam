@@ -53,6 +53,7 @@ uv run python ../eval/gate.py                                       # eval gate 
 | `certificate.py` | the signed measurement certificate: canonical JSON, Ed25519 signing and checking, the key from `.env` |
 | `replay.py` | checks a certificate and recomputes its depth and sigma with the service's own geometry code |
 | `pipeline.py` | image or video in, `MeasureResponse` out, with the overlay |
+| `codes.py` | the stable codes and args behind every reason and step decision, for translation (docs/CONTRACTS.md 1.3) |
 | `service.py` | FastAPI app: `/v1/measure`, `/v1/measure/stream` (server-sent events), `/v1/transcribe`, `/healthz`, `/readyz` |
 | `media.py` | upload limits, EXIF orientation and capture time, metadata stripping |
 | `synth.py`, `synth_eval.py` | synthetic 3D scenes and the evaluation |
