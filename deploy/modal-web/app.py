@@ -34,8 +34,8 @@ MARKER = "# ---- Hugging Face Space only below this line ----"
 
 # Read when the app is deployed, so a redeploy can change them.
 CPU = float(os.environ.get("NEERMATTAM_WEB_CPU", "2"))
-MEMORY_MB = int(os.environ.get("NEERMATTAM_WEB_MEMORY_MB", "4096"))
-MEMORY_LIMIT_MB = int(os.environ.get("NEERMATTAM_WEB_MEMORY_LIMIT_MB", "6144"))
+MEMORY_MB = int(os.environ.get("NEERMATTAM_WEB_MEMORY_MB", "5120"))
+MEMORY_LIMIT_MB = int(os.environ.get("NEERMATTAM_WEB_MEMORY_LIMIT_MB", "8192"))
 # How many X-Forwarded-For entries, counted from the right, were added by
 # Modal's proxy. Checked against real requests; see docs/DEPLOY.md.
 PROXY_HOPS = os.environ.get("NEERMATTAM_WEB_PROXY_HOPS", "1")
