@@ -32,6 +32,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -53,7 +54,12 @@ PHOTOS = HERE / "photos"
 OUT = HERE / "out"
 RESULTS = HERE / "RESULTS_REAL.md"
 CLOSE_DIR = Path.home() / "neermattam-data" / "probe" / "close"
-SETS = {"commons": "commons_photos.json", "close": "unsplash_photos.json"}
+SETS = {
+    "commons": "commons_photos.json",
+    "close": "unsplash_photos.json",
+    # Photos chosen for the wheel method: side-on tyres in shallow to moderate water.
+    "wheel": "wheel_photos.json",
+}
 UA = "neermattam-eval/0.2 (https://github.com/vignesh2027; flood depth research)"
 
 
@@ -70,8 +76,17 @@ def fetch(meta: dict[str, object]) -> Path:
     transport = httpx.HTTPTransport(local_address="0.0.0.0", retries=2)
     with httpx.Client(transport=transport, timeout=120.0, headers={"User-Agent": UA}) as c:
         r = c.get(str(meta["download"]), follow_redirects=True)
-        r.raise_for_status()
-        path.write_bytes(r.content)
+    if r.status_code == 403 and shutil.which("curl"):
+        # Unsplash's download links answer 403 to this client but not to curl.
+        tmp = path.with_suffix(".part")
+        subprocess.run(
+            ["curl", "-4", "-sSfL", "-m", "120", "-A", UA, "-o", str(tmp), str(meta["download"])],
+            check=True,
+        )
+        tmp.replace(path)
+        return path
+    r.raise_for_status()
+    path.write_bytes(r.content)
     return path
 
 
@@ -82,6 +97,7 @@ def summarise(
         "brief": "Commons, named in the brief",
         "extra": "Commons, side-on wheels",
         "close": "Unsplash close-up",
+        "wheel": f"{str(meta.get('source', '')).capitalize()}, chosen for the wheel method",
     }.get(str(meta.get("set")), str(meta.get("set")))
     lines = [f"### {pid}: {meta['title']} ({kind})", ""]
     lines.append(
@@ -127,15 +143,18 @@ def summarise(
     return "\n".join(lines)
 
 
-def write_results(sections: list[str], header: str) -> None:
-    begin, end = "<!-- real-eval:begin -->", "<!-- real-eval:end -->"
+def write_results(sections: list[str], header: str, marker: str = "real-eval") -> None:
+    begin, end = f"<!-- {marker}:begin -->", f"<!-- {marker}:end -->"
     body = header + "\n\n" + "\n".join(sections)
     if RESULTS.exists():
         text = RESULTS.read_text(encoding="utf-8")
         if begin in text and end in text:
             pat = re.compile(re.escape(begin) + ".*?" + re.escape(end), re.DOTALL)
-            RESULTS.write_text(pat.sub(f"{begin}\n{body}\n{end}", text), encoding="utf-8")
+            RESULTS.write_text(pat.sub(lambda _: f"{begin}\n{body}\n{end}", text), encoding="utf-8")
             return
+        # A new block goes at the end, after the blocks already there.
+        RESULTS.write_text(text.rstrip("\n") + f"\n\n{begin}\n{body}\n{end}\n", encoding="utf-8")
+        return
     RESULTS.write_text(f"# Real-photo evaluation\n\n{begin}\n{body}\n{end}\n", encoding="utf-8")
 
 
@@ -272,7 +291,7 @@ async def run(args: argparse.Namespace) -> int:
         "No ground truth exists for these photos; only qualitative behaviour is shown."
     )
     if not args.only and args.write_results:
-        write_results(sections, header)
+        write_results(sections, header, args.marker)
     return 0
 
 
@@ -287,6 +306,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--scene-cache", default=None, help="folder to keep scene readings in")
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--sets", nargs="*", default=["close", "commons"], choices=list(SETS))
+    ap.add_argument(
+        "--marker",
+        default="real-eval",
+        help="the generated block of RESULTS_REAL.md to rewrite (wheel-eval for --sets wheel)",
+    )
     ap.add_argument(
         "--no-write-results",
         dest="write_results",
