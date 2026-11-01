@@ -80,6 +80,7 @@ class RegionSam:
 
     async def region_candidates(self, image, region, prompts):  # type: ignore[no-untyped-def]
         self.regions.append((region, len(prompts)))
+        self.prompts = list(prompts)
         body = np.zeros_like(self.wheel)
         body[160:250, 300:520] = True
         return [
@@ -110,6 +111,66 @@ def test_agent_finds_and_accepts_a_vehicle_wheel() -> None:
     assert out.trace[0].target == "car 1 wheel"
     inter = np.logical_and(out.mask.mask, wheel).sum() / wheel.sum()
     assert inter > 0.9  # the tyre, not the body patch, was shown first and accepted
+
+
+def test_scene_model_wheels_inside_a_vehicle_are_prompted_in_its_search() -> None:
+    """A close-up cut by the frame: the tyre sits above the lower part of the car's
+    box, so the scene model's own wheel box is prompted and the region grows to it."""
+    from neermattam_perception.adapters import SceneObject
+    from neermattam_perception.wheel_finder import grow_region
+
+    rgb, wheel, _ = car_scene()
+    sam = RegionSam(wheel)
+    ver = ScriptedVerifier(lambda what, n: {**GOOD, "choice": "A"})
+    agent = VerifyRefineAgent(ver, sam)
+    vbox = (0, 200, 640, 480)  # a car filling the bottom of the frame
+    hint = SceneObject(
+        RefKind.CAR_WHEEL,
+        (200, 300),
+        (140, 270, 260, 360),
+        tyre_points=((150, 320), (200, 272), (250, 320)),
+        rim_point=(200, 330),
+    )
+    vehicle = VehicleObject("car", vbox)
+    out = asyncio.run(
+        agent.find_vehicle_wheel(
+            image_from_rgb(rgb), vehicle, RefKind.CAR_WHEEL, 1, 1, hints=(hint,)
+        )
+    )
+    region = sam.regions[0][0]
+    lower = wheel_region(vbox, 640, 480)
+    assert lower[1] > 270 and region[1] <= 270 - 9  # grown above the lower part, with room
+    scene = [p for p in sam.prompts if p[0] == "scene wheel"]
+    assert [p[1] for p in scene] == [hint.box, hint.box]
+    assert len(scene[1][2]) == 4 and not scene[1][2][-1].positive  # the ring and the hub
+    assert "1 scene model wheel box" in out.trace[0].output
+    assert grow_region((10, 10, 20, 20), [], 100, 100) == (10, 10, 20, 20)
+    assert grow_region((10, 10, 20, 20), [(0, 50, 100, 90)], 100, 100) == (0, 10, 100, 94)
+
+
+def test_pipeline_passes_the_scene_wheels_inside_a_vehicle_to_its_search(easy_case) -> None:  # type: ignore[no-untyped-def]
+    from dataclasses import replace
+
+    from .conftest import case_image
+    from .test_agent import agent_pipeline, open_reading
+
+    base = open_reading(easy_case)
+    wref = replace(base.references[0], kind=RefKind.CAR_WHEEL)
+    bike = replace(base.references[0], kind=RefKind.TWO_WHEELER_WHEEL)
+    ys, xs = np.nonzero(easy_case.wheel_mask)
+    car_box = (int(xs.min()) - 40, int(ys.min()) - 120, int(xs.max()) + 200, int(ys.max()) + 5)
+    reading = replace(base, vehicles=(VehicleObject("car", car_box),))
+    p, _, _ = agent_pipeline(easy_case, replace(reading, references=(wref, bike)))
+    seen: list[Any] = []
+    real = p.agent.find_vehicle_wheel  # type: ignore[union-attr]
+
+    async def spy(*a: Any, **kw: Any) -> Any:
+        seen.append(kw.get("hints"))
+        return await real(*a, **kw)
+
+    p.agent.find_vehicle_wheel = spy  # type: ignore[union-attr,method-assign]
+    asyncio.run(p.measure(image=case_image(easy_case)))
+    assert seen == [(wref,)]  # the car wheel only, not a two-wheeler's
 
 
 def test_vehicles_are_parsed_from_the_scene_answer() -> None:

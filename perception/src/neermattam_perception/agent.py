@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import io
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import partial
@@ -61,6 +61,7 @@ from .wheel_finder import (
     WheelScore,
     dark_ellipse_boxes,
     grid_points,
+    grow_region,
     outside_inside_ratio,
     points_outside,
     score_wheel,
@@ -1226,18 +1227,34 @@ class VerifyRefineAgent:
         index: int,
         object_id: int,
         emit: Emit | None = None,
+        hints: Sequence[SceneObject] = (),
     ) -> RefOutcome:
         """A wheel of ``vehicle`` found by SAM from a point grid and dark blobs in the
-        lower part of its box, ranked by wheel score, then verified as usual."""
+        lower part of its box, ranked by wheel score, then verified as usual.
+
+        ``hints`` are the scene model's own wheels inside this vehicle's box. Their
+        boxes and tyre points are prompted too, alongside the grid, and the search
+        region is grown to hold them: on a close-up of a car cut by the frame the
+        tyre was above the lower part of the box (u_ic8V3A59gpg), and the scene
+        model's box around it was the best prompt there was."""
         target = f"{vehicle.kind.replace('_', ' ')} {index} wheel"
-        region = wheel_region(vehicle.box, image.width, image.height)
+        lower = wheel_region(vehicle.box, image.width, image.height)
+        hint_boxes = [h.box for h in hints if h.box is not None]
+        region = grow_region(lower, hint_boxes, image.width, image.height)
         vw = vehicle.box[2] - vehicle.box[0]
         t0 = time.perf_counter()
-        grid = grid_points(region)
+        grid = grid_points(lower)
         blobs = await self._in_budget(asyncio.to_thread(dark_ellipse_boxes, image.rgb, region, vw))
         prompts: list[tuple[str, Box | None, Sequence[PointPrompt]]] = [
             ("grid", None, (PointPrompt(*p),)) for p in grid
         ] + [("dark blob", b, ()) for b in blobs]
+        for h in hints:
+            if h.box is None:
+                continue
+            ring = _initial_points(h, h.box)
+            prompts.append(("scene wheel", h.box, ()))
+            if ring:
+                prompts.append(("scene wheel", h.box, ring))
         trace: list[TraceStep] = []
         many = getattr(self.masks, "region_candidates", None)
         raw: list[NDArray[np.bool_]] = []
@@ -1272,8 +1289,9 @@ class VerifyRefineAgent:
 
         best = await self._in_budget(asyncio.to_thread(rank))
         out_text = (
-            f"{_count(len(raw), 'proposal')} from {_count(len(grid), 'grid point')} and "
-            f"{_count(len(blobs), 'dark blob')}; "
+            f"{_count(len(raw), 'proposal')} from {_count(len(grid), 'grid point')}"
+            + (f", {_count(len(hint_boxes), 'scene model wheel box')}" if hint_boxes else "")
+            + f" and {_count(len(blobs), 'dark blob')}; "
             + ("best: " + "; ".join(sc.text() for sc, _ in best) if best else "none wheel-like")
         )
         self._log(
@@ -1324,15 +1342,20 @@ class VerifyRefineAgent:
         emit: Emit | None = None,
         vehicles: Sequence[tuple[int, VehicleObject, RefKind, int]] = (),
         deadline: float | None = None,
+        vehicle_hints: Mapping[int, Sequence[SceneObject]] | None = None,
     ) -> tuple[WaterOutcome, list[RefOutcome]]:
         """Water, every vehicle's wheel and every other reference, verified
         concurrently (SAM itself runs one request at a time). Outcomes come back in
         the order: vehicles, then references. With ``deadline`` (a
         ``time.perf_counter()`` value), no check runs past it: what is not
-        verified by then is not accepted (verdict "time budget reached")."""
+        verified by then is not accepted (verdict "time budget reached").
+        ``vehicle_hints`` maps a vehicle's index to the scene model's wheels inside
+        its box (see :meth:`find_vehicle_wheel`)."""
         token = _DEADLINE.set(deadline)
         try:
-            return await self._run(image, refs, water_box, water_points, water_id, emit, vehicles)
+            return await self._run(
+                image, refs, water_box, water_points, water_id, emit, vehicles, vehicle_hints or {}
+            )
         finally:
             _DEADLINE.reset(token)
 
@@ -1345,6 +1368,7 @@ class VerifyRefineAgent:
         water_id: int,
         emit: Emit | None,
         vehicles: Sequence[tuple[int, VehicleObject, RefKind, int]],
+        vehicle_hints: Mapping[int, Sequence[SceneObject]],
     ) -> tuple[WaterOutcome, list[RefOutcome]]:
         spent = "time budget reached"
 
@@ -1356,7 +1380,9 @@ class VerifyRefineAgent:
 
         async def vehicle_job(idx: int, v: VehicleObject, kind: RefKind, oid: int) -> RefOutcome:
             try:
-                return await self.find_vehicle_wheel(image, v, kind, idx, oid, emit)
+                return await self.find_vehicle_wheel(
+                    image, v, kind, idx, oid, emit, hints=vehicle_hints.get(idx, ())
+                )
             except BudgetSpent:
                 centre = ((v.box[0] + v.box[2]) // 2, (v.box[1] + v.box[3]) // 2)
                 obj = SceneObject(kind, centre, v.box, vehicle=v.vehicle)

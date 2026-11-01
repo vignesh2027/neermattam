@@ -160,6 +160,8 @@ class _Candidate:
     rim: ObjectMask | None = None
     waterline_points: tuple[tuple[int, int], ...] = ()
     vehicle: VehicleObject | None = None  # its wheel is searched for inside the box
+    # The scene model's own wheels inside that box: prompted in the search too.
+    hints: tuple[SceneObject, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1190,6 +1192,10 @@ class Pipeline:
                     continue
                 vehicle_jobs.append((v, vkind))
             boxes = [v.box for v, _ in vehicle_jobs]
+            hints = {
+                id(v): tuple(w for w in wheels if w.kind == vk and _inside(w.point, v.box))
+                for v, vk in vehicle_jobs
+            }
             wheels = [w for w in wheels if not any(_inside(w.point, b) for b in boxes)]
         wheels, dropped = truck_wheels_dropped(wheels, reading.vehicles)
         reasons += [r for r in dropped if r not in reasons]
@@ -1233,7 +1239,9 @@ class Pipeline:
             i = len(cands)
             centre = ((v.box[0] + v.box[2]) // 2, (v.box[1] + v.box[3]) // 2)
             obj = SceneObject(vkind, centre, v.box, vehicle=v.vehicle)
-            cands.append(_Candidate(obj, i + 1, 1 + 2 * i, None, False, vehicle=v))
+            cands.append(
+                _Candidate(obj, i + 1, 1 + 2 * i, None, False, vehicle=v, hints=hints[id(v)])
+            )
         for wref in wheels:
             i = len(cands)
             rid = None
@@ -1677,6 +1685,7 @@ class Pipeline:
             emit=trace.append,
             vehicles=vjobs,
             deadline=deadline,
+            vehicle_hints={c.index: c.hints for c in cands if c.vehicle is not None},
         )
         # The agent returns vehicles first, then references; restore the order of cands.
         by_index = {o.index: o for o in outs}

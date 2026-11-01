@@ -18,6 +18,7 @@ vehicle; SAM and the wheel-shape judge find the wheel.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import cv2
@@ -45,6 +46,16 @@ def wheel_region(vehicle: Box, w: int, h: int) -> Box:
         min(w, round(x1 + 0.05 * bw)),
         min(h, round(y1 + 0.15 * bh)),
     )
+
+
+def grow_region(region: Box, boxes: Sequence[Box], w: int, h: int, pad: float = 0.1) -> Box:
+    """``region`` grown to hold each of ``boxes`` with ``pad`` of its size around it."""
+    x0, y0, x1, y1 = region
+    for b in boxes:
+        px, py = pad * (b[2] - b[0]), pad * (b[3] - b[1])
+        x0, y0 = min(x0, round(b[0] - px)), min(y0, round(b[1] - py))
+        x1, y1 = max(x1, round(b[2] + px)), max(y1, round(b[3] + py))
+    return max(0, x0), max(0, y0), min(w, x1), min(h, y1)
 
 
 def grid_points(region: Box, nx: int = 6, ny: int = 4) -> list[tuple[int, int]]:
