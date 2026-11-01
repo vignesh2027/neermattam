@@ -238,6 +238,51 @@ def test_water_is_refined_with_a_corrected_box(easy_case) -> None:  # type: igno
     assert [t.decision.split(" ")[0] for t in out.trace] == ["verify", "refine", "verify", "accept"]
 
 
+def test_confirmed_water_is_kept_when_the_refinement_check_fails(easy_case) -> None:  # type: ignore[no-untyped-def]
+    """u_w8MXURXvqjQ: the first check confirmed water with partial coverage; the
+    check of the refined region timed out, and the confirmed water was thrown away
+    along with an accepted wheel. It is now used, as a partial region would be."""
+    img = case_image(easy_case)
+    shape = easy_case.water_mask.shape
+    sam = BoxSam({16: easy_case.water_mask}, shape)
+    wb = box_of(easy_case.water_mask)
+
+    @dataclass
+    class TimesOut:
+        scene_model_name: str = "muse-spark-open"
+        calls: int = 0
+
+        async def ask_image(self, jpeg: bytes, prompt: str, *, what: str) -> JsonReply:
+            self.calls += 1
+            if self.calls == 1:
+                partial = {
+                    "is_water": True,
+                    "coverage": "partial",
+                    "corrected_box": [0, 0, 999, 999],
+                }
+                return JsonReply(partial, Usage(1000, 500), 1234, "")
+            raise ModelError("verify water gave no answer within 20 s")
+
+    out = asyncio.run(VerifyRefineAgent(TimesOut(), sam).refine_water(img, wb, [], 16))
+    assert out.accepted and out.mask is not None
+    assert np.array_equal(out.mask.mask, easy_case.water_mask)
+    assert out.verdict == "partial (a later check failed)"
+    assert out.trace[-1].decision == (
+        "give up: the region an earlier check confirmed as water is used"
+    )
+
+    # With nothing confirmed before the failure, there is still no water.
+    @dataclass
+    class Fails:
+        scene_model_name: str = "muse-spark-open"
+
+        async def ask_image(self, jpeg: bytes, prompt: str, *, what: str) -> JsonReply:
+            raise ModelError("verify water gave no answer within 20 s")
+
+    none = asyncio.run(VerifyRefineAgent(Fails(), sam).refine_water(img, wb, [], 16))
+    assert not none.accepted and none.mask is None and none.trace[-1].decision == "give up"
+
+
 def test_verifier_failure_is_a_traced_give_up(easy_case) -> None:  # type: ignore[no-untyped-def]
     @dataclass
     class Broken:

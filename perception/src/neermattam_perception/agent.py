@@ -1149,6 +1149,7 @@ class VerifyRefineAgent:
                     bill=out,
                 )
             except ModelError as exc:
+                budget = isinstance(exc, BudgetSpent)
                 if not isinstance(exc, AnswerRejected):
                     self._log(
                         out.trace,
@@ -1158,15 +1159,22 @@ class VerifyRefineAgent:
                             self.scene_name,
                             "photo with the region tinted",
                             f"error: {exc}",
-                            "give up",
+                            "give up: the region an earlier check confirmed as water is used"
+                            if confirmed and not budget
+                            else "give up",
                             0,
                             VERIFY_WATER_VERSION,
                         ),
                         emit,
                     )
                 out.verdict = _failed(exc, "verification failed")
-                if isinstance(exc, BudgetSpent) and confirmed:
-                    # Out of time: the water already confirmed (partial) is used.
+                if confirmed:
+                    # A later check failed (out of time, no answer, or answers that
+                    # failed their checks): the water an earlier check already
+                    # confirmed, with partial coverage, is used, as it would have
+                    # been had no refinement been asked for. On u_w8MXURXvqjQ a
+                    # timed-out refinement check threw away confirmed water and
+                    # with it an accepted wheel.
                     union = confirmed[0].mask.copy()
                     for c in confirmed[1:]:
                         union |= c.mask
@@ -1175,7 +1183,8 @@ class VerifyRefineAgent:
                     out.mask = ObjectMask(
                         first.object_id, 0, union, mask_bbox(union) or first.box, first.confidence
                     )
-                    out.verdict = "partial (time budget reached)"
+                    why = "time budget reached" if budget else "a later check failed"
+                    out.verdict = f"partial ({why})"
                 return out
             d = reply.data
             ok = _truthy(d.get("is_water"))
