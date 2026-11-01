@@ -517,3 +517,38 @@ def test_sam_work_stops_at_the_deadline(easy_case) -> None:  # type: ignore[no-u
     assert time.perf_counter() - t0 < 2.0
     assert not water.accepted and water.verdict == "time budget reached"
     assert len(outs) == 1 and not outs[0].accepted and outs[0].verdict == "time budget reached"
+
+
+def test_a_proposal_far_larger_than_its_tyre_box_is_not_shown(easy_case) -> None:  # type: ignore[no-untyped-def]
+    """p_26202090: a box around the tyre above the water gave the side of the car as
+    a second proposal; it is dropped before the verifier sees it."""
+    from neermattam_perception.agent import SPILL_AREA, spills_far_beyond
+
+    shape = easy_case.wheel_mask.shape
+    box = box_of(easy_case.wheel_mask)
+    w, h = box[2] - box[0], box[3] - box[1]
+    assert not spills_far_beyond(easy_case.wheel_mask, box)
+    car = (max(0, box[0] - 2 * w), max(0, box[1] - 2 * h), box[2] + 2 * w, box[3])
+    car_mask = rect_mask(shape, car)
+    assert spills_far_beyond(car_mask, box)
+    near = rect_mask(shape, (box[0] - w // 4, box[1] - h // 4, box[2] + w // 4, box[3]))
+    assert not spills_far_beyond(near, box)  # a tyre a little larger than its box stays
+    assert SPILL_AREA == 4.0
+
+    @dataclass
+    class TwoSam:
+        mask_model_name: str = "fake-sam"
+        name: str = "fake-sam"
+
+        async def candidates(self, image, b, points):  # type: ignore[no-untyped-def]
+            from neermattam_perception.sam_local import MaskCandidate
+
+            return [
+                MaskCandidate(easy_case.wheel_mask, 0.9, "box+points", 0),
+                MaskCandidate(car_mask, 0.95, "box+points", 1),
+            ]
+
+    agent = VerifyRefineAgent(ScriptedVerifier(lambda what, n: GOOD), TwoSam())  # type: ignore[arg-type]
+    props, n_raw, _ = asyncio.run(agent._proposals(case_image(easy_case), box, (), 1))
+    assert n_raw == 2 and len(props) == 1
+    assert np.array_equal(props[0].mask, easy_case.wheel_mask)

@@ -405,6 +405,23 @@ def _initial_points(obj: SceneObject, box: Box | None) -> tuple[PointPrompt, ...
     return tuple(pts)
 
 
+# A proposal whose bounding box is this many times the area of the tyre box it
+# was prompted with is the vehicle or the street around the tyre, not the tyre.
+SPILL_AREA = 4.0
+
+
+def spills_far_beyond(mask: NDArray[np.bool_], box: Box) -> bool:
+    """True when the mask's bounding box is more than ``SPILL_AREA`` times the
+    prompt box's area. On the Dzire photo (p_26202090) a box around the tyre
+    above the water gave the whole side of the car as SAM's second proposal; shown
+    to the verifier as B, it also widened the crop until the tyre was small."""
+    bb = mask_bbox(mask)
+    if bb is None:
+        return False
+    area = (bb[2] - bb[0]) * (bb[3] - bb[1])
+    return area > SPILL_AREA * max(1, (box[2] - box[0]) * (box[3] - box[1]))
+
+
 def _chosen(d: dict[str, Any], shown: Sequence[Proposal]) -> Proposal | None:
     """The proposal the verifier picked (A or B); the only one if just one was shown."""
     if not shown:
@@ -663,6 +680,8 @@ class VerifyRefineAgent:
             keep = dedupe([m for m, _ in raw])
             out = []
             for i in keep:
+                if box is not None and spills_far_beyond(raw[i][0], box):
+                    continue
                 solid, _ = solid_wheel(raw[i][0])
                 out.append(self._proposal(image, solid, wheel_shape(raw[i][0]), raw[i][1], vehicle))
             return sorted(out, key=lambda p: -p.shape.score)
