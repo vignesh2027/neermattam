@@ -476,6 +476,35 @@ VEHICLE_WHEEL: dict[str, RefKind] = {
 }
 
 
+def truck_wheels_dropped(
+    wheels: Sequence[SceneObject], vehicles: Sequence[VehicleObject]
+) -> tuple[list[SceneObject], list[str]]:
+    """Bus and auto-rickshaw wheels the scene model placed on a truck are not measured.
+
+    The scene model has no truck wheel to choose, so it names a truck's tyre a bus
+    wheel; measured against the 106 cm bus tyre, a light truck's 75 to 85 cm tyre
+    gives a wrong depth (a real Chennai photo, w_chennai01). Such a wheel is kept
+    only when it also lies in a bus or auto-rickshaw box. Car wheels on a truck are
+    handled by the light-truck rule, and two-wheelers parked in front of a truck
+    are left alone."""
+    trucks = [v.box for v in vehicles if v.kind == "truck"]
+    own = {RefKind.BUS_WHEEL: "bus", RefKind.AUTO_WHEEL: "auto_rickshaw"}
+    kept: list[SceneObject] = []
+    why: list[str] = []
+    for w in wheels:
+        kind = own.get(w.kind)
+        if (
+            kind is not None
+            and any(_inside(w.point, b) for b in trucks)
+            and not any(v.kind == kind and _inside(w.point, v.box) for v in vehicles)
+        ):
+            # The same sentence (and reason code) as for a truck's own box.
+            why.append("no wheel size is known for a truck")
+            continue
+        kept.append(w)
+    return kept, list(dict.fromkeys(why))
+
+
 def _inside(p: tuple[int, int], box: tuple[int, int, int, int]) -> bool:
     return box[0] <= p[0] < box[2] and box[1] <= p[1] < box[3]
 
@@ -1162,6 +1191,8 @@ class Pipeline:
                 vehicle_jobs.append((v, vkind))
             boxes = [v.box for v, _ in vehicle_jobs]
             wheels = [w for w in wheels if not any(_inside(w.point, b) for b in boxes)]
+        wheels, dropped = truck_wheels_dropped(wheels, reading.vehicles)
+        reasons += [r for r in dropped if r not in reasons]
         wheels = wheels[: max(0, cfg.max_wheels - len(vehicle_jobs))]
         if hint_kind == RefKind.PERSON:
             wheels, vehicle_jobs = [], []

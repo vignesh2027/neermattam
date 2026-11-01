@@ -168,6 +168,29 @@ def test_light_truck_on_car_wheels_is_searched_and_other_trucks_are_not(easy_cas
     r2 = asyncio.run(p2.measure(image=case_image(easy_case)))
     assert "no wheel size is known for a truck" in r2.reasons
     assert not any(t.target == "truck 1 wheel" for t in r2.agent_trace)
+    # The scene model's "bus wheel" on that truck is not measured against a bus
+    # tyre either (w_chennai01: 106 cm assumed for a light truck's tyre).
+    assert r2.method != "wheel_geometry"
+    assert not any(t.target.startswith("bus wheel") for t in r2.agent_trace)
+    assert r2.reasons.count("no wheel size is known for a truck") == 1
+
+
+def test_truck_wheels_dropped_keeps_real_buses_cars_and_two_wheelers() -> None:
+    from neermattam_perception.adapters import SceneObject
+    from neermattam_perception.pipeline import truck_wheels_dropped
+
+    truck = VehicleObject("truck", (100, 100, 500, 300))
+    bus = VehicleObject("bus", (300, 100, 700, 300))
+    on_truck = SceneObject(RefKind.BUS_WHEEL, (200, 250), (180, 230, 220, 270))
+    on_both = SceneObject(RefKind.BUS_WHEEL, (400, 250), (380, 230, 420, 270))
+    auto = SceneObject(RefKind.AUTO_WHEEL, (150, 250), (130, 230, 170, 270))
+    car = SceneObject(RefKind.CAR_WHEEL, (250, 250), (230, 230, 270, 270))
+    bike = SceneObject(RefKind.TWO_WHEELER_WHEEL, (260, 280), (240, 260, 280, 300))
+    free = SceneObject(RefKind.BUS_WHEEL, (900, 250), (880, 230, 920, 270))
+    kept, why = truck_wheels_dropped([on_truck, on_both, auto, car, bike, free], [truck, bus])
+    assert kept == [on_both, car, bike, free]
+    assert why == ["no wheel size is known for a truck"]
+    assert truck_wheels_dropped([on_truck], [bus]) == ([on_truck], [])
 
 
 def test_an_outline_on_the_rim_is_darker_outside_than_inside() -> None:
