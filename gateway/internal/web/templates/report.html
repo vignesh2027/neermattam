@@ -6,6 +6,35 @@
     <p>{{t "report.lead"}}</p>
   </header>
 
+  {{with .Report.Samples}}
+  <section class="card try" id="try" aria-labelledby="try-title">
+    <div class="try-head">
+      <div>
+        <p class="eyebrow">{{t "lp.try_eyebrow"}}</p>
+        <h2 id="try-title">{{t "lp.try_title"}}</h2>
+        <p class="try-lead">{{t "lp.try_lead"}}</p>
+      </div>
+    </div>
+    <ul class="try-list" role="list">
+      {{range .}}
+      <li>
+        <form class="try-card{{if eq .ID $.Report.Sample}} is-chosen{{end}}" method="post" action="/report" enctype="multipart/form-data" data-sample="{{.ID}}">
+          <input type="hidden" name="sample" value="{{.ID}}">
+          <img src="{{asset .Thumb}}" alt="{{t "lp.sample_alt" .Place}}" width="280" height="187" loading="lazy" decoding="async">
+          <div class="try-meta">
+            <b>{{.Place}}{{if .Year}}, {{.Year}}{{end}}</b>
+            <small>{{.Kind}}</small>
+            <small class="try-credit">{{.Credit}}</small>
+          </div>
+          <button class="btn btn-primary btn-sm" type="submit">{{t "lp.try_button"}}</button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+    <p class="small muted try-note">{{t "lp.try_note"}}</p>
+  </section>
+  {{end}}
+
   <div class="split">
     <form class="card panel" id="report-form" method="post" action="/report" enctype="multipart/form-data" novalidate>
       <input type="hidden" name="city" value="{{.City.ID}}">
@@ -171,6 +200,7 @@ document.addEventListener("DOMContentLoaded", function () {
   input.addEventListener("change", function () { show(input, voice); });
   voice.addEventListener("change", function () { show(voice, input); });
 
+  var voiceRun = false;
   var stages = document.getElementById("stages"), ORDER = ["upload", "scene", "verify", "fuse"], current = null, last = 0;
   function rows() { return stages.querySelectorAll(".stage"); }
   var tick = null;
@@ -187,7 +217,7 @@ document.addEventListener("DOMContentLoaded", function () {
         rows()[j].querySelector(".val").textContent = ((performance.now() - last) / 1000).toFixed(0) + " s";
       }, 250);
     }
-    if (name === "scene" && !voice.files[0] && !traceBox.querySelector(".trace")) waiting();
+    if (name === "scene" && !voiceRun && !traceBox.querySelector(".trace")) waiting();
   }
   // Until the first agent step arrives, the live panel says what it is
   // waiting for. A perception build without the step stream sends the whole
@@ -236,10 +266,32 @@ document.addEventListener("DOMContentLoaded", function () {
     err.textContent = "";
     if (!chosen()) { err.textContent = NM.tr("js.need_media"); input.focus(); return; }
     if (!lat.value || !lon.value) { err.textContent = NM.tr("js.need_location"); lat.focus(); return; }
+    send(new FormData(form), voice.files[0] && !input.files[0]);
+  });
+
+  // A sample photo: the server holds the file, so only its name is sent,
+  // and it runs through the same live pipeline as any upload.
+  var tries = document.querySelectorAll(".try-card");
+  function runSample(f) {
+    tries.forEach(function (x) { x.classList.toggle("is-chosen", x === f); });
+    err.textContent = "";
+    preview.textContent = ""; preview.classList.remove("has");
+    var fd = new FormData(); fd.append("sample", f.getAttribute("data-sample"));
+    send(fd, false);
+    document.getElementById("process").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  tries.forEach(function (f) {
+    f.addEventListener("submit", function (e) { e.preventDefault(); if (!submit.disabled) runSample(f); });
+  });
+  var asked = document.querySelector(".try-card.is-chosen");
+  if (asked && location.hash === "#try") { setTimeout(function () { runSample(asked); }, 300); }
+
+  function send(body, isVoice) {
+    voiceRun = !!isVoice;
     document.getElementById("process").classList.add("is-busy");
     document.getElementById("process-title").textContent = NM.tr("js.your_report");
     stages.hidden = false; result.textContent = ""; traceBox.textContent = ""; submit.disabled = true; submit.textContent = NM.tr("js.measuring");
-    document.getElementById("scene-sub").textContent = voice.files[0] && !input.files[0] ? NM.tr("js.voice_sub") : NM.tr("js.scene_sub");
+    document.getElementById("scene-sub").textContent = isVoice ? NM.tr("js.voice_sub") : NM.tr("js.scene_sub");
     rows().forEach(function (li) { li.removeAttribute("data-state"); li.querySelector(".val").textContent = ""; });
     document.getElementById("upbar").style.width = "0";
     current = null; enter("upload");
@@ -271,8 +323,9 @@ document.addEventListener("DOMContentLoaded", function () {
     xhr.onprogress = function () { pump(false); };
     xhr.onload = function () { pump(true); done(); };
     xhr.onerror = function () { err.textContent = NM.tr("js.upload_failed"); handle("error", {}); done(); };
-    function done() { submit.disabled = false; submit.textContent = NM.tr("js.measure"); }
-    xhr.send(new FormData(form));
-  });
+    function done() { submit.disabled = false; submit.textContent = NM.tr("js.measure"); tries.forEach(function (x) { x.querySelector("button").disabled = false; }); }
+    tries.forEach(function (x) { x.querySelector("button").disabled = true; });
+    xhr.send(body);
+  }
 });
 </script>{{end}}

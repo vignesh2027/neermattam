@@ -2,7 +2,7 @@
 
 **Street-level flood depth from one phone photo, measured with a wheel or a person as the ruler, fused into a live map that routes each kind of vehicle around water it cannot cross.**
 
-![Neermattam landing page: the live Chennai depth map beside the headline "Forecasts say where Chennai will flood. Neermattam measures how deep it is on your street."](docs/img/gateway-home.png)
+![Neermattam landing page: the headline "Forecasts say where India will flood. Neermattam measures how deep, street by street." beside one recorded measurement of a flooded Chennai street, 46 cm plus or minus 13, with Muse Spark Open's verdicts on each outline](docs/img/gateway-home.png)
 
 **Live site:** https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run
 
@@ -131,6 +131,7 @@ Third-party pieces I did not write:
 |---|---|---|
 | MapLibre GL JS 5.6.0 | Vendored in `gateway/internal/web/static/vendor/` | BSD 3-Clause ([LICENSE.txt](gateway/internal/web/static/vendor/maplibre-gl-5.6.0/LICENSE.txt)) |
 | Inter typeface | Vendored | SIL Open Font License 1.1 ([licence](gateway/internal/web/static/fonts/LICENSE-Inter.txt)) |
+| Plus Jakarta Sans typeface, for headings | Vendored | SIL Open Font License 1.1 ([licence](gateway/internal/web/static/fonts/LICENSE-PlusJakartaSans.txt)) |
 | Noto Sans for Indic scripts | Loaded from Google Fonts | SIL Open Font License 1.1 |
 | OpenStreetMap road extracts, seven cities | Cut from Geofabrik extracts, not in git | ODbL 1.0 |
 | OpenFreeMap base map tiles | Loaded by the map | OpenStreetMap and OpenMapTiles attribution |
@@ -138,6 +139,7 @@ Third-party pieces I did not write:
 | SAM 2.1 hiera-small weights | Downloaded at build time | Apache 2.0 |
 | Muse Spark Open | Called through Baseten; no weights in this repository | Meta's terms for the model |
 | Evaluation photos | Downloaded by `eval/real_photos.py`, not in git | CC0, CC BY 2.0, CC BY 3.0, CC BY-SA 4.0 and Unsplash License, credited per photo |
+| Sample and showcase photos on the site | Four evaluation photos, faces and plates blurred, in `gateway/internal/samples` and `static/showcase` | CC0 1.0, CC BY 2.0, CC BY 3.0 and Unsplash License, credited on the page and in `samples.json` |
 
 Library dependencies are pinned in `engine/Cargo.lock` and `perception/uv.lock`. The gateway uses only Go's standard library.
 

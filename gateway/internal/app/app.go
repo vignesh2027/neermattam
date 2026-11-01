@@ -58,6 +58,11 @@ type App struct {
 
 	ready readiness // /readyz hysteresis (ready.go)
 
+	// mux is the route table, kept so the landing page can read
+	// GET /api/india in process (landing.go).
+	mux      *http.ServeMux
+	indiaMem indiaCache // the last GET /api/india answer (landing.go)
+
 	reportLimit *ratelimit.Limiter
 	apiLimit    *ratelimit.Limiter
 	cells       *cellsCache
@@ -274,6 +279,7 @@ func (a *App) Handler() http.Handler {
 		http.Redirect(w, r, "/static/brand/favicon.ico", http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("/", a.notFound)
+	a.mux = mux
 
 	// secure runs before observe so the request observe sees is the one the
 	// mux annotates with its matched pattern.

@@ -553,9 +553,11 @@ func TestPagesRender(t *testing.T) {
 	h := newHarness(t, map[string]string{"DEMO": "1"}, true)
 	h.app.Origins.Mark("8a618c4e2d47fff", true)
 	pages := map[string][]string{
-		"/":       {"Forecasts say where Chennai will flood.", "Open the live map", "Built on Meta", "Muse Spark Open", "Who it is for", "Honest numbers", "Advisory, always", "pv-cells", "Watch the models check each other"},
+		"/": {"Forecasts say where India will flood.", "Measure a photo now", "See the live map", "Built on Meta", "make it work anywhere in India", "Muse Spark Open", "SAM 2.1",
+			"Who it is for", "Honest numbers", "Advisory, always", "pv-cells", "Watch the models check each other", "Live across India", "Visakhapatnam",
+			"/report?sample=nandanam#try", "Vijayingarsal", "CC0 1.0", "46<small>cm</small>", "Written, not running"},
 		"/map":    {"Chennai flood depth, live", "Simulated scenario", "Report water here", "Advisory only", "maplibre-gl-5.6.0/maplibre-gl"},
-		"/report": {"Measure the water from one photo", "Use my location", "12 MB", "30 seconds"},
+		"/report": {"Measure the water from one photo", "Use my location", "12 MB", "30 seconds", "Measure one of ours", `name="sample" value="kolkata-car"`, "Dibakar Roy, Unsplash License"},
 		"/route":  {"Route around the water", "Kodambakkam station", "Guindy station", "SIPCOT IT Park, Siruseri", "Two-wheeler"},
 		"/route?from=12.9791,80.2209&to=13.0067,80.2206&vehicle=car": {"Water-aware route · Car", "4.2 km", "37 of 37", "Simulated scenario", `id="route-data"`},
 		"/about": {"Muse Spark Open", "SAM 3.1", "Voice reports", "ODbL", "OpenFreeMap", "Limitations"},

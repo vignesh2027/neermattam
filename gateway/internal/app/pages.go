@@ -52,6 +52,9 @@ func (a *App) page(w http.ResponseWriter, r *http.Request, active string, needsM
 			VideoSeconds: int(a.Cfg.MaxVideoSeconds),
 		},
 	}
+	if active == "report" {
+		p.Report.Samples = web.SampleCards(lang) // landing.go
+	}
 	for _, l := range i18n.Languages {
 		q := r.URL.Query()
 		q.Set("lang", l.Code)
@@ -118,6 +121,13 @@ func (a *App) mapPage(w http.ResponseWriter, r *http.Request) {
 func (a *App) reportPage(w http.ResponseWriter, r *http.Request) {
 	p := a.page(w, r, "report", true)
 	p.LiveTrace = &web.TraceView{Live: true}
+	if id := r.URL.Query().Get("sample"); id != "" {
+		for _, s := range p.Report.Samples {
+			if s.ID == id {
+				p.Report.Sample = id
+			}
+		}
+	}
 	if at := r.URL.Query().Get("at"); at != "" {
 		if lat, lon, ok := strings.Cut(at, ","); ok {
 			if _, err := strconv.ParseFloat(lat, 64); err == nil {
@@ -356,7 +366,9 @@ func (a *App) homePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := a.page(w, r, "home", false)
-	h := &web.HomeView{Facts: &a.Facts, Trace: web.NewHomeTrace(p.Lang, a.Facts.Trace)}
+	h := &web.HomeView{Facts: &a.Facts, Trace: web.NewHomeTrace(p.Lang, a.Facts.Trace),
+		Showcase: web.NewShowcaseView(p.Lang, loadShowcase()), Samples: web.SampleCards(p.Lang)}
+	h.India = a.indiaView(r.Context(), p.Lang, p.City.ID)
 	ctx, cancel := context.WithTimeout(r.Context(), 1200*time.Millisecond)
 	defer cancel()
 	if e, err := a.cellsForCity(ctx, p.City.ID); err == nil {

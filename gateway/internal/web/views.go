@@ -99,6 +99,17 @@ type ResultView struct {
 	Readings []ReadingRow
 	Voice    *VoiceView
 	Trace    *TraceView
+	// Figure draws the depth beside a ruler, a scooter wheel and an adult.
+	Figure *DepthFigure
+	// Sample is set when the photo was one of the gateway's sample photos:
+	// measured live, never added to the map.
+	Sample *SampleView
+}
+
+// SampleView says which sample photo was measured and why it is not on the
+// map.
+type SampleView struct {
+	Place, Taken string
 }
 
 // ReadingRow is one way the depth was obtained.
@@ -138,6 +149,13 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 		v.Gauge = newGauge(lang, *o.DepthCm, *o.DepthSigmaCm)
 	}
 	describeMethod(v, o, lang)
+	if v.HasDepth {
+		f := NewDepthFigure(lang, *o.DepthCm, *o.DepthSigmaCm, v.Method == "estimate" || o.Source == "voice")
+		v.Figure = &f
+	}
+	if sm := o.Sample; sm != nil {
+		v.Sample = &SampleView{Place: sm.Place, Taken: DateText(lang, sm.Taken)}
+	}
 	switch v.Method {
 	case "estimate":
 		v.OverlayAlt, v.OverlayCaption = tr("result.overlay_alt"), tr("result.overlay_estimate")
@@ -149,6 +167,8 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 	switch o.Status {
 	case report.StatusFused:
 		v.Title = tr("result.title_fused")
+	case report.StatusSample:
+		v.Title = tr("lp.res_sample_title")
 	case report.StatusUnusable:
 		v.Title = tr("result.title_unusable")
 		if o.Source == "voice" {

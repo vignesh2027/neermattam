@@ -109,6 +109,10 @@ type Limits struct {
 type ReportForm struct {
 	Lat, Lon string
 	Error    string
+	// Samples are the sample photos offered in one tap; Sample is the one
+	// the link asked for, which the page measures as soon as it opens.
+	Samples []SampleCard
+	Sample  string
 }
 
 // VehicleOption is one vehicle radio button.
