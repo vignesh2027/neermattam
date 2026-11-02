@@ -18,6 +18,7 @@ from meta_sam_parser._mask_codec import _encode_raster  # official encoder, test
 
 from neermattam_perception import sam
 from neermattam_perception.adapters import (
+    FRESH_SCENE,
     ImageQuality,
     MaskResult,
     SceneObject,
@@ -105,9 +106,12 @@ class FakeScene:
     name: str = "fake-scene"
     is_ready: bool = True
     calls: int = 0
+    # Whether each call was asked for a fresh reading (adapters.FRESH_SCENE).
+    fresh_seen: list[bool] = field(default_factory=list)
 
     async def read_scene(self, image: ImageInput) -> SceneReading:
         self.calls += 1
+        self.fresh_seen.append(FRESH_SCENE.get())
         return self.reading
 
     async def ready(self) -> tuple[bool, str]:

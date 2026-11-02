@@ -13,7 +13,7 @@ import httpx
 import numpy as np
 import pytest
 
-from neermattam_perception.adapters import SceneObject
+from neermattam_perception.adapters import FRESH_SCENE, SceneObject, SceneReading
 from neermattam_perception.agent import VerifyRefineAgent, _chosen, _initial_points
 from neermattam_perception.media import ImageInput
 from neermattam_perception.muse_open import MuseSparkOpenAdapter, Usage, jpeg_for_model
@@ -190,6 +190,32 @@ def test_scene_reading_is_cached_in_memory_and_on_disk(tmp_path: Path) -> None:
     asyncio.run(make(scene_effort="medium").read_scene(IMAGE))  # other settings: a new call
     assert len(calls) == 2 and calls[1]["reasoning_effort"] == "medium"
     assert Usage().cost_usd == 0.0
+
+
+def test_fresh_request_skips_the_scene_cache(tmp_path: Path) -> None:
+    """A request that asks for a fresh reading (a sample photo) calls the model even
+    when the photo was read before, and the new reading replaces the cached one."""
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(req.content))
+        return httpx.Response(200, json=recorded("baseten_scene_response.json"))
+
+    a = MuseSparkOpenAdapter(
+        api_key=KEY, transport=httpx.MockTransport(handler), scene_cache_dir=tmp_path
+    )
+    assert not asyncio.run(a.read_scene(IMAGE)).cached
+
+    async def fresh() -> SceneReading:
+        token = FRESH_SCENE.set(True)
+        try:
+            return await a.read_scene(IMAGE)
+        finally:
+            FRESH_SCENE.reset(token)
+
+    again = asyncio.run(fresh())
+    assert len(calls) == 2 and not again.cached
+    assert asyncio.run(a.read_scene(IMAGE)).cached and len(calls) == 2
 
 
 def test_model_images_are_compressed() -> None:
