@@ -120,3 +120,60 @@ def test_recorded_transcriptions(
     assert t.depth_cm == depth and t.depth_basis.startswith(f"phrase table: {landmark}")
     assert t.depth_words and t.depth_words_en
     assert t.depth_low_cm is not None and t.depth_high_cm is not None
+
+
+# Written sentences a reporter might say, three per language, each naming one
+# body landmark in its own inflected form (and a few romanised). This checks
+# the depth parser only: it does not test recognising speech, which depends on
+# the voice model. Each sentence must give exactly its landmark and nothing else.
+SPOKEN_PHRASES: list[tuple[str, str, str]] = [
+    ("hi", "सड़क पर घुटनों तक पानी है", "knee"),
+    ("hi", "यहाँ कमर तक पानी भरा है", "waist"),
+    ("hi", "ghutne tak paani hai", "knee"),
+    ("ta", "முழங்கால் அளவு தண்ணீர் இருக்கு", "knee"),
+    ("ta", "இடுப்பு வரை தண்ணீர் நிக்குது", "waist"),
+    ("ta", "கணுக்கால் வரை தண்ணீர்", "ankle"),
+    ("te", "మోకాలి లోతు నీళ్ళు ఉన్నాయి", "knee"),
+    ("te", "నడుము లోతు నీళ్ళు", "waist"),
+    ("te", "చీలమండ వరకు నీరు", "ankle"),
+    ("kn", "ಮೊಣಕಾಲಿನವರೆಗೆ ನೀರು ಇದೆ", "knee"),
+    ("kn", "ಸೊಂಟದವರೆಗೆ ನೀರು ನಿಂತಿದೆ", "waist"),
+    ("kn", "ಎದೆಯವರೆಗೆ ನೀರು", "chest"),
+    ("ml", "മുട്ടോളം വെള്ളം ഉണ്ട്", "knee"),
+    ("ml", "അരക്കെട്ടോളം വെള്ളം", "waist"),
+    ("ml", "കഴുത്തോളം വെള്ളം", "neck"),
+    ("bn", "রাস্তায় হাঁটু পর্যন্ত জল জমেছে", "knee"),
+    ("bn", "কোমর সমান জল", "waist"),
+    ("bn", "বুক পর্যন্ত জল", "chest"),
+    ("mr", "रस्त्यावर गुडघ्यापर्यंत पाणी साचले आहे", "knee"),
+    ("mr", "कंबरेपर्यंत पाणी आहे", "waist"),
+    ("mr", "मांडीपर्यंत पाणी", "thigh"),
+    ("gu", "રસ્તા પર ઘૂંટણ સુધી પાણી ભરાયું છે", "knee"),
+    ("gu", "કમર સુધી પાણી છે", "waist"),
+    ("gu", "ઘૂંટી સુધી પાણી", "ankle"),
+    ("pa", "ਸੜਕ ਤੇ ਗੋਡਿਆਂ ਤੱਕ ਪਾਣੀ ਹੈ", "knee"),
+    ("pa", "ਲੱਕ ਤੱਕ ਪਾਣੀ", "waist"),
+    ("pa", "ਛਾਤੀ ਤੱਕ ਪਾਣੀ ਹੈ", "chest"),
+    ("or", "ରାସ୍ତାରେ ଆଣ୍ଠୁ ପର୍ଯ୍ୟନ୍ତ ପାଣି", "knee"),
+    ("or", "ଅଣ୍ଟା ପର୍ଯ୍ୟନ୍ତ ପାଣି", "waist"),
+    ("or", "ଛାତି ପର୍ଯ୍ୟନ୍ତ ପାଣି", "chest"),
+    ("ur", "سڑک پر گھٹنوں تک پانی ہے", "knee"),
+    ("ur", "کمر تک پانی ہے", "waist"),
+    ("ur", "سینے تک پانی", "chest"),
+    ("en", "the water is knee deep on the main road", "knee"),
+    ("en", "waist-deep near the bus stop", "waist"),
+    ("en", "ankle deep water outside the station", "ankle"),
+]
+
+
+def test_spoken_phrases_cover_twelve_languages() -> None:
+    assert {lang for lang, _, _ in SPOKEN_PHRASES} == set(LANGUAGES)
+    assert len(SPOKEN_PHRASES) == 36  # the count quoted in docs and on the site
+
+
+@pytest.mark.parametrize(("lang", "words", "landmark"), SPOKEN_PHRASES)
+def test_spoken_phrase_gives_its_depth(lang: str, words: str, landmark: str) -> None:
+    assert {name for name, _ in match_landmarks(words)} == {landmark}
+    got = depth_from_words(words, "")
+    assert got is not None and got.basis.startswith(f"phrase table: {landmark} (")
+    assert got.depth_cm == LANDMARKS[landmark].centre_cm

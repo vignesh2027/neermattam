@@ -1,10 +1,6 @@
-/* The live map's city strip, rainfall line, replay switch and measured photos. */
+/* The live map's city strip, rainfall line and archival photos. The replay
+   switch is shared with the route page, so its rules are in app.css. */
 .nm-rain { margin-top: 8px; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
-.nm-replay-link { margin-top: 10px; font-size: 12.5px; }
-.nm-replay-link a { display: inline-flex; align-items: center; gap: 6px; color: var(--violet, #4C1D95); font-weight: 600; text-decoration: none; }
-.nm-replay-link a:hover span { text-decoration: underline; }
-.nm-replay-link svg { width: 15px; height: 15px; flex-shrink: 0; }
-.nm-replay a { color: inherit; font-weight: 700; }
 .is-replay .status-card { border-color: #C4B5FD; }
 .nm-active { display: block; margin-top: 6px; }
 .nm-chip { display: inline-block; margin: 4px 4px 0 0; padding: 3px 10px; border-radius: 999px; background: var(--surface, #fff); border: 1px solid #BFD3F6; color: var(--primary-deep, #1D4ED8); font-weight: 600; font-size: 12.5px; text-decoration: none; }
@@ -55,3 +51,9 @@
 .nm-cities b { flex: 1 0 100%; }
 .nm-cities span + span::before { content: "· "; color: var(--faint); }
 .feed .nm-cities li, .feed .nm-photos li { animation: none; }
+/* An empty city offers the replay as a clear, labelled call to action. */
+.nm-replay-cta { margin-top: 10px; display: grid; gap: 6px; justify-items: start; }
+.nm-replay-btn { background: var(--violet, #4C1D95); color: #fff; }
+.nm-replay-btn:hover { color: #fff; filter: brightness(1.12); }
+.nm-replay-cta p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
+.stats[hidden] { display: none; }

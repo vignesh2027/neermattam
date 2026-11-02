@@ -185,6 +185,13 @@ p { margin: 0; }
 }
 .sim-banner svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
 .sim-banner strong { font-weight: 700; }
+/* The replay switch is a shared partial (map and route pages), so its rules
+   live here, not in map.css, which only the map page links. */
+.nm-replay-link { margin-top: 10px; font-size: 12.5px; }
+.nm-replay-link a { display: inline-flex; align-items: center; gap: 6px; color: var(--violet, #4C1D95); font-weight: 600; text-decoration: none; }
+.nm-replay-link a:hover span { text-decoration: underline; }
+.nm-replay-link svg { width: 15px; height: 15px; flex-shrink: 0; }
+.nm-replay a { color: inherit; font-weight: 700; }
 
 .legend { left: 16px; bottom: 16px; width: 316px; padding: 0; }
 .legend summary {
@@ -339,6 +346,9 @@ details.more summary { cursor: pointer; font-weight: 600; font-size: 14px; color
 .stage[data-state="done"] .dot { background: var(--primary); border-color: var(--primary); color: #fff; }
 .stage[data-state="done"] .dot svg { display: block; }
 .stage[data-state="error"] .dot { background: var(--danger); border-color: var(--danger); }
+.stage[data-state="skipped"] { color: var(--muted); }
+.stage[data-state="skipped"] .dot { border-style: dashed; background: transparent; }
+.stage[data-state="skipped"] .val { font-style: italic; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .upload-bar { height: 4px; border-radius: 99px; background: var(--soft); overflow: hidden; margin-top: 6px; }
 .upload-bar i { display: block; height: 100%; width: 0; background: var(--primary); transition: width .2s; }
@@ -1187,6 +1197,7 @@ pre.code { max-width: 100%; }
 .vfy-verdict.not-used .vfy-ic { background: var(--amber-soft); color: var(--amber); }
 .vfy-checks .c-warn svg { color: var(--amber); }
 .vfy-checks .c-warn span { color: var(--amber); font-weight: 650; }
+.vfy-checks .c-info svg { color: var(--violet); }
 .vfy-decision { margin-top: 18px; border-left: 4px solid var(--line-strong); }
 .vfy-decision.d-fused { border-left-color: var(--ok); }
 .vfy-decision.d-rejected { border-left-color: var(--amber); background: linear-gradient(135deg, #FFFBF2, #FFFFFF); }

@@ -189,7 +189,7 @@ var knOps = map[string]string{
 	"dev.route_returns": "LineString ಇರುವ ಒಂದು GeoJSON Feature ಅನ್ನು ಹಿಂತಿರುಗಿಸುತ್ತದೆ:",
 	"dev.f_advisory":    "ಯಾವಾಗಲೂ true, ಜೊತೆಗೆ ಈ ನಿಯಮಗಳ ಲಿಂಕ್.",
 	"dev.f_geometry":    "ಶಿಫಾರಸು ಮಾಡಿದ ದಾರಿ, lon,lat ಜೋಡಿಗಳಾಗಿ.",
-	"dev.f_kind":        "water_aware, ಅಥವಾ ಒಣ ದಾರಿ ಇಲ್ಲದಿದ್ದಾಗ least_bad.",
+	"dev.f_kind":        "water_aware, ಅಥವಾ ಯಾವ ದಾರಿಯೂ ವಾಹನದ ಆಳದ ಮಿತಿಯೊಳಗೆ ಇಲ್ಲದಿದ್ದಾಗ least_bad.",
 	"dev.f_passable":    "ಪ್ರತಿ ದಾರಿಯೂ ವಾಹನದ ಮಿತಿ ಮೀರಿದ ನೀರನ್ನು ದಾಟಿದಾಗ false; ಇದನ್ನು ಚಾಲಕರಿಗೆ ತೋರಿಸಿ.",
 	"dev.f_distance":    "ಮೀಟರ್‌ಗಳಲ್ಲಿ ಉದ್ದ ಮತ್ತು ನಿಮಿಷಗಳಲ್ಲಿ ಅಂದಾಜು ಸಮಯ.",
 	"dev.f_depth":       "ದಾರಿಯಲ್ಲಿ ತಿಳಿದಿರುವ ಅತಿ ಆಳದ ನೀರು ಮತ್ತು ಅದರ ಪ್ಲಸ್ ಆರ್ ಮೈನಸ್, ಅಥವಾ null.",

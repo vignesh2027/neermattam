@@ -392,7 +392,10 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 	switch c.typ.Kind {
 	case media.Image, media.Video:
 		out.Source = "photo"
-		req := upstream.MeasureRequest{HintReference: sub.HintReference, HintDiameterCm: sub.HintDiameterCm}
+		// A sample photo is the same file every time, so perception would
+		// answer its scene reading from cache; ask for a new one so that
+		// every tap really runs the models.
+		req := upstream.MeasureRequest{HintReference: sub.HintReference, HintDiameterCm: sub.HintDiameterCm, Fresh: sample}
 		up := &upstream.Upload{Filename: "report" + c.typ.Ext, MIME: c.typ.MIME, Data: c.file.Data}
 		if c.typ.Kind == media.Image {
 			up.Field = "image"
@@ -433,7 +436,7 @@ func (p *Pipeline) Run(ctx context.Context, sub Submission, progress Progress) (
 			depth, sigma := *m.DepthCm, *m.DepthSigmaCm
 			out.DepthCm, out.DepthSigmaCm = &depth, &sigma
 			out.Status = StatusSample
-			out.Summary = fmt.Sprintf("Measured live: about %.0f cm of water, plus or minus %.0f cm. A sample photo is not added to the map.", depth, sigma)
+			out.Summary = fmt.Sprintf("Sample photo, run live just now: about %.0f cm of water, plus or minus %.0f cm. A sample photo is not added to the map.", depth, sigma)
 			p.recordDecision(out, verify.Result{})
 			p.finish(out, start)
 			return out, nil

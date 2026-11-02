@@ -23,6 +23,10 @@ type Stored struct {
 	Certificate  json.RawMessage `json:"certificate"`
 	UploadSHA256 string          `json:"upload_sha256"`
 	ReceivedAt   time.Time       `json:"received_at"`
+	// ReceivedDateOnly says ReceivedAt carries a date and no real time of
+	// day (an archival photo whose record holds only a date), so it is
+	// shown as a date.
+	ReceivedDateOnly bool `json:"received_date_only,omitempty"`
 	// Decision is what the gateway did with the measurement once it had
 	// checked it: added it to the map, refused it, or found no depth. It is
 	// the gateway's own record, outside the signed certificate, and is nil

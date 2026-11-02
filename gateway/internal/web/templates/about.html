@@ -65,7 +65,7 @@
     <ul>
       <li>{{t "about.lim1"}}</li>
       <li>{{t "about.lim2"}}</li>
-      {{with .Home}}{{with .Facts}}<li>{{if .Real.Person}}{{t "about.lim3_person" .Real.Photos .Real.Geometry .Real.Person}}{{else}}{{t "about.lim3" .Real.Photos .Real.Geometry}}{{end}}</li>{{end}}{{end}}
+      {{with .Home}}{{with .Facts}}{{with .RealAll}}<li>{{t "about.lim3_all" .Photos .Person .Geometry}}</li>{{end}}{{end}}{{end}}
       <li>{{t "about.lim4"}}</li>
       <li>{{t "about.lim5"}}</li>
       <li>{{t "about.lim6"}}</li>

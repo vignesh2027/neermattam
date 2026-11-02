@@ -245,7 +245,7 @@ func TestMapIsNeverEmptyWithoutAnExplanation(t *testing.T) {
 		t.Error("the inline cells come before the panel")
 	}
 	_, body = get(t, nil, h.srv.URL+"/map?city=chennai")
-	for _, want := range []string{"Rain in the last 24 hours: 34.0 mm (last hour 1.2 mm). Open-Meteo model, read at", `id="photos-data"`, "Measured photos (", "Photo from 2008, measured by Neermattam on", "/verify/m_"} {
+	for _, want := range []string{"Rain in the last 24 hours: 34.0 mm (last hour 1.2 mm). Open-Meteo model, read at", `id="photos-data"`, "Archival photos (", "Photo from 2008, run through Neermattam on", "/verify/m_"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("Chennai's map lacks %q", want)
 		}
@@ -268,7 +268,7 @@ func TestArchivalPhotoVerifiesAndIsNeverOnTheMap(t *testing.T) {
 	if r.StatusCode != 200 {
 		t.Fatalf("verify page: %d", r.StatusCode)
 	}
-	for _, want := range []string{"Signature verified: an archival photo", "Archival photo, not on the live map", "Photo from " + p.Year() + ", measured by Neermattam on", "never added to the live map"} {
+	for _, want := range []string{"Signature verified: an archival photo", "Archival photo, not on the live map", "Photo from " + p.Year() + ", run through Neermattam on", "never added to the live map"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("verify page lacks %q", want)
 		}

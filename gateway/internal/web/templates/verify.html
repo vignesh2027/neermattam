@@ -13,8 +13,11 @@
     <p class="small muted"><code>{{.ID}}</code></p>
   </section>
   {{else}}
-  <section class="card panel vfy-verdict v-{{.Status}}{{if ne .Decision "fused"}}{{if ne .Decision "unknown"}} not-used{{end}}{{end}}" aria-labelledby="vfy-v">
-    <span class="vfy-ic" aria-hidden="true">{{if and (eq .Status "verified") (or (eq .Decision "fused") (eq .Decision "unknown"))}}{{template "icon-shield"}}{{else}}{{template "icon-alert"}}{{end}}</span>
+  {{/* Amber only for a real problem: the checks refused the measurement. A
+       valid signature on an archival photo, a sample or a photo with no
+       depth is shown as verified, and the decision below says the rest. */}}
+  <section class="card panel vfy-verdict v-{{.Status}}{{if eq .Decision "rejected"}} not-used{{end}}" aria-labelledby="vfy-v">
+    <span class="vfy-ic" aria-hidden="true">{{if and (eq .Status "verified") (ne .Decision "rejected")}}{{template "icon-shield"}}{{else}}{{template "icon-alert"}}{{end}}</span>
     <div>
       {{if eq .Status "verified"}}
       <h2 id="vfy-v">{{if or (eq .Decision "rejected") (eq .Decision "unusable")}}{{t "vfy.ok_title_rejected"}}{{else if eq .Decision "archival"}}{{t "vfy.ok_title_archival"}}{{else}}{{t "vfy.ok_title"}}{{end}}</h2>
@@ -29,7 +32,7 @@
       <ul class="vfy-checks">
         <li class="c-{{if eq .Status "verified"}}ok{{else}}bad{{end}}">{{if eq .Status "verified"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>Ed25519 · <code>{{.KeyID}}</code>{{if ne .Status "verified"}} · {{.Reason}}{{end}}</span></li>
         <li class="c-{{if eq .Upload "match"}}ok{{else if eq .Upload "mismatch"}}bad{{else}}none{{end}}">{{if eq .Upload "match"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>{{if eq .Upload "match"}}{{t "vfy.upload_match"}}{{else if eq .Upload "mismatch"}}{{t "vfy.upload_mismatch"}}{{else}}{{t "vfy.upload_unknown"}}{{end}}</span></li>
-        {{if ne .Decision "unknown"}}<li class="c-{{if eq .Decision "fused"}}ok{{else}}warn{{end}}">{{if eq .Decision "fused"}}{{template "icon-check"}}{{else}}{{template "icon-alert"}}{{end}}<span>{{if eq .Decision "fused"}}{{t "vfy.dec_fused" .DecisionTrust}}{{else if eq .Decision "rejected"}}{{t "result.title_rejected"}}{{else if eq .Decision "sample"}}{{t "lp.vfy_chip_sample"}}{{else if eq .Decision "archival"}}{{t "vfy.dec_chip_archival"}}{{else}}{{t "vfy.dec_unusable"}}{{end}}</span></li>{{end}}
+        {{if ne .Decision "unknown"}}<li class="c-{{if eq .Decision "fused"}}ok{{else if eq .Decision "rejected"}}warn{{else if eq .Decision "unusable"}}none{{else}}info{{end}}">{{if eq .Decision "fused"}}{{template "icon-check"}}{{else if eq .Decision "rejected"}}{{template "icon-alert"}}{{else if eq .Decision "unusable"}}{{template "icon-eye"}}{{else}}{{template "icon-flask"}}{{end}}<span>{{if eq .Decision "fused"}}{{t "vfy.dec_fused" .DecisionTrust}}{{else if eq .Decision "rejected"}}{{t "result.title_rejected"}}{{else if eq .Decision "sample"}}{{t "lp.vfy_chip_sample"}}{{else if eq .Decision "archival"}}{{t "vfy.dec_chip_archival"}}{{else}}{{t "vfy.dec_unusable"}}{{end}}</span></li>{{end}}
       </ul>
       {{if and (ne .Status "verified") .HasRecord}}<p class="vfy-claims">{{t "vfy.unverified_note"}}</p>{{end}}
     </div>
@@ -45,7 +48,7 @@
     {{if .DecisionReasons}}<p class="section-title">{{t "vfy.dec_why"}}</p>
     <ul class="reasons">{{range .DecisionReasons}}<li>{{template "reason_text" .}}</li>{{end}}</ul>{{end}}
     <p class="small muted">{{t "result.trust_rejected" .DecisionTrust}}</p>
-    {{else if eq .Decision "sample"}}<p>{{t "lp.vfy_dec_sample"}}</p>
+    {{else if eq .Decision "sample"}}<p>{{t "vfy.dec_sample"}}</p>
     {{else if eq .Decision "unusable"}}<p>{{t "vfy.dec_unusable"}}</p>
     {{if .DecisionReasons}}<ul class="reasons notes">{{range .DecisionReasons}}<li>{{template "reason_text" .}}</li>{{end}}</ul>{{end}}
     {{else if eq .Decision "archival"}}{{with .Archival}}<p><strong>{{t "photos.label" .Year .MeasuredOn}}</strong></p>

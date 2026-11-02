@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -314,6 +315,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", a.readyz)
 	mux.Handle("GET /metrics", a.Metrics.Registry.Handler())
 	mux.Handle("GET /static/", a.Renderer.Assets().Handler())
+	mux.HandleFunc("GET /robots.txt", robots)
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/static/brand/favicon.ico", http.StatusMovedPermanently)
 	})
@@ -427,4 +429,12 @@ func (a *App) saveKeyUsage() {
 			a.Log.Warn("API key usage not saved", "error", err.Error())
 		}
 	}
+}
+
+// robots allows every crawler everywhere: every page is public, and the
+// map, verify and certificate pages are meant to be found.
+func robots(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = io.WriteString(w, "User-agent: *\nAllow: /\n")
 }

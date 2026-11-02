@@ -31,7 +31,7 @@ func Ago(lang string, t time.Time) string {
 // When formats a time of day and date in IST.
 func When(lang string, t time.Time) string {
 	lt := t.In(ist)
-	return fmt.Sprintf("%s, %d %s", lt.Format("15:04"), lt.Day(), i18n.Month(lang, lt.Month()))
+	return fmt.Sprintf("%s IST, %d %s", lt.Format("15:04"), lt.Day(), i18n.Month(lang, lt.Month()))
 }
 
 // Day formats a calendar date, such as 1 November 2026, in a language.
@@ -39,7 +39,22 @@ func Day(lang string, t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
+	t = t.In(ist)
 	return fmt.Sprintf("%d %s %d", t.Day(), i18n.Month(lang, t.Month()), t.Year())
+}
+
+// PlaceInCity names a locality with its city, such as "Tatanagar,
+// Bengaluru", so a place is never read as a namesake elsewhere. A place
+// that already names its city is left as it is.
+func PlaceInCity(lang, place, city string) string {
+	if place == "" || city == "" {
+		return place
+	}
+	en, local := i18n.T(i18n.Default, "city."+city), i18n.T(lang, "city."+city)
+	if strings.Contains(place, en) || strings.Contains(place, local) {
+		return place
+	}
+	return place + ", " + local
 }
 
 // Place localises "near X" and "at lat, lon"; place names stay as they are.

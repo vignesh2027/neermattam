@@ -189,7 +189,7 @@ var mrOps = map[string]string{
 	"dev.route_returns": "LineString असलेले GeoJSON Feature परत देते:",
 	"dev.f_advisory":    "नेहमी true, आणि या अटींची लिंक.",
 	"dev.f_geometry":    "शिफारस केलेला मार्ग, lon,lat जोड्यांच्या रूपात.",
-	"dev.f_kind":        "water_aware, किंवा कोरडा मार्ग नसल्यास least_bad.",
+	"dev.f_kind":        "water_aware, किंवा कोणताही मार्ग वाहनाच्या खोलीच्या मर्यादेत नसल्यास least_bad.",
 	"dev.f_passable":    "प्रत्येक मार्ग वाहनाच्या मर्यादेपेक्षा जास्त पाणी ओलांडत असल्यास false; हे चालकाला दाखवा.",
 	"dev.f_distance":    "मीटरमधील लांबी आणि मिनिटांतील अंदाजे वेळ.",
 	"dev.f_depth":       "मार्गावरील माहीत असलेले सर्वात खोल पाणी आणि त्याचे अधिक उणे, किंवा null.",

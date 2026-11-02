@@ -189,7 +189,7 @@ var teOps = map[string]string{
 	"dev.route_returns": "LineString ఉన్న ఒక GeoJSON Feature ను తిరిగి ఇస్తుంది:",
 	"dev.f_advisory":    "ఎల్లప్పుడూ true, ఈ నిబంధనల లింక్‌తో పాటు.",
 	"dev.f_geometry":    "సిఫారసు చేసిన దారి, lon,lat జతలుగా.",
-	"dev.f_kind":        "water_aware, లేదా పొడి దారి లేనప్పుడు least_bad.",
+	"dev.f_kind":        "water_aware, లేదా ఏ దారీ వాహన లోతు పరిమితిలో లేనప్పుడు least_bad.",
 	"dev.f_passable":    "ప్రతి దారీ వాహన పరిమితిని మించిన నీటిని దాటినప్పుడు false; దీన్ని డ్రైవర్‌కు చూపండి.",
 	"dev.f_distance":    "మీటర్లలో పొడవు, నిమిషాల్లో సుమారు సమయం.",
 	"dev.f_depth":       "దారిలో తెలిసిన అత్యంత లోతైన నీరు, దాని ప్లస్ ఆర్ మైనస్, లేదా null.",

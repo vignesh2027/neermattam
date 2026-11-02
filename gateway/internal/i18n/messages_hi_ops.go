@@ -189,7 +189,7 @@ var hiOps = map[string]string{
 	"dev.route_returns": "एक LineString वाला GeoJSON Feature लौटाता है:",
 	"dev.f_advisory":    "हमेशा true, और इन शर्तों का लिंक।",
 	"dev.f_geometry":    "सुझाया गया रास्ता, lon,lat जोड़ों के रूप में।",
-	"dev.f_kind":        "water_aware, या least_bad जब कोई सूखा रास्ता न हो।",
+	"dev.f_kind":        "water_aware, या least_bad जब कोई रास्ता वाहन की गहराई सीमा के भीतर न रहे।",
 	"dev.f_passable":    "false जब हर रास्ता वाहन की सीमा से ऊपर के पानी से गुज़रता हो; इसे चालक को दिखाएँ।",
 	"dev.f_distance":    "लंबाई मीटर में और मोटा समय मिनटों में।",
 	"dev.f_depth":       "रास्ते पर ज्ञात सबसे गहरा पानी और उसकी घट-बढ़, या null।",

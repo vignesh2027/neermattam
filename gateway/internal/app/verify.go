@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"neermattam/gateway/internal/certs"
+	"neermattam/gateway/internal/photos"
 	"neermattam/gateway/internal/upstream"
 	"neermattam/gateway/internal/web"
 )
@@ -127,7 +128,7 @@ func (a *App) verifyPage(w http.ResponseWriter, r *http.Request) {
 	res := a.checkCertificate(r.Context(), st)
 	p.Verify = web.NewVerifyView(p.Lang, id, st, res, a.Cfg.PublicURL)
 	if ph, ok := a.Photos.ByMeasurement(id); ok {
-		p.Verify.Archival = &web.ArchivalView{Year: ph.Year(), MeasuredOn: web.Day(p.Lang, ph.MeasuredAt()), Place: ph.Place, City: ph.City, Credit: ph.Credit(), SourceURL: ph.SourceURL, LicenceURL: ph.LicenceURL}
+		p.Verify.Archival = &web.ArchivalView{Year: ph.Year(), MeasuredOn: web.Day(p.Lang, measuredAt(ph)), Place: ph.Place, City: ph.City, Credit: ph.Credit(), SourceURL: ph.SourceURL, LicenceURL: ph.LicenceURL}
 	}
 	a.render(w, http.StatusOK, "verify", p)
 }
@@ -176,7 +177,8 @@ func (a *App) certificate(id string) (certs.Stored, bool) {
 		return certs.Stored{}, false
 	}
 	m := ph.Measurement
-	st := certs.Stored{Certificate: m.Certificate, UploadSHA256: ph.FileSHA256, ReceivedAt: ph.MeasuredAt()}
+	at, exact := ph.MeasuredAt()
+	st := certs.Stored{Certificate: m.Certificate, UploadSHA256: ph.FileSHA256, ReceivedAt: at, ReceivedDateOnly: !exact}
 	if len(m.ReasonCodes) == len(m.Reasons) {
 		st.ReasonCodes = m.ReasonCodes
 	}
@@ -189,6 +191,12 @@ func (a *App) certificate(id string) (certs.Stored, bool) {
 			break
 		}
 	}
-	st.Decision = &certs.Decision{Status: certs.DecisionArchival, DecidedAt: ph.MeasuredAt()}
+	st.Decision = &certs.Decision{Status: certs.DecisionArchival, DecidedAt: at}
 	return st, true
+}
+
+// measuredAt is when an archival photo was measured, for a date.
+func measuredAt(ph photos.Photo) time.Time {
+	t, _ := ph.MeasuredAt()
+	return t
 }

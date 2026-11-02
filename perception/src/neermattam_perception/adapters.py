@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol, TypeVar
 
@@ -145,6 +146,13 @@ class TrackResult:
     frames_billed: int
     cost_usd: float = 0.0
     problems: tuple[str, ...] = ()
+
+
+# Set for a request that asked for a fresh scene reading (the ``fresh`` form
+# field, docs/CONTRACTS.md 1). A scene model that caches its readings reads the
+# photo anew while it is set. Pipeline.measure sets it for one request; each
+# request runs in its own task, so concurrent requests never share it.
+FRESH_SCENE: ContextVar[bool] = ContextVar("fresh_scene", default=False)
 
 
 class SceneModel(Protocol):

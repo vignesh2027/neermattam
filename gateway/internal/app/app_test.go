@@ -132,6 +132,20 @@ type fakePerception struct {
 	stream      bool // serve /v1/measure/stream; otherwise it answers 404
 	transcript  string
 	keys        atomic.Value // string: the GET /v1/keys document
+	freshMu     sync.Mutex
+	fresh       []string // the "fresh" form field of each measure request
+}
+
+func (p *fakePerception) noteFresh(r *http.Request) {
+	p.freshMu.Lock()
+	defer p.freshMu.Unlock()
+	p.fresh = append(p.fresh, r.FormValue("fresh"))
+}
+
+func (p *fakePerception) freshSeen() []string {
+	p.freshMu.Lock()
+	defer p.freshMu.Unlock()
+	return append([]string(nil), p.fresh...)
 }
 
 func newFakePerception(t *testing.T, usable bool) *fakePerception {
@@ -173,6 +187,7 @@ func newFakePerception(t *testing.T, usable bool) *fakePerception {
 				return
 			}
 			p.calls.Add(1)
+			p.noteFresh(r)
 			w.Header().Set("Content-Type", "text/event-stream")
 			var m struct {
 				Trace []json.RawMessage `json:"agent_trace"`
@@ -190,6 +205,7 @@ func newFakePerception(t *testing.T, usable bool) *fakePerception {
 			http.Error(w, `{"detail":"image or video required"}`, 422)
 			return
 		}
+		p.noteFresh(r)
 		w.Write([]byte(p.body))
 	}))
 	t.Cleanup(p.srv.Close)
@@ -581,7 +597,7 @@ func TestPagesRender(t *testing.T) {
 		"/": {"Forecasts say where India will flood.", "Measure a photo now", "See the live map", "Built on Meta", "make it work anywhere in India", "Muse Spark Open", "SAM 2.1",
 			"Who it is for", "Honest numbers", "Advisory, always", "pv-cells", "Watch the models check each other", "Live across India", "Visakhapatnam",
 			"/report?sample=nandanam#try", "Vijayingarsal", "CC0 1.0", "46<small>cm</small>", "Written, not running"},
-		"/map":    {"Chennai flood depth, live", "Simulated scenario", "Report water here", "Advisory only", "maplibre-gl-5.6.0/maplibre-gl"},
+		"/map":    {"Chennai flood depth</h1>", "Replay a past flood</span>", "Cyclone Michaung, Chennai, December 2023. Simulated", "Simulated scenario", "Report water here", "Advisory only", "maplibre-gl-5.6.0/maplibre-gl"},
 		"/report": {"Measure the water from one photo", "Use my location", "12 MB", "30 seconds", "Measure one of ours", `name="sample" value="kolkata-car"`, "Dibakar Roy, Unsplash License"},
 		"/route":  {"Route around the water", "Kodambakkam station", "Guindy station", "SIPCOT IT Park, Siruseri", "Two-wheeler"},
 		"/route?from=12.9791,80.2209&to=13.0067,80.2206&vehicle=car": {"Water-aware route · Car", "4.2 km", "37 of 37", "Simulated scenario", `id="route-data"`},

@@ -70,13 +70,18 @@ func (a *App) page(w http.ResponseWriter, r *http.Request, active string, needsM
 		q.Set("city", c.ID)
 		p.CityLinks = append(p.CityLinks, web.CityLink{ID: c.ID, Href: r.URL.Path + "?" + q.Encode(), Current: c.ID == city.ID})
 	}
+	if a.Replay != nil {
+		q := url.Values{"city": {cities.Default}, "replay": {ReplayID}}
+		p.Replay.DemoHref = "/map?" + q.Encode()
+	}
 	if a.replayAvailable(city.ID) {
 		on, off := r.URL.Query(), r.URL.Query()
 		on.Set("city", city.ID)
 		on.Set("replay", ReplayID)
 		off.Set("city", city.ID)
 		off.Del("replay")
-		p.Replay = web.ReplayView{Available: true, On: replay, OnHref: r.URL.Path + "?" + on.Encode(), OffHref: r.URL.Path + "?" + off.Encode()}
+		p.Replay.Available, p.Replay.On = true, replay
+		p.Replay.OnHref, p.Replay.OffHref = r.URL.Path+"?"+on.Encode(), r.URL.Path+"?"+off.Encode()
 	}
 	return p
 }
@@ -252,6 +257,9 @@ func (a *App) reportForm(w http.ResponseWriter, r *http.Request) {
 	} else {
 		view = web.NewResultView(out, lang)
 		final["status"] = out.Status
+		if skipped := web.SkippedStages(lang, out.Status); skipped != nil {
+			final["skipped"] = skipped
+		}
 	}
 	html, rerr := a.Renderer.Fragment(lang, "result_card", view)
 	if rerr != nil {
