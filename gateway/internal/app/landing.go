@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"neermattam/gateway/internal/cities"
 	"neermattam/gateway/internal/report"
 	"neermattam/gateway/internal/samples"
 	"neermattam/gateway/internal/web"
@@ -124,7 +125,11 @@ func (a *App) indiaView(ctx context.Context, lang, current string) *web.IndiaVie
 	if err != nil {
 		data = nil
 	}
-	return web.NewIndiaView(lang, refs, current, data, time.Now())
+	v := web.NewIndiaView(lang, refs, current, data, time.Now())
+	if a.replayAvailable(cities.Default) {
+		v.ReplayHref = "/map?city=" + cities.Default + "&replay=" + ReplayID
+	}
+	return v
 }
 
 // applySample replaces a submission's file and place with one of the

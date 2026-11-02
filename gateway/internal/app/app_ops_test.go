@@ -150,10 +150,10 @@ func TestCitySwitcherScopesEveryPage(t *testing.T) {
 	if !strings.Contains(list, `"routing":"failed"`) || !strings.Contains(list, `"default":"chennai"`) {
 		t.Fatalf("cities %s", list)
 	}
-	// The landing preview follows the city.
+	// The landing's map button follows the city.
 	_, body = get(t, nil, h.srv.URL+"/?city=hyderabad")
-	if !strings.Contains(body, "No reports yet in Hyderabad.") || !strings.Contains(body, "Secunderabad station") {
-		t.Fatal("the landing preview should show Hyderabad, empty, with its places")
+	if !strings.Contains(body, `href="/map?city=hyderabad"`) {
+		t.Fatal("the landing should open Hyderabad's map")
 	}
 }
 

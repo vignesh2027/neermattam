@@ -27,6 +27,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="{{.LangFontURL}}">{{end}}
 <link rel="stylesheet" href="{{asset "app.css"}}">
+{{block "head" .}}{{end}}
 {{if .NeedsMap}}<link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
 <link rel="stylesheet" href="{{asset "vendor/maplibre-gl-5.6.0/maplibre-gl.css"}}">
 <script src="{{asset "vendor/maplibre-gl-5.6.0/maplibre-gl.js"}}" defer></script>{{end}}
