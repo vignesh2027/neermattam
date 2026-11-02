@@ -79,14 +79,41 @@ func (p Photo) Credit() string {
 	return strings.TrimSpace(p.Author) + ", " + p.Licence
 }
 
-// MeasuredAt is when the measurement was made, from the certificate's
-// record when it says, else the measured_on date.
-func (p Photo) MeasuredAt() time.Time {
+// MeasuredAt is when the measurement was made: the signing time in the
+// certificate's record (issued_at), else the measured_on date at midnight
+// UTC. Exact reports whether the time of day is real; a bare date must be
+// shown as a date only, never as a clock time.
+func (p Photo) MeasuredAt() (t time.Time, exact bool) {
+	if t, ok := issuedAt(p.Measurement.Certificate); ok {
+		return t, true
+	}
 	t, err := time.Parse("2006-01-02", p.MeasuredOn)
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, false
 	}
-	return t
+	return t, false
+}
+
+// issuedAt reads issued_at from a certificate's signed payload without
+// checking the signature; the verify page checks it.
+func issuedAt(cert json.RawMessage) (time.Time, bool) {
+	var env struct {
+		Payload string `json:"payload"`
+	}
+	if len(cert) == 0 || json.Unmarshal(cert, &env) != nil || env.Payload == "" {
+		return time.Time{}, false
+	}
+	var rec struct {
+		IssuedAt string `json:"issued_at"`
+	}
+	if json.Unmarshal([]byte(env.Payload), &rec) != nil {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, rec.IssuedAt)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t.UTC(), true
 }
 
 // Set is every measured photo, in city then id order.

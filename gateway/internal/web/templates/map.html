@@ -5,24 +5,32 @@
   <div id="map" class="map-full" role="region" aria-label="{{t "map.region_aria"}}"></div>
 
   <div class="overlay glass status-card">
-    <div class="title-row"><h1><span class="live-dot" id="live-dot" aria-hidden="true"></span>{{if .Replay.On}}{{t "replay.title" (t (printf "city.%s" .City.ID))}}{{else}}{{t "map.title_city" (t (printf "city.%s" .City.ID))}}{{end}}</h1>{{template "city_switcher" .}}</div>
+    {{/* The green live dot and "live" only where there is live data: never on
+         the simulated replay, and not on a city nobody has reported in. */}}
+    <div class="title-row"><h1>{{if .Replay.On}}{{t "replay.title" (t (printf "city.%s" .City.ID))}}{{else if .Stats.Empty}}{{t "map.title_city_empty" (t (printf "city.%s" .City.ID))}}{{else}}<span class="live-dot" id="live-dot" aria-hidden="true"></span>{{t "map.title_city" (t (printf "city.%s" .City.ID))}}{{end}}</h1>{{template "city_switcher" .}}</div>
     <p class="sub">{{if .Replay.On}}{{t "replay.sub"}}{{else}}{{t "map.sub_live"}}{{end}}</p>
-    <div class="stats" aria-live="polite">
+    {{/* An empty city's stats are all zero; they show again with the first report. */}}
+    <div class="stats" id="stats" aria-live="polite"{{if and (not .Replay.On) .Stats.Empty}} hidden{{end}}>
       <div class="stat"><b id="st-cells">{{.Stats.Cells}}</b><span><span class="lg-only">{{t "map.stat_cells"}}</span><span class="sm-only">{{t "map.stat_cells_short"}}</span></span></div>
       <div class="stat"><b id="st-deep">{{.Stats.Deep}}</b><span>{{t "map.stat_deep"}}</span></div>
       <div class="stat"><b id="st-max">{{.Stats.Max}}</b><span><span class="lg-only">{{t "map.stat_max"}}</span><span class="sm-only">{{t "map.stat_max_short"}}</span></span></div>
     </div>
     {{template "city_rain" .}}
-    {{template "replay_switch" .}}
     {{if and (not .Replay.On) .Stats.Empty}}
-    <div class="empty-banner" role="note" id="empty-banner">
+    <div id="empty-banner">
+    <div class="empty-banner" role="note">
       {{template "icon-pin"}}
-      <span><strong>{{t "city.no_reports" (t (printf "city.%s" .City.ID))}}</strong> {{t "city.no_reports_sub"}}
-      {{$active := false}}{{range .Overview}}{{if and .Active (not .Current)}}{{$active = true}}{{end}}{{end}}
-      {{if $active}}<span class="nm-active">{{t "india.active_now"}} {{range .Overview}}{{if and .Active (not .Current)}}<a class="nm-chip" href="{{.Href}}">{{t (printf "city.%s" .ID)}}</a>{{end}}{{end}}</span>
-      {{else}}<span class="nm-active">{{t "india.none_active"}}</span>{{end}}</span>
+      <span><strong>{{t "city.no_reports" (t (printf "city.%s" .City.ID))}}</strong> {{t "city.no_reports_sub"}}</span>
     </div>
-    {{end}}
+    {{if .Replay.DemoHref}}<div class="nm-replay-cta">
+      <a class="btn btn-sm nm-replay-btn" href="{{.Replay.DemoHref}}">{{template "icon-flask"}}<span>{{t "replay.cta"}}</span></a>
+      <p>{{t "replay.cta_note"}}</p>
+    </div>{{end}}
+    {{$active := false}}{{range .Overview}}{{if and .Active (not .Current)}}{{$active = true}}{{end}}{{end}}
+    {{if $active}}<p class="nm-active nm-note">{{t "india.active_now"}} {{range .Overview}}{{if and .Active (not .Current)}}<a class="nm-chip" href="{{.Href}}">{{t (printf "city.%s" .ID)}}</a>{{end}}{{end}}</p>
+    {{else}}<p class="nm-active nm-note">{{t "india.none_active"}}</p>{{end}}
+    </div>
+    {{else}}{{template "replay_switch" .}}{{end}}
     <div class="nm-narrow">{{template "map_more" (pair . false)}}</div>
   </div>
 
@@ -54,12 +62,12 @@
   </details>
 
   <aside class="overlay glass feed" aria-labelledby="feed-title">
-    <h2 id="feed-title">{{t "feed.title"}} <span class="chip chip-grey" id="feed-state">{{t "js.live"}}</span></h2>
+    <h2 id="feed-title">{{if .Replay.On}}{{t "feed.title_replay"}} <span class="chip chip-violet">{{t "js.simulated"}}</span>{{else}}{{t "feed.title"}} <span class="chip chip-grey" id="feed-state">{{t "js.live"}}</span>{{end}}</h2>
     <ol id="feed" aria-live="polite">
       {{range .Feed}}
       <li class="{{if .Simulated}}is-sim{{else}}is-real{{end}}">
         <span class="depth-badge {{if lt .DepthCm 15.0}}light{{end}}" style="background:{{depthColor .DepthCm}}">{{printf "%.0f" .DepthCm}}</span>
-        <span class="meta"><b>{{place .Place}}</b><span>{{if .Simulated}}{{t "js.simulated"}}{{else}}{{t (printf "js.real_%s" .Source)}}{{end}} · ± {{printf "%.0f" .DepthSigmaCm}} cm · <time data-at="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{ago .At}}</time></span></span>
+        <span class="meta"><b>{{place .Place}}</b><span>{{if .Simulated}}{{t "js.simulated"}}{{else}}{{t (printf "js.real_%s" .Source)}}{{end}} · ± {{printf "%.0f" .DepthSigmaCm}} cm{{if not .Simulated}} · <time data-at="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{ago .At}}</time>{{end}}</span></span>
       </li>
       {{else}}
       <li class="empty" id="feed-empty" style="display:block;border:0;background:none;padding:0">{{t "feed.empty"}}</li>
@@ -144,11 +152,12 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("st-deep").textContent = deep.toLocaleString();
         document.getElementById("st-max").textContent = known.length ? Math.round(max) + " cm" : "\u2013";
         var empty = document.getElementById("empty-banner");
-        if (empty && list.length) empty.remove();
+        if (empty && list.length) { empty.remove(); document.getElementById("stats").hidden = false; }
       },
       onStatus: function (s) {
-        dot.setAttribute("data-state", s);
-        feedState.textContent = NM.tr(s === "up" ? "js.live" : "js.reconnecting");
+        // The replay and an empty city have no live dot or live chip.
+        if (dot) dot.setAttribute("data-state", s);
+        if (feedState) feedState.textContent = NM.tr(s === "up" ? "js.live" : "js.reconnecting");
       },
       onReport: addFeed
     });
@@ -219,9 +228,13 @@ document.addEventListener("DOMContentLoaded", function () {
     badge.style.background = NM.depthColor(item.depth_cm);
     var meta = NM.el("span", "meta");
     meta.appendChild(NM.el("b", null, NM.place(item.place)));
-    var sub = NM.el("span", null, NM.tr(item.simulated ? "js.simulated" : "js.real_" + item.source) + " · ± " + Math.round(item.depth_sigma_cm) + " cm · ");
-    var t = NM.el("time", null, NM.ago(item.at)); t.setAttribute("data-at", item.at);
-    sub.appendChild(t); meta.appendChild(sub);
+    var sub = NM.el("span", null, NM.tr(item.simulated ? "js.simulated" : "js.real_" + item.source) + " · ± " + Math.round(item.depth_sigma_cm) + " cm");
+    // A simulated reading has no real time; "just now" would read as live.
+    if (!item.simulated) {
+      var t = NM.el("time", null, NM.ago(item.at)); t.setAttribute("data-at", item.at);
+      sub.appendChild(document.createTextNode(" · ")); sub.appendChild(t);
+    }
+    meta.appendChild(sub);
     li.appendChild(badge); li.appendChild(meta);
     // Real reports stay on top; the simulated drip never pushes them out.
     var firstSim = ol.querySelector("li.is-sim");

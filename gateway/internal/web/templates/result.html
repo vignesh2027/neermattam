@@ -19,7 +19,7 @@
     <div class="res-main">
     <h2 id="res-title" class="res-depth"><b>{{.Depth}}<small>cm</small></b><span>± {{.Sigma}} cm</span><span class="visually-hidden">{{t "result.depth_a11y" .Sigma}}</span></h2>
     <p class="res-place">{{.Place}} · {{.When}}</p>
-    {{with .Sample}}<p class="sample-note">{{template "icon-flask"}}<span>{{if .Taken}}{{t "lp.res_sample_note" .Place .Taken}}{{else}}{{t "lp.res_sample_note_nodate" .Place}}{{end}}</span></p>{{end}}
+    {{with .Sample}}<p class="sample-note">{{template "icon-flask"}}<span>{{if .Taken}}{{t "result.sample_note" .Place .Taken}}{{else}}{{t "result.sample_note_nodate" .Place}}{{end}}</span></p>{{end}}
     {{if .CertificateURL}}<a class="res-cert" href="{{.CertificateURL}}">{{template "icon-shield"}}{{t "result.verify_link"}}</a>{{end}}
     </div>
     {{with .Figure}}{{template "depth_figure" .}}{{end}}

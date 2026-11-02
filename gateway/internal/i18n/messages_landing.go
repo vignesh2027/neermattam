@@ -122,19 +122,16 @@ var enLanding = map[string]string{
 	"lp.built":          "Built by one developer during the Meta Global AI Developer Hackathon, 26 October to 4 November 2026. Every line of its own code was written during the event, and it is open:",
 
 	// Sample photos
-	"lp.sample_kind_person":     "People standing in the water",
-	"lp.sample_kind_wheel":      "Motorcycle wheels in the water",
-	"lp.sample_kind_car":        "A car in the water",
-	"lp.try_eyebrow":            "Try it now",
-	"lp.try_title":              "No flood photo with you? Measure one of ours",
-	"lp.try_lead":               "Real flood photos from Chennai and Kolkata, with faces and number plates blurred. Tap one and it goes through the live pipeline right now, exactly as your own photo would: Muse Spark Open, SAM 2.1, the checks and a signed certificate.",
-	"lp.sample_alt":             "Flood photo from %s",
-	"lp.try_button":             "Measure this photo",
-	"lp.try_note":               "Each tap is a fresh run, so the result can differ from the last one. A sample is never added to the live map, because its water is years old.",
-	"lp.res_sample_title":       "Measured live from a sample photo",
-	"lp.res_sample_note":        "This photo was taken in %s on %s and measured just now by the live models. It is not added to the map, because the water in it is long gone.",
-	"lp.res_sample_note_nodate": "This photo was taken in %s and measured just now by the live models. It is not added to the map, because the water in it is long gone.",
-	"err.unknown_sample":        "There is no sample photo with that name.",
+	"lp.sample_kind_person": "People standing in the water",
+	"lp.sample_kind_wheel":  "Motorcycle wheels in the water",
+	"lp.sample_kind_car":    "A car in the water",
+	"lp.try_eyebrow":        "Try it now",
+	"lp.try_title":          "No flood photo with you? Measure one of ours",
+	"lp.try_lead":           "Real flood photos from Chennai and Kolkata, with faces and number plates blurred. Tap one and it goes through the live pipeline right now, exactly as your own photo would: Muse Spark Open, SAM 2.1, the checks and a signed certificate.",
+	"lp.sample_alt":         "Flood photo from %s",
+	"lp.try_button":         "Measure this photo",
+	"lp.try_note":           "Each tap is a fresh run, so the result can differ from the last one. A sample is never added to the live map, because its water is years old.",
+	"err.unknown_sample":    "There is no sample photo with that name.",
 
 	// Depth figure on the result card
 	"fig.ankle":         "Ankle",
@@ -158,7 +155,6 @@ var enLanding = map[string]string{
 
 	// Certificate page
 	"lp.vfy_chip_sample": "Sample photo, not on the map",
-	"lp.vfy_dec_sample":  "This was one of this site's sample photos. It was measured live, but it is never added to the map, because the water in it is years old.",
 }
 
 // Added after the first screenshots: the hero's model line and the city

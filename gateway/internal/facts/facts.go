@@ -3,8 +3,10 @@
 //
 //   - routing time from docs/ENGINE.md (the criterion benchmark table),
 //   - synthetic depth accuracy from docs/GEOMETRY.md (the synth-eval block),
-//   - real-photo status from eval/RESULTS_REAL.md (the real-eval block),
-//     counted by method: wheel, person or model estimate,
+//   - real-photo status from eval/RESULTS_REAL.md, counted by method
+//     (wheel, person or model estimate): the first run (the real-eval
+//     block) and the photos chosen for the wheel method (the wheel-eval
+//     block),
 //   - an agent trace excerpt from a recorded run, kept in git as
 //     gateway/internal/facts/testdata/x2.json (a copy of eval/out/x2.json,
 //     which is not in git).
@@ -66,6 +68,15 @@ type Real struct {
 // Measured is the number of photos measured against a wheel or a person.
 func (r Real) Measured() int { return r.Geometry + r.Person }
 
+// Plus adds another run's counts; the date is the later run's.
+func (r Real) Plus(o Real) Real {
+	out := Real{Photos: r.Photos + o.Photos, Geometry: r.Geometry + o.Geometry, Person: r.Person + o.Person, Estimates: r.Estimates + o.Estimates, Date: r.Date, Source: r.Source}
+	if o.Date > out.Date {
+		out.Date = o.Date
+	}
+	return out
+}
+
 // Trace is a recorded agent run.
 type Trace struct {
 	Photo  string               `json:"photo"`
@@ -81,8 +92,15 @@ type Facts struct {
 	Routing Routing `json:"routing"`
 	Depth   Depth   `json:"depth"`
 	Real    Real    `json:"real"`
-	Trace   Trace   `json:"trace"`
+	// RealWheel is the later run on photos chosen for the wheel method.
+	// Its wheel readings include outlines that missed the tyre, which
+	// eval/RESULTS_REAL.md explains; only one followed the tyre.
+	RealWheel Real  `json:"real_wheel"`
+	Trace     Trace `json:"trace"`
 }
+
+// RealAll is every real photo run so far: both runs together.
+func (f Facts) RealAll() Real { return f.Real.Plus(f.RealWheel) }
 
 //go:embed facts.json
 var embedded []byte
@@ -161,31 +179,43 @@ func Extract(root string) (Facts, error) {
 	if err != nil {
 		return f, err
 	}
-	rb, err := block(string(real), "real-eval")
-	if err != nil {
-		return f, fmt.Errorf("RESULTS_REAL.md: %w", err)
+	if f.Real, err = countReal(string(real), "real-eval"); err != nil {
+		return f, err
 	}
-	for _, r := range realResult.FindAllStringSubmatch(rb, -1) {
-		f.Real.Photos++
-		switch upstream.NormalizeMethod(r[1]) {
-		case upstream.MethodWheelGeometry:
-			f.Real.Geometry++
-		case upstream.MethodPersonReference:
-			f.Real.Person++
-		case upstream.MethodModelEstimate:
-			f.Real.Estimates++
-		}
+	if f.RealWheel, err = countReal(string(real), "wheel-eval"); err != nil {
+		return f, err
 	}
-	if f.Real.Photos == 0 {
-		return f, errors.New("RESULTS_REAL.md: no results found")
-	}
-	if dm := realDate.FindStringSubmatch(rb); dm != nil {
-		f.Real.Date = dm[1]
-	}
-	f.Real.Source = "eval/RESULTS_REAL.md"
 
 	f.Trace, err = extractTrace(root)
 	return f, err
+}
+
+// countReal counts one generated block of eval/RESULTS_REAL.md by the
+// method that answered each photo.
+func countReal(text, name string) (Real, error) {
+	r := Real{Source: "eval/RESULTS_REAL.md"}
+	b, err := block(text, name)
+	if err != nil {
+		return r, fmt.Errorf("RESULTS_REAL.md: %w", err)
+	}
+	for _, m := range realResult.FindAllStringSubmatch(b, -1) {
+		r.Photos++
+		switch upstream.NormalizeMethod(m[1]) {
+		case upstream.MethodWheelGeometry:
+			r.Geometry++
+		case upstream.MethodPersonReference:
+			r.Person++
+		case upstream.MethodModelEstimate:
+			r.Estimates++
+		}
+	}
+	if r.Photos == 0 {
+		return r, fmt.Errorf("RESULTS_REAL.md: no results in the %s block", name)
+	}
+	if dm := realDate.FindStringSubmatch(b); dm != nil {
+		r.Date = dm[1]
+	}
+	return r, nil
 }
 
 // TracePath is the recorded run, relative to the repository root.

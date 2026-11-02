@@ -204,6 +204,10 @@ type MeasureRequest struct {
 	Video          *Upload
 	HintReference  string
 	HintDiameterCm *float64
+	// Fresh asks perception for a new scene reading instead of one from its
+	// cache (CONTRACTS.md 1, `fresh`). The gateway sets it for its own
+	// sample photos, so each tap on a sample is a new run.
+	Fresh bool
 }
 
 func measureBody(req MeasureRequest) (*bytes.Buffer, string, error) {
@@ -222,6 +226,9 @@ func measureBody(req MeasureRequest) (*bytes.Buffer, string, error) {
 	}
 	if req.HintDiameterCm != nil {
 		_ = w.WriteField("hint_diameter_cm", strconv.FormatFloat(*req.HintDiameterCm, 'f', -1, 64))
+	}
+	if req.Fresh {
+		_ = w.WriteField("fresh", "true")
 	}
 	if err := w.Close(); err != nil {
 		return nil, "", err

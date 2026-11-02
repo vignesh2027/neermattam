@@ -34,6 +34,7 @@ import httpx
 from PIL import Image
 
 from .adapters import (
+    FRESH_SCENE,
     AnswerRejected,
     ImageQuality,
     ModelError,
@@ -943,9 +944,11 @@ class MuseSparkOpenAdapter:
         The key covers the photo's bytes, the prompt, the model and its settings,
         so a changed prompt is never answered from an old reading. A cached
         answer costs nothing and is marked ``cached``. ``fresh`` skips the cache
-        (the answer there failed its checks). Only an answer whose decision
-        fields pass the checks (``validate.check_scene``) is cached.
+        (the answer there failed its checks), and so does a request that asked
+        for a fresh reading (``adapters.FRESH_SCENE``). Only an answer whose
+        decision fields pass the checks (``validate.check_scene``) is cached.
         """
+        fresh = fresh or FRESH_SCENE.get()
         key = self._scene_key(image)
         hit = None if fresh else self._scene_cache.get(key)
         if hit is None and not fresh and self.scene_cache_dir is not None:

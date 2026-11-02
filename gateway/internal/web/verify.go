@@ -87,6 +87,10 @@ func NewVerifyView(lang, id string, st certs.Stored, res certs.Result, publicURL
 		KeysURL:    "/.well-known/neermattam-keys.json",
 		ReceivedAt: When(lang, st.ReceivedAt),
 	}
+	if st.ReceivedDateOnly {
+		// Only the date is known: midnight UTC is not a time anything happened.
+		v.ReceivedAt = Day(lang, st.ReceivedAt)
+	}
 	v.ReplayCmd = fmt.Sprintf("curl -4 -s %s/api/certificates/%s -o %s.json\n"+
 		"cd perception && uv run python -m neermattam_perception.replay ../%s.json \\\n"+
 		"    --keys %s/.well-known/neermattam-keys.json", base, id, id, id, base)

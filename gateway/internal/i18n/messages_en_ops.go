@@ -190,7 +190,7 @@ var enOps = map[string]string{
 	"dev.route_returns": "Returns a GeoJSON Feature with a LineString:",
 	"dev.f_advisory":    "Always true, and the link to these terms.",
 	"dev.f_geometry":    "The recommended route, as lon,lat pairs.",
-	"dev.f_kind":        "water_aware, or least_bad when no dry route exists.",
+	"dev.f_kind":        "water_aware, or least_bad when no route stays under the vehicle's depth limit.",
 	"dev.f_passable":    "False when every route crosses water over the vehicle's limit; show this to the driver.",
 	"dev.f_distance":    "Length in metres and a rough time in minutes.",
 	"dev.f_depth":       "The deepest known water on the route and its plus or minus, or null.",

@@ -268,3 +268,16 @@ def test_probes_answer_fast_while_a_photo_is_measured(slow_app, easy_case) -> No
     assert done == [200]
     assert probes >= 4
     assert worst < 0.2, f"a probe took {worst * 1000:.0f} ms"
+
+
+def test_fresh_asks_the_scene_model_anew(client_and_store, easy_case) -> None:  # type: ignore[no-untyped-def]
+    """``fresh=true`` (the gateway's sample photos) reaches the scene model on both
+    endpoints; without it the scene model may answer from its cache."""
+    client, _, scene = client_and_store
+    data = jpeg_with_exif(easy_case.image)
+    files = {"image": ("p.jpg", data, "image/jpeg")}
+    assert client.post("/v1/measure", files=files).status_code == 200
+    assert client.post("/v1/measure", files=files, data={"fresh": "true"}).status_code == 200
+    with client.stream("POST", "/v1/measure/stream", files=files, data={"fresh": "true"}) as r:
+        assert r.status_code == 200 and "event: result" in "".join(r.iter_text())
+    assert scene.fresh_seen == [False, True, True]

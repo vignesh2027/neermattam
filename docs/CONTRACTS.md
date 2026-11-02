@@ -10,6 +10,7 @@ Multipart form:
 - `video` (mp4/mov, optional; used for velocity)
 - `hint_reference` (optional: `two_wheeler_wheel`, `car_wheel`, `auto_wheel`, `kerb`, `person`)
 - `hint_diameter_cm` (optional float, when the reporter knows the wheel size)
+- `fresh` (optional, `true` or `false`, default `false`): when `true`, the scene model reads the photo anew instead of answering from the service's scene cache, which is keyed by the photo's bytes, the prompt and the model settings. Without it a second upload of the same file reuses the first scene reading (the trace's `scene` step then says "(cached reading)"). The gateway sends `true` for its own sample photos, so each tap on a sample gets a new scene reading as well as new outlines and checks. A fresh reading replaces the cached one. (SAM's image embedding may still be reused for the same photo; it is a deterministic computation, not a stored answer.)
 
 Response 200:
 ```json
@@ -388,8 +389,8 @@ Every page takes `?lang=` (one of `en`, `ta`, `hi`, `te`, `kn`, `ml`, `bn`, `mr`
 
 ### Pages (HTML, rendered on the server)
 - `GET /`: landing page with a live preview of the selected city.
-- `GET /map?city=&at=lat,lon&replay=michaung`: the live map, real reports only, with the city's Open-Meteo rainfall, a strip of every city (real reports in 24 hours, rainfall, measured photos; one tap to switch), and the measured archival photos as their own layer. With `at` and no `city`, the city holding the point is chosen. `replay=michaung` (Chennai, on a gateway with `DEMO=1`) shows the simulated replay of Cyclone Michaung instead, labelled throughout.
-- `GET /report?city=&at=`, `POST /report`: report water. The point must lie in the selected city (or, with no city sent, in any covered city).
+- `GET /map?city=&at=lat,lon&replay=michaung`: the live map, real reports only, with the city's Open-Meteo rainfall, a strip of every city (real reports in 24 hours, rainfall, archival photos; one tap to switch), and the archival photos as their own layer. With `at` and no `city`, the city holding the point is chosen. `replay=michaung` (Chennai, on a gateway with `DEMO=1`) shows the simulated replay of Cyclone Michaung instead, labelled throughout.
+- `GET /report?city=&at=`, `POST /report`: report water. The point must lie in the selected city (or, with no city sent, in any covered city). With `Accept: text/event-stream` the answer is server-sent events: `stage`, `step`, then `done` (or `error`). `done` carries `status`, the rendered card in `html`, `trace_html`, and `skipped`, a map from a stage the report never entered (`verify`, `fuse`) to the reason in the page language: a sample skips both, a photo with no depth skips both, a refused report skips `fuse`. A sample (form field `sample`) is sent to perception with `fresh=true`.
 - `GET /route?city=&from=&to=&vehicle=&replay=`, `GET /route/plan` (JSON: `summary_html` and `route`): water-aware routes inside one city.
 - `GET /alerts?city=`: "Watch my street": pick a point or the last planned route and a vehicle, then turn on notifications.
 - `GET /control?city=&cell=`: the control room. Needs the `nm_ctl` cookie; without it, `GET /control` shows the key entry page. `POST /control/login` (form field `key`) sets the cookie, `POST /control/logout` clears it. `GET /control/login` and `GET /control/logout` answer 303 to `/control` (keeping `lang`). When `CONTROL_ROOM_KEY` is unset the keyed control room is off and only the demo exists.
@@ -404,6 +405,7 @@ Every page takes `?lang=` (one of `en`, `ta`, `hi`, `te`, `kn`, `ml`, `bn`, `mr`
 - `GET /about`: how it works, the hackathon it was built in, the repository and the deployed commit (read from `BUILD_INFO_PATH`, default `/opt/neermattam/BUILD_INFO`).
 - Any other path: a 404 page in the page language with links to the main pages; paths under `/api/`, `/v1/`, `/webhooks/`, `/.well-known/` and `/static/`, and requests whose `Accept` names JSON and not HTML, get the JSON error with `code` `not_found`.
 - `GET /sw.js`: the service worker that shows push notifications (served from the root so its scope covers the site).
+- `GET /robots.txt`: `User-agent: *` then `Allow: /`, as plain text.
 
 ### Public JSON API (rate limited per client address)
 - `GET /api/cities`: `{"cities": [{"id", "name", "bbox", "centre", "cells", "routing": "ready|loading|failed", "simulated_scenario": false, "replay_available"}], "default": "chennai"}`.

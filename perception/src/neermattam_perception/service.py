@@ -314,6 +314,7 @@ def create_app(
         hint_reference: str | None,
         hint_diameter_cm: float | None,
         on_step: Callable[[TraceStep], None] | None = None,
+        fresh: bool = False,
     ) -> MeasureResponse:
         try:
             resp = await pipeline.measure(
@@ -322,6 +323,7 @@ def create_app(
                 hint_reference=hint_reference,
                 hint_diameter_cm=hint_diameter_cm,
                 on_step=on_step,
+                fresh_scene=fresh,
             )
         except ModelError as exc:
             raise HTTPException(503, f"model unavailable: {exc}") from exc
@@ -338,9 +340,10 @@ def create_app(
         video: Annotated[UploadFile | None, File()] = None,
         hint_reference: Annotated[str | None, Form()] = None,
         hint_diameter_cm: Annotated[float | None, Form()] = None,
+        fresh: Annotated[bool, Form()] = False,
     ) -> JSONResponse:
         img, vid = await inputs(image, video, hint_reference, hint_diameter_cm)
-        resp = await run(img, vid, hint_reference, hint_diameter_cm)
+        resp = await run(img, vid, hint_reference, hint_diameter_cm, fresh=fresh)
         headers = {}
         if resp.captured_at:
             headers["X-Captured-At"] = resp.captured_at
@@ -352,6 +355,7 @@ def create_app(
         video: Annotated[UploadFile | None, File()] = None,
         hint_reference: Annotated[str | None, Form()] = None,
         hint_diameter_cm: Annotated[float | None, Form()] = None,
+        fresh: Annotated[bool, Form()] = False,
     ) -> StreamingResponse:
         img, vid = await inputs(image, video, hint_reference, hint_diameter_cm)
         queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
@@ -366,7 +370,7 @@ def create_app(
 
         async def work() -> None:
             try:
-                resp = await run(img, vid, hint_reference, hint_diameter_cm, on_step)
+                resp = await run(img, vid, hint_reference, hint_diameter_cm, on_step, fresh)
                 queue.put_nowait(("result", json.dumps(resp.model_dump())))
             except HTTPException as exc:
                 body = {"status": exc.status_code, "detail": exc.detail}

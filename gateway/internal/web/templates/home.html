@@ -246,7 +246,7 @@
       </div>
       <ul class="lp-num-grid" role="list">
         <li class="is-field"><b class="lp-big">{{t "lp.n_field_big"}}</b><h3>{{t "lp.n_field"}}</h3><p>{{t "lp.n_field_p"}}</p></li>
-        <li><b class="lp-big num">{{.Real.Measured}}<span> / {{.Real.Photos}}</span></b><h3>{{t "lp.n_real"}}</h3><p>{{if eq .Real.Geometry 0}}{{t "lp.n_real_p" .Real.Person .Real.Estimates}}{{else}}{{t "lp.n_real_p2" .Real.Geometry .Real.Person .Real.Estimates}}{{end}}</p><p class="lp-src">{{t "lp.n_src_dated" .Real.Source .Real.Date}}</p></li>
+        {{with .RealAll}}<li><b class="lp-big num">{{.Photos}}</b><h3>{{t "lp.n_real"}}</h3><p>{{t "about.lim3_all" .Photos .Person .Geometry}}</p><p class="lp-src">{{t "home.source" .Source}}</p></li>{{end}}
         <li><b class="lp-big num">{{.Depth.MAECm}}<span> cm</span></b><h3>{{t "lp.n_synth" .Depth.Cases}}</h3><p>{{t "lp.n_synth_p" .Depth.Usable .Depth.Within1}}</p><p class="lp-src">{{t "home.source" .Depth.Source}}</p></li>
         <li><b class="lp-big num">{{.Routing.DryMs}}</b><h3>{{t "lp.n_route" .Routing.Trip}}</h3><p>{{t "lp.n_route_p" .Routing.Readings2000Ms .Routing.Machine}}</p><p class="lp-src">{{t "home.source" .Routing.Source}}</p></li>
       </ul>

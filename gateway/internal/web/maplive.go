@@ -19,6 +19,9 @@ type ReplayView struct {
 	On        bool   // the page shows it
 	OnHref    string // the same page with the replay on
 	OffHref   string // the same page on the live map
+	// DemoHref opens the replay on the map from any city, when this
+	// gateway has it; an empty city offers it instead of a bare map.
+	DemoHref string
 }
 
 // CityStatus is one city in the map's city strip: real data only.

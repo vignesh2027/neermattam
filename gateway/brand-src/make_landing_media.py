@@ -14,6 +14,9 @@ git: eval/real_photos.py downloads the photos and writes eval/out/). Writes:
 * internal/web/static/showcase/: the showcase photo (faces pixelated as the
   service's own overlay has them), the measured overlay without its text
   label, a close-up of the measured person, and the verifier's images;
+* internal/web/static/showcase/<run>-stage*.webp: the whole photo at full
+  size and at 960 px for the landing hero, with the shapes of the run as
+  vectors in showcase.json's "stage" (see stage() below);
 * internal/web/showcase.json: the run itself (its agent steps, result and
   credits), which the landing page renders. Swap the run by changing RUN.
 

@@ -36,6 +36,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .adapters import (
+    FRESH_SCENE,
     AnswerRejected,
     MaskModel,
     MaskResult,
@@ -984,12 +985,15 @@ class Pipeline:
         hint_diameter_cm: float | None = None,
         on_step: Callable[[TraceStep], None] | None = None,
         on_flow: Callable[[FlowResult], None] | None = None,
+        fresh_scene: bool = False,
     ) -> MeasureResponse:
         """Measure one photo (or a video's key frame).
 
         ``on_step`` is called with every trace step the moment it is recorded,
         in the order the steps happen (the streaming endpoint uses it). With a
         signer, the response carries a signed certificate of the measurement.
+        ``fresh_scene`` makes the scene model read the photo anew instead of
+        answering from its cache (the ``fresh`` form field).
         """
         rec = _Record()
         key = image if image is not None else (video.key_frame if video is not None else None)
@@ -1006,6 +1010,7 @@ class Pipeline:
         flow_token = _FLOW_SINK.set(on_flow)
         pending: list[asyncio.Task[Any]] = []
         pending_token = _PENDING.set(pending)
+        fresh_token = FRESH_SCENE.set(fresh_scene)
         try:
             return await self._measure(
                 image=image,
@@ -1018,6 +1023,7 @@ class Pipeline:
             for task in pending:  # work for an answer already given
                 if not task.done():
                     task.cancel()
+            FRESH_SCENE.reset(fresh_token)
             _PENDING.reset(pending_token)
             _FLOW_SINK.reset(flow_token)
             _RECORD.reset(token)
