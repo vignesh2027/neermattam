@@ -384,14 +384,6 @@ func (a *App) homePage(w http.ResponseWriter, r *http.Request) {
 	h := &web.HomeView{Facts: &a.Facts, Trace: web.NewHomeTrace(p.Lang, a.Facts.Trace),
 		Showcase: web.NewShowcaseView(p.Lang, loadShowcase()), Samples: web.SampleCards(p.Lang)}
 	h.India = a.indiaView(r.Context(), p.Lang, p.City.ID)
-	ctx, cancel := context.WithTimeout(r.Context(), 1200*time.Millisecond)
-	defer cancel()
-	if e, err := a.cellsForCity(ctx, p.City.ID); err == nil {
-		h.Preview = e.Preview()
-	} else {
-		c, _ := a.Cities.Get(p.City.ID)
-		h.Preview = web.NewPreview(nil, web.FrameFor(c.ID, c.BBox.MinLon, c.BBox.MinLat, c.BBox.MaxLon, c.BBox.MaxLat))
-	}
 	p.Home = h
 	a.render(w, http.StatusOK, "home", p)
 }

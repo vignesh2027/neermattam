@@ -172,3 +172,68 @@ func TestSampleCards(t *testing.T) {
 		}
 	}
 }
+
+// The hero replays the recorded run: one log line for the scene reading,
+// one per check and one for the result, each later than the last, and the
+// boxes the agent asked SAM 2.1 for, each ending the way the run ended it.
+func TestHeroReplay(t *testing.T) {
+	s, err := LoadShowcase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Stage.Width != 1632 || s.Stage.Height != 918 || s.Stage.Water == "" || s.Stage.Person == "" {
+		t.Fatalf("stage %+v", s.Stage)
+	}
+	if _, err := os.Stat("static/" + s.Stage.Photo); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range i18n.Languages {
+		v := NewShowcaseView(l.Code, s)
+		if v.Stage == nil || len(v.Beats) != 7 || v.Beats[0].Kind != "scene" || v.Beats[6].Kind != "result" {
+			t.Fatalf("%s: beats %+v", l.Code, v.Beats)
+		}
+		var tones []string
+		for i, b := range v.Beats {
+			if b.Title == "" || strings.HasPrefix(b.Title, "lp.") || strings.Contains(b.Note, "%!") {
+				t.Fatalf("%s: beat %d %+v", l.Code, i, b)
+			}
+			if i > 0 && b.At <= v.Beats[i-1].At {
+				t.Fatalf("%s: beat %d does not come after the one before", l.Code, i)
+			}
+			tones = append(tones, b.Tone)
+		}
+		if got := strings.Join(tones[1:6], ","); got != "refine,ok,refine,refine,stop" {
+			t.Fatalf("%s: verdicts %s", l.Code, got)
+		}
+		if !strings.Contains(v.Beats[0].Words, "knee level") || !strings.Contains(v.Beats[5].Words, "mudguard") {
+			t.Fatalf("%s: the model's own words are missing", l.Code)
+		}
+		ends := map[string]int{}
+		for _, b := range v.Stage.Boxes {
+			ends[b.Kind+"/"+b.End]++
+			if b.W <= 0 || b.H <= 0 || b.Out == "" {
+				t.Fatalf("%s: box %+v", l.Code, b)
+			}
+		}
+		// Water: the first box replaced, the second accepted. Wheels: the
+		// second vehicle's search found nothing, and the first vehicle's
+		// three boxes ended with the verifier giving up.
+		if ends["water/dim"] != 1 || ends["water/done"] != 1 || ends["wheel/reject"] != 2 || ends["wheel/dim"] != 2 {
+			t.Fatalf("%s: box ends %v", l.Code, ends)
+		}
+		if v.Stage.WaterAt != v.Beats[2].At || v.Stage.PersonAt != v.Beats[6].At {
+			t.Fatalf("%s: water at %s, person at %s", l.Code, v.Stage.WaterAt, v.Stage.PersonAt)
+		}
+		if len(v.Shots) != 5 || v.Shots[4].Tone != "stop" || v.Shots[4].Try != 3 {
+			t.Fatalf("%s: shots %+v", l.Code, v.Shots)
+		}
+		// 46 cm is past the knee (45 cm) and short of mid-thigh.
+		under := map[int]bool{}
+		for _, m := range v.Gauge.Marks {
+			under[m.Cm] = m.Under
+		}
+		if len(v.Gauge.Marks) != 4 || !under[45] || under[65] || v.Gauge.Fill != "41.45%" {
+			t.Fatalf("%s: gauge %+v", l.Code, v.Gauge)
+		}
+	}
+}

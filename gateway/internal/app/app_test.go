@@ -578,9 +578,10 @@ func TestPagesRender(t *testing.T) {
 	h := newHarness(t, map[string]string{"DEMO": "1"}, true)
 	h.app.Origins.Mark("8a618c4e2d47fff", true)
 	pages := map[string][]string{
-		"/": {"Forecasts say where India will flood.", "Measure a photo now", "See the live map", "Built on Meta", "make it work anywhere in India", "Muse Spark Open", "SAM 2.1",
-			"Who it is for", "Honest numbers", "Advisory, always", "pv-cells", "Watch the models check each other", "Live across India", "Visakhapatnam",
-			"/report?sample=nandanam#try", "Vijayingarsal", "CC0 1.0", "46<small>cm</small>", "Written, not running"},
+		"/": {"How deep is the water", "on your street?", "Try it on a photo", "See the live map", "Recorded run, 30 Oct 2026", "What the agent did", "Muse Spark Open", "SAM 2.1",
+			"Two Meta models check each other", "Too shallow is refused", "Who it serves", "Honest numbers", "Advisory, always", "Seven cities", "Visakhapatnam",
+			"/report?sample=nandanam#try", "Vijayingarsal", "CC0 1.0", "46<small>cm</small>", "Written, not running", "Baseten", "Open-Meteo",
+			`class="hx-person"`, "Built solo, in the open, during the hackathon"},
 		"/map":    {"Chennai flood depth, live", "Simulated scenario", "Report water here", "Advisory only", "maplibre-gl-5.6.0/maplibre-gl"},
 		"/report": {"Measure the water from one photo", "Use my location", "12 MB", "30 seconds", "Measure one of ours", `name="sample" value="kolkata-car"`, "Dibakar Roy, Unsplash License"},
 		"/route":  {"Route around the water", "Kodambakkam station", "Guindy station", "SIPCOT IT Park, Siruseri", "Two-wheeler"},

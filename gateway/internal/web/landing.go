@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,6 +63,23 @@ type Showcase struct {
 		PersonBox [4]float64 `json:"person_box"`
 	} `json:"images"`
 	Steps []ShowcaseStep `json:"steps"`
+	Stage Stage          `json:"stage"`
+}
+
+// Stage is the hero's photo at full size and the run's shapes in that
+// photo's own pixels: the verified water and the measured person, traced
+// from the service's overlay, and the lines it drew. The boxes the agent
+// asked SAM 2.1 for are read from the steps themselves.
+type Stage struct {
+	Photo      string `json:"photo"`
+	PhotoSmall string `json:"photo_small"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	Water      string `json:"water"`
+	Person     string `json:"person"`
+	PersonBox  [4]int `json:"person_box"`
+	Waterline  [3]int `json:"waterline"`   // x0, x1, y
+	HeightLine [3]int `json:"height_line"` // x, y0, y1
 }
 
 // ShowcaseStep is one agent step with the image the verifier was shown.
@@ -103,6 +122,236 @@ type ShowcaseView struct {
 	Key                                            []ShowcaseStepView // the steps drawn on the timeline
 	Total, Checks, Refines, GiveUps, Accepts       int
 	Figure                                         *DepthFigure
+	// The hero's replay of the run: the stage, the agent's log beside it,
+	// the gauge under the result, and the verifier's images for the
+	// section on how the models check each other.
+	Stage       *StageView
+	Beats       []Beat
+	Gauge       HeroGauge
+	Shots       []Shot
+	Height      string // the stature the person was taken as, in cm
+	HeightSigma string
+	EstimateAt  string // when the result appears, as a CSS time
+}
+
+// StageView is the stage ready to draw: the photo, and every shape with
+// the moment it appears and the moment it is dimmed, struck out or done.
+type StageView struct {
+	Photo, PhotoSmall string
+	W, H              int
+	Water, Person     string
+	Waterline         [3]int
+	HeightLine        [3]int
+	Boxes             []StageBox
+	WaterAt, PersonAt string // CSS times
+	// The depth tag beside the measured person, as CSS percentages.
+	TagLeft, TagTop string
+	ScanEnd         string
+}
+
+// StageBox is one box the agent asked SAM 2.1 for.
+type StageBox struct {
+	X, Y, W, H int
+	Kind       string // water or wheel
+	In, Out    string // CSS times
+	End        string // dim (a newer box replaced it), reject or done
+}
+
+// Beat is one line of the agent's log in the hero.
+type Beat struct {
+	Kind    string // scene, verify or result
+	Model   string
+	Title   string
+	Verdict string
+	Tone    string
+	Words   string // the model's own words, in English
+	Note    string
+	At      string // CSS time
+}
+
+// HeroGauge is the compact depth gauge under the result: the depth and its
+// band on a ruler from 0 to Max cm, with body landmarks.
+type HeroGauge struct {
+	Max    int
+	Fill   string // CSS percentages
+	BandLo string
+	BandH  string
+	Marks  []GaugeMark
+	Aria   string
+	FillAt string
+}
+
+// GaugeMark is a body landmark on the gauge.
+type GaugeMark struct {
+	Label string
+	Cm    int
+	Pos   string
+	Under bool
+	Up    bool // labelled above the gauge, so neighbours never collide
+}
+
+// Shot is one image the verifier was shown, with its verdict.
+type Shot struct {
+	Thumb, Alt, Target, Verdict, Tone string
+	Try                               int
+}
+
+// beatGap is the time between two lines of the hero's log, in seconds.
+const (
+	beatStart = 0.5
+	beatGap   = 1.05
+)
+
+func cssTime(s float64) string { return fmt.Sprintf("%.2fs", s) }
+
+var boxRe = regexp.MustCompile(`box \[(\d+),(\d+),(\d+),(\d+)\]`)
+
+// heroReplay fills the stage, the log, the gauge and the verifier's
+// images from the run.
+func (v *ShowcaseView) heroReplay(lang string, s *Showcase) {
+	tr := func(k string, a ...any) string { return i18n.T(lang, k, a...) }
+	st := s.Stage
+	if st.Photo == "" || st.Width == 0 {
+		return
+	}
+	beatOf := make([]int, len(s.Steps)) // the beat each step belongs to
+	at := func(b int) float64 { return beatStart + float64(b)*beatGap }
+	b := -1
+	tries := map[string]int{}
+	for i, step := range s.Steps {
+		tv := v.Steps[i].TraceStepView
+		switch step.Step {
+		case "scene":
+			b++
+			note := ""
+			if v.Estimate != "" {
+				note = tr("lp.b_scene_note", v.Estimate, v.EstimateSigma)
+			}
+			v.Beats = append(v.Beats, Beat{Kind: "scene", Model: "Muse Spark Open", Title: tr("lp.b_scene"), Words: v.EstimateBasis, Note: note, Tone: "neutral"})
+		case "verify":
+			b++
+			kind := targetKind(step.Target)
+			title := tr("lp.b_check_water")
+			if kind == "wheel" {
+				title = tr("lp.b_check_wheel")
+			} else if kind == "person" {
+				title = tr("lp.b_check_person")
+			}
+			v.Beats = append(v.Beats, Beat{Kind: "verify", Model: "Muse Spark Open", Title: title, Verdict: tv.Decision, Tone: tv.Tone, Words: modelWords(step.Output)})
+			tries[kind]++
+			if step.Thumb != "" {
+				v.Shots = append(v.Shots, Shot{Thumb: step.Thumb, Alt: tr("lp.thumb_alt_"+kind, i+1), Target: tr("lp.t_" + kind), Try: tries[kind], Verdict: tv.Decision, Tone: tv.Tone})
+			}
+		case "estimate":
+			b++
+			note := ""
+			if v.Method == "person" && v.Height != "" {
+				note = tr("lp.b_result_note_person", v.Height, v.HeightSigma)
+			}
+			v.Beats = append(v.Beats, Beat{Kind: "result", Model: tr("lp.b_geometry"), Title: tr("lp.b_result_" + v.Method), Note: note, Tone: "ok"})
+		}
+		beatOf[i] = max(b, 0)
+	}
+	for i := range v.Beats {
+		v.Beats[i].At = cssTime(at(i))
+	}
+	last := at(len(v.Beats) - 1)
+	sv := &StageView{
+		Photo: st.Photo, PhotoSmall: st.PhotoSmall, W: st.Width, H: st.Height,
+		Water: st.Water, Person: st.Person, Waterline: st.Waterline, HeightLine: st.HeightLine,
+		PersonAt: cssTime(last), ScanEnd: cssTime(at(1)),
+		TagLeft: pctf(float64(st.PersonBox[2]+14) / float64(st.Width)), TagTop: pctf(float64(st.Waterline[2]) / float64(st.Height)),
+	}
+	// Boxes, in the order the agent asked for them. Each appears just after
+	// the log line that asked for it, and ends when a newer box for the same
+	// target replaces it, when the verifier gives up on the target (struck
+	// out), or when it accepts the outline (done).
+	type pending struct {
+		box    StageBox
+		target string
+		step   int
+	}
+	var all []pending
+	for i, step := range s.Steps {
+		if step.Step != "segment" {
+			continue
+		}
+		kind := targetKind(step.Target)
+		if kind != "water" && kind != "wheel" {
+			continue
+		}
+		m := boxRe.FindStringSubmatch(step.Input)
+		if m == nil {
+			continue
+		}
+		var c [4]int
+		for j := range c {
+			c[j], _ = strconv.Atoi(m[j+1])
+		}
+		in := at(beatOf[i]) + 0.45
+		all = append(all, pending{box: StageBox{X: c[0], Y: c[1], W: c[2] - c[0], H: c[3] - c[1], Kind: kind, In: cssTime(in)}, target: step.Target, step: i})
+		if strings.HasPrefix(strings.ToLower(step.Decision), "give up") {
+			all[len(all)-1].box.End, all[len(all)-1].box.Out = "reject", cssTime(in+0.7)
+		}
+	}
+	for i := range all {
+		p := &all[i]
+		if p.box.End != "" {
+			continue
+		}
+		for _, q := range all[i+1:] {
+			if q.target == p.target {
+				p.box.End, p.box.Out = "dim", q.box.In
+				break
+			}
+		}
+		if p.box.End != "" {
+			continue
+		}
+		// The last box for its target: what did the verifier say after it?
+		for j := p.step + 1; j < len(s.Steps); j++ {
+			if s.Steps[j].Step != "verify" || s.Steps[j].Target != p.target {
+				continue
+			}
+			switch v.Steps[j].Tone {
+			case "stop":
+				p.box.End, p.box.Out = "reject", cssTime(at(beatOf[j]))
+			case "ok":
+				p.box.End, p.box.Out = "done", cssTime(at(beatOf[j]))
+				if p.box.Kind == "water" {
+					sv.WaterAt = p.box.Out
+				}
+			}
+		}
+		if p.box.End == "" {
+			p.box.End, p.box.Out = "dim", cssTime(last)
+		}
+	}
+	for _, p := range all {
+		sv.Boxes = append(sv.Boxes, p.box)
+	}
+	if sv.WaterAt == "" {
+		sv.WaterAt = cssTime(last)
+	}
+	v.Stage = sv
+	v.EstimateAt = cssTime(last + 0.5)
+
+	// The gauge: 0 to just past the waist, wider for deeper water.
+	depth, sigma := s.Result.DepthCm, s.Result.SigmaCm
+	maxCm := 110.0
+	if depth+sigma > 100 {
+		maxCm = math.Ceil((depth+sigma+15)/10) * 10
+	}
+	pos := func(cm float64) string { return pctf(math.Max(0, math.Min(1, cm/maxCm))) }
+	g := HeroGauge{Max: int(maxCm), Fill: pos(depth), BandLo: pos(depth - sigma), BandH: pctf(math.Min(1, (depth+sigma)/maxCm) - math.Max(0, (depth-sigma)/maxCm)), Aria: v.Figure.Aria, FillAt: cssTime(last + 0.7)}
+	for _, m := range landmarks {
+		cm := m.frac * adultCm
+		if cm > maxCm || m.key == "chest" && maxCm < 120 {
+			continue
+		}
+		g.Marks = append(g.Marks, GaugeMark{Label: tr("fig." + m.key), Cm: int(math.Round(cm)), Pos: pos(cm), Under: depth >= cm, Up: len(g.Marks)%2 == 1})
+	}
+	v.Gauge = g
 }
 
 // Verdict is one of the verifier's decisions, as a chip.
@@ -190,7 +439,8 @@ func NewShowcaseView(lang string, s *Showcase) *ShowcaseView {
 	case upstream.MethodPersonReference:
 		v.Method, v.MethodLabel = "person", tr("result.person_chip")
 		if s.Result.HeightCm != nil && s.Result.HeightSigmaCm != nil {
-			v.Ruler = tr("lp.sc_ruler_person", fmt.Sprintf("%.0f", *s.Result.HeightCm), fmt.Sprintf("%.0f", *s.Result.HeightSigmaCm))
+			v.Height, v.HeightSigma = fmt.Sprintf("%.0f", *s.Result.HeightCm), fmt.Sprintf("%.0f", *s.Result.HeightSigmaCm)
+			v.Ruler = tr("lp.sc_ruler_person", v.Height, v.HeightSigma)
 		}
 	case upstream.MethodWheelGeometry:
 		v.Method, v.MethodLabel = "geometry", tr("result.measured_from", strings.ToLower(tr("ref.wheel")))
@@ -234,6 +484,7 @@ func NewShowcaseView(lang string, s *Showcase) *ShowcaseView {
 	est := v.Method == "estimate"
 	f := NewDepthFigure(lang, s.Result.DepthCm, s.Result.SigmaCm, est)
 	v.Figure = &f
+	v.heroReplay(lang, s)
 	return v
 }
 
@@ -310,6 +561,13 @@ type IndiaView struct {
 	Cities    []IndiaCity
 	Photos    []IndiaPhoto
 	TotalRain string
+	// Reports is the number of real reports in the last 24 hours across
+	// every city, and ReportsKnown says whether any city gave a count.
+	Reports      int
+	ReportsKnown bool
+	// ReplayHref opens the simulated replay of a past flood, when this
+	// gateway has one; the landing offers it when no city has reports.
+	ReplayHref string
 }
 
 // IndiaCityRef is what the page knows about a city without the live

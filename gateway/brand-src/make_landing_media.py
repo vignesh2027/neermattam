@@ -233,10 +233,94 @@ def showcase():
     SHOW_JSON.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
 
 
+def svg_path(contour, k):
+    """An OpenCV contour as an SVG path in full-photo pixels."""
+    pts = contour.reshape(-1, 2) * k
+    return "M" + " ".join(f"{x:.0f} {y:.0f}" for x, y in pts) + "Z"
+
+
+def stage():
+    """The landing page's hero stage: the whole photo at full size with faces
+    pixelated, and the run's shapes as vectors in the photo's own pixels, so
+    the page can draw them one by one over a sharp photo:
+
+    * water: the verified water mask, traced from the service's overlay;
+    * person: the measured man's outline, traced the same way;
+    * waterline and height: the cyan and yellow lines the overlay draws.
+
+    The boxes the agent asked SAM 2.1 for are in the trace itself, in the
+    same pixels; the page reads them from there.
+    """
+    org = Image.open(EVAL / "photos" / f"{RUN}.jpg").convert("RGB")
+    W, H = org.size
+    ov = Image.open(EVAL / "out" / f"{RUN}_overlay.png").convert("RGB")
+    w, h = ov.size
+    k = W / w
+    # Faces: the overlay's blur boxes are fractions, so they apply to the
+    # full-size photo too.
+    photo = pixelate(org, blur_boxes(RUN) + EXTRA.get(RUN, []))
+    SHOW_OUT.mkdir(parents=True, exist_ok=True)
+    photo.save(SHOW_OUT / f"{RUN}-stage.webp", "WEBP", quality=80, method=6)
+    fit(photo, 960).save(SHOW_OUT / f"{RUN}-stage-960.webp", "WEBP", quality=78, method=6)
+
+    v = np.asarray(ov).astype(int)
+    o = np.asarray(org.resize((w, h), Image.LANCZOS)).astype(int)
+    d = v - o
+    tint = ((d[..., 2] - d[..., 0] > 40) & (np.abs(d).sum(2) > 60)).astype(np.uint8)
+    cyan = (v[..., 1] > 150) & (v[..., 2] > 150) & (v[..., 0] < 100) & (np.abs(d).sum(2) > 60)
+    yellow = (v[..., 0] > 200) & (v[..., 1] > 180) & (v[..., 2] < 80) & (np.abs(d).sum(2) > 60)
+
+    # The water: the biggest tinted region, smoothed a little.
+    water = cv2.morphologyEx(tint, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    water[:, : w // 8] = 0  # the measured man's outline sits at the far left
+    cs, _ = cv2.findContours(water, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    big = max(cs, key=cv2.contourArea)
+    water_d = svg_path(cv2.approxPolyDP(big, 1.2, True), k)
+
+    # The man: the violet outline at the far left, filled, then traced.
+    man = tint.copy()
+    ys, xs = np.nonzero(yellow[:, : w // 8])
+    col = int(np.median(xs))  # the height line runs down his middle
+    man[:, col + 40:] = 0
+    man[cyan] = 0
+    cy = np.nonzero(cyan[:, : w // 4])[0]
+    man[cy.min() - 1:, :] = 0  # the waterline is drawn on its own
+    man = cv2.morphologyEx(man, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    # The overlay draws the outline as a thin line: fill each row between
+    # its outermost pixels for the silhouette, then trace that once.
+    solid = np.zeros_like(man)
+    for y in np.unique(np.nonzero(man)[0]):
+        xs = np.nonzero(man[y])[0]
+        solid[y, xs.min():xs.max() + 1] = 1
+    man = cv2.morphologyEx(solid, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    cs, _ = cv2.findContours(man, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    body = max(cs, key=cv2.contourArea)
+    person_d = svg_path(cv2.approxPolyDP(body, 0.8, True), k)
+    bx, by, bw, bh = cv2.boundingRect(body)
+
+    ys, xs = np.nonzero(cyan[:, : w // 4])
+    waterline = [round(xs.min() * k), round(xs.max() * k), round(np.median(ys) * k)]
+    # The yellow cross: its long stroke is the height line, its short one
+    # the shoulder line.
+    ys, xs = np.nonzero(yellow[:, : w // 8])
+    height = [round(col * k), round(ys.min() * k), round(ys.max() * k)]
+
+    return {
+        "photo": f"showcase/{RUN}-stage.webp", "photo_small": f"showcase/{RUN}-stage-960.webp",
+        "width": W, "height": H,
+        "water": water_d, "person": person_d,
+        "person_box": [round(bx * k), round(by * k), round((bx + bw) * k), round((by + bh) * k)],
+        "waterline": waterline, "height_line": height,
+    }
+
+
 def main():
     for pid in SAMPLES:
         print(pid, sample(pid))
     showcase()
+    data = json.loads(SHOW_JSON.read_text())
+    data["stage"] = stage()
+    SHOW_JSON.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
     print("showcase written")
 
 
