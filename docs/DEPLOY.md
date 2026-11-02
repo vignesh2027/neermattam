@@ -39,7 +39,7 @@ The seven road extracts, `<city>-roads.osm.pbf` for Chennai, Mumbai, Bengaluru, 
 
 ## What runs in the container
 
-`app.py` defines one class, `Web`, with `min_containers=1` and `max_containers=1`, so one container is always warm and visitors never wait for a cold start. It asks for 2 CPU cores and 5 GiB of memory, with a hard limit of 8 GiB, and accepts up to 400 concurrent requests (`@modal.concurrent`), since every open map holds a live stream. On start it runs the launcher, which starts:
+`app.py` defines one class, `Web`, with `min_containers=1` and `max_containers=1`, so one container is always warm and visitors never wait for a cold start. It asks for 8 CPU cores (perception runs SAM 2.1 with 8 threads; at 2 cores a live measurement ran out of its 55 s budget) and 5 GiB of memory, with a hard limit of 8 GiB, and accepts up to 400 concurrent requests (`@modal.concurrent`), since every open map holds a live stream. On start it runs the launcher, which starts:
 
 | Process | Address | Notes |
 |---|---|---|
@@ -94,7 +94,7 @@ Settings read by `app.py` when you run `modal deploy` (export them first to chan
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `NEERMATTAM_WEB_CPU` | `2` | CPU cores for the container |
+| `NEERMATTAM_WEB_CPU` | `8` | CPU cores for the container |
 | `NEERMATTAM_WEB_MEMORY_MB`, `NEERMATTAM_WEB_MEMORY_LIMIT_MB` | `5120`, `8192` | Memory request and hard limit |
 | `NEERMATTAM_WEB_PROXY_HOPS` | `1` | Trusted `X-Forwarded-For` entries, counted from the right |
 | `NEERMATTAM_WEB_DAILY_CAP` | `150` | Perception calls per day across all visitors |

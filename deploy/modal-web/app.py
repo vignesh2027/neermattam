@@ -33,7 +33,7 @@ SPACE = Path(__file__).resolve().parent.parent / "hf-space"
 MARKER = "# ---- Hugging Face Space only below this line ----"
 
 # Read when the app is deployed, so a redeploy can change them.
-CPU = float(os.environ.get("NEERMATTAM_WEB_CPU", "2"))
+CPU = float(os.environ.get("NEERMATTAM_WEB_CPU", "8"))
 MEMORY_MB = int(os.environ.get("NEERMATTAM_WEB_MEMORY_MB", "5120"))
 MEMORY_LIMIT_MB = int(os.environ.get("NEERMATTAM_WEB_MEMORY_LIMIT_MB", "8192"))
 # How many X-Forwarded-For entries, counted from the right, were added by

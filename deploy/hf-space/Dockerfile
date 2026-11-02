@@ -99,8 +99,8 @@ ENV DEMO=1 \
     NEERMATTAM_MODELS_DIR=/opt/neermattam/models \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
-    OMP_NUM_THREADS=2 \
-    MKL_NUM_THREADS=2 \
+    OMP_NUM_THREADS=8 \
+    MKL_NUM_THREADS=8 \
     ENGINE_LOG_FORMAT=json
 
 # ---- Hugging Face Space only below this line ----
