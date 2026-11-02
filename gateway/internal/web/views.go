@@ -168,7 +168,7 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 	case report.StatusFused:
 		v.Title = tr("result.title_fused")
 	case report.StatusSample:
-		v.Title = tr("lp.res_sample_title")
+		v.Title = tr("result.sample_title")
 	case report.StatusUnusable:
 		v.Title = tr("result.title_unusable")
 		if o.Source == "voice" {
@@ -265,6 +265,24 @@ func NewResultView(o *report.Outcome, lang string) *ResultView {
 		}
 	}
 	return v
+}
+
+// SkippedStages names the progress stages a finished report never entered,
+// each with the reason in the page language, so the page marks them
+// skipped instead of leaving them looking stalled: a sample photo is
+// neither checked against today's map nor fused, a photo with no depth has
+// nothing to check, and a refused report is not fused.
+func SkippedStages(lang, status string) map[string]string {
+	tr := func(key string) string { return i18n.T(lang, key) }
+	switch status {
+	case report.StatusSample:
+		return map[string]string{report.StageVerify: tr("stage.skip_sample_verify"), report.StageFuse: tr("stage.skip_sample_fuse")}
+	case report.StatusUnusable:
+		return map[string]string{report.StageVerify: tr("stage.skip_no_depth"), report.StageFuse: tr("stage.skip_no_depth")}
+	case report.StatusRejected:
+		return map[string]string{report.StageFuse: tr("stage.skip_rejected")}
+	}
+	return nil
 }
 
 // ErrorView is the card for a report that could not be processed.

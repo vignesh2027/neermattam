@@ -189,7 +189,7 @@ var bnOps = map[string]string{
 	"dev.route_returns": "একটি LineString সহ GeoJSON Feature ফেরত দেয়:",
 	"dev.f_advisory":    "সবসময় true, সঙ্গে এই শর্তাবলির লিঙ্ক।",
 	"dev.f_geometry":    "প্রস্তাবিত পথ, lon,lat জোড় হিসেবে।",
-	"dev.f_kind":        "water_aware, অথবা কোনো শুকনো পথ না থাকলে least_bad।",
+	"dev.f_kind":        "water_aware, অথবা কোনো পথ গাড়ির গভীরতার সীমার মধ্যে না থাকলে least_bad।",
 	"dev.f_passable":    "প্রতিটি পথ গাড়ির সীমার বেশি জল পেরোলে false; এটি চালককে দেখান।",
 	"dev.f_distance":    "মিটারে দৈর্ঘ্য এবং মিনিটে আনুমানিক সময়।",
 	"dev.f_depth":       "পথে জানা সবচেয়ে গভীর জল এবং তার প্লাস মাইনাস, অথবা null।",

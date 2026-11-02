@@ -390,7 +390,7 @@ func NewIndiaView(lang string, refs []IndiaCityRef, current string, data *India,
 				continue
 			}
 			ph := IndiaPhoto{
-				Place: p.Place, City: p.City, Date: DateText(lang, p.PhotoDate),
+				Place: PlaceInCity(lang, p.Place, p.City), City: p.City, Date: DateText(lang, p.PhotoDate),
 				Depth: fmt.Sprintf("%.0f", *p.DepthCm), Sigma: fmt.Sprintf("%.0f", *p.SigmaCm),
 				Thumb: thumb, Verify: safePath(p.VerifyURL, "/verify/"), Credit: p.Credit,
 			}

@@ -29,7 +29,7 @@ func (a *App) mapExtras(_ context.Context, p *web.Page) {
 	}
 	for _, ph := range a.Photos.InCity(p.City.ID) {
 		mp := web.MapPhoto{
-			ID: ph.MeasurementID(), Place: ph.Place, Year: ph.Year(), MeasuredOn: web.Day(p.Lang, ph.MeasuredAt()),
+			ID: ph.MeasurementID(), Place: web.PlaceInCity(p.Lang, ph.Place, ph.City), Year: ph.Year(), MeasuredOn: web.Day(p.Lang, measuredAt(ph)),
 			Method: ph.Method(), Thumb: a.Renderer.Assets().URL("photos/" + ph.ID + ".jpg"),
 			Verify: "/verify/" + ph.MeasurementID(), Credit: ph.Credit(), Source: ph.SourceURL, Lat: ph.Lat, Lon: ph.Lon,
 		}

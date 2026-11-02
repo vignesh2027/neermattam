@@ -245,12 +245,27 @@ document.addEventListener("DOMContentLoaded", function () {
     bump("steps"); bump(msg.tone);
     list.lastElementChild.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
+  // Stages a finished report never entered (a sample is not checked or
+  // fused, for example) say so, with the server's reason, so they do not
+  // look stalled.
+  function skip(list) {
+    if (!list) return;
+    Object.keys(list).forEach(function (name) {
+      var i = ORDER.indexOf(name);
+      if (i < 0 || rows()[i].getAttribute("data-state")) return;
+      var row = rows()[i];
+      row.setAttribute("data-state", "skipped");
+      row.querySelector(".val").textContent = NM.tr("js.skipped");
+      var sub = row.querySelector("small");
+      if (sub) { if (!sub.hasAttribute("data-orig")) sub.setAttribute("data-orig", sub.textContent); sub.textContent = list[name]; }
+    });
+  }
   function handle(name, msg) {
     if (name === "step") { onStep(msg); return; }
     if (msg.stage === "received" || msg.stage === "scene") { if (current !== "scene") enter("scene"); return; }
     if (msg.stage === "verify" || msg.stage === "fuse") { enter(msg.stage); return; }
     if (name === "done" || name === "error") clearInterval(tick);
-    if (name === "done") enter(null);
+    if (name === "done") { enter(null); skip(msg.skipped); }
     if (name === "error" && ORDER.indexOf(current) >= 0) rows()[ORDER.indexOf(current)].setAttribute("data-state", "error");
     if (msg.html) {
       result.innerHTML = msg.html;
@@ -292,7 +307,11 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("process-title").textContent = NM.tr("js.your_report");
     stages.hidden = false; result.textContent = ""; traceBox.textContent = ""; submit.disabled = true; submit.textContent = NM.tr("js.measuring");
     document.getElementById("scene-sub").textContent = isVoice ? NM.tr("js.voice_sub") : NM.tr("js.scene_sub");
-    rows().forEach(function (li) { li.removeAttribute("data-state"); li.querySelector(".val").textContent = ""; });
+    rows().forEach(function (li) {
+      li.removeAttribute("data-state"); li.querySelector(".val").textContent = "";
+      var sub = li.querySelector("small[data-orig]");
+      if (sub) sub.textContent = sub.getAttribute("data-orig");
+    });
     document.getElementById("upbar").style.width = "0";
     current = null; enter("upload");
     var seen = 0, xhr = new XMLHttpRequest();
