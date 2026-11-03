@@ -6,6 +6,8 @@
 
 **Live site:** https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run
 
+**Demo video (2:54):** https://youtu.be/cDX91WGaFUQ
+
 Every northeast monsoon, a rider in Chennai stops at the edge of a flooded street and has to guess. Ankle deep, the scooter gets through. Knee deep, the engine drowns and the rider is stuck in moving water. Forecasts tell the city where it will flood; nothing tells that rider how deep the water is on this street, right now. Neermattam (Tamil for "water level") answers with a measurement. A photo of a wheel or a person already standing in the water becomes a depth in centimetres with an honest uncertainty, and many such reports become a live map and a route for a two-wheeler, an auto, a car, a bus or someone on foot.
 
 I built it alone for the Meta Global AI Developer Hackathon, Indie track.
