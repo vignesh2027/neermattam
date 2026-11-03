@@ -120,6 +120,26 @@
     </div>
   </section>
 
+  <!-- 0. The idea: one measured photo serves a whole ecosystem, anywhere -->
+  <section class="lp-idea" id="idea" aria-labelledby="h-idea">
+    <div class="lp-wrap">
+      <div class="lp-idea-card">
+        <div class="lp-idea-head">
+          <p class="lp-eyebrow">{{t "lp3.label"}}</p>
+          <h2 id="h-idea">{{t "lp3.title"}}</h2>
+          <p class="lp-idea-lead">{{t "lp3.lead"}}</p>
+        </div>
+        <ul class="lp-idea-grid" role="list">
+          <li><span class="lp-idea-ico">{{template "icon-camera"}}</span><h3>{{t "lp3.c1_t"}}</h3><p>{{t "lp3.c1_d"}}</p><span class="lp-idea-tag">{{t "lp3.c1_tag"}}</span></li>
+          <li><span class="lp-idea-ico">{{template "icon-route"}}</span><h3>{{t "lp3.c2_t"}}</h3><p>{{t "lp3.c2_d"}}</p><span class="lp-idea-tag">{{t "lp3.live_tag"}}</span></li>
+          <li><span class="lp-idea-ico">{{template "icon-server"}}</span><h3>{{t "lp3.c3_t"}}</h3><p>{{t "lp3.c3_d"}}</p><span class="lp-idea-tag">{{t "lp3.live_tag"}}</span></li>
+          <li><span class="lp-idea-ico">{{template "icon-map"}}</span><h3>{{t "lp3.c4_t"}}</h3><p>{{t "lp3.c4_d"}}</p><span class="lp-idea-tag">{{t "lp3.c4_tag"}}</span></li>
+        </ul>
+        <p class="lp-idea-foot"><b>{{t "lp3.foot_big"}}</b> {{t "lp3.foot"}} <a href="https://www.nature.com/articles/s41467-022-30727-4" rel="noopener">{{t "lp3.foot_src"}}</a></p>
+      </div>
+    </div>
+  </section>
+
   <!-- 1. The problem, with sourced numbers -->
   <section class="lp-sec lp-problem" id="problem" aria-labelledby="h-problem">
     <div class="lp-wrap">
@@ -763,7 +783,7 @@
   "use strict";
   if (!window.IntersectionObserver || !window.matchMedia || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   document.documentElement.classList.add("lp-motion");
-  var sel = ".lp-sec .lp-head, .lp-stats > li, .lp-eco, .lp-eco-list > li, .lp-gap, .lp-flow > li, .lp-feat-grid > li, .lp-arch-col, .lp-samples > li, .lp-cmp-wrap, .lp-uniq > li, .lp-use > li, .lp-sites-fig, .lp-sfeat > li, .lp-sites-shot, .lp-models > *, .lp-open, .lp-steps > li, .lp-price, .lp-next-list > li, .lp-beyond-card, .lp-city-grid > li, .lp-num-grid > li, .lp-built-card, .lp-end-inner";
+  var sel = ".lp-idea-head, .lp-idea-grid > li, .lp-sec .lp-head, .lp-stats > li, .lp-eco, .lp-eco-list > li, .lp-gap, .lp-flow > li, .lp-feat-grid > li, .lp-arch-col, .lp-samples > li, .lp-cmp-wrap, .lp-uniq > li, .lp-use > li, .lp-sites-fig, .lp-sfeat > li, .lp-sites-shot, .lp-models > *, .lp-open, .lp-steps > li, .lp-price, .lp-next-list > li, .lp-beyond-card, .lp-city-grid > li, .lp-num-grid > li, .lp-built-card, .lp-end-inner";
   var seen = false;
   var io = new IntersectionObserver(function (es) {
     seen = true;
