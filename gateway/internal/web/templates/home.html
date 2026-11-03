@@ -5,6 +5,7 @@
 {{$control := "/control"}}{{if .Demo}}{{$control = "/control/demo"}}{{end}}
 <div class="lp">
   <section class="lp-hero" aria-labelledby="h-title">
+    <div class="lp-ripple" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="lp-wrap lp-hero-text">
       <p class="lp-pill">{{t "lp.hero_pill"}}</p>
       <h1 id="h-title"><span>{{t "lp.hero_title_1"}}</span> <span>{{t "lp.hero_title_2"}}</span></h1>
@@ -132,25 +133,25 @@
       <ul class="lp-stats" role="list">
         <li>
           <p class="lp-stat-where">{{t "lp2.p1_where"}}</p>
-          <b class="lp-stat-big">289</b>
+          <b class="lp-stat-big" data-count>289</b>
           <p>{{t "lp2.p1"}}</p>
           <p class="lp-cite">{{t "lp2.source"}} <a href="https://www.swissre.com/dam/jcr:b4a158fc-2669-4b70-b817-96db6a8705e9/sigma1_2016_en.pdf" rel="noopener">Swiss Re, sigma 1/2016</a></p>
         </li>
         <li>
           <p class="lp-stat-where">{{t "lp2.p2_where"}}</p>
-          <b class="lp-stat-big">944<small> mm</small></b>
+          <b class="lp-stat-big" data-count>944<small> mm</small></b>
           <p>{{t "lp2.p2"}}</p>
           <p class="lp-cite">{{t "lp2.source"}} <a href="https://sdma.goa.gov.in/sites/default/files/2022-05/management_urban_flooding.pdf" rel="noopener">NDMA, Management of Urban Flooding, 2010</a></p>
         </li>
         <li>
           <p class="lp-stat-where">{{t "lp2.p3_where"}}</p>
-          <b class="lp-stat-big">{{t "lp2.p3_big"}}</b>
+          <b class="lp-stat-big" data-count>{{t "lp2.p3_big"}}</b>
           <p>{{t "lp2.p3"}}</p>
           <p class="lp-cite">{{t "lp2.source"}} <a href="https://www.business-standard.com/article/current-affairs/aug-30-flood-in-bengaluru-led-to-a-loss-of-rs-225-cr-it-firms-to-cm-bommai-122090301023_1.html" rel="noopener">Business Standard (PTI), 3 Sep 2022</a></p>
         </li>
         <li>
           <p class="lp-stat-where">{{t "lp2.p4_where"}}</p>
-          <b class="lp-stat-big">{{t "lp2.p4_big"}}</b>
+          <b class="lp-stat-big" data-count>{{t "lp2.p4_big"}}</b>
           <p>{{t "lp2.p4"}}</p>
           <p class="lp-cite">{{t "lp2.source"}} <a href="https://www.dtnext.in/amp/story/news/tamilnadu/stalin-writes-to-modi-seeking-rs-5060-crore-for-interim-flood-relief-752682" rel="noopener">DT Next, 6 Dec 2023</a></p>
         </li>
@@ -162,6 +163,34 @@
           <li><span class="lp-gap-ic">{{template "icon-map"}}</span><h4>{{t "lp2.g2"}}</h4><p>{{t "lp2.g2_p"}}</p></li>
           <li><span class="lp-gap-ic">{{template "vehicle-icon-bike"}}</span><h4>{{t "lp2.g3"}}</h4><p>{{t "lp2.g3_p"}}</p></li>
         </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- 1b. Why India needs this, with national figures -->
+  <section class="lp-sec lp-india" id="why-india" aria-labelledby="h-india-why">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <div>
+          <p class="lp-eyebrow">{{t "lp3.i_eyebrow"}}</p>
+          <h2 id="h-india-why">{{t "lp3.i_title"}}</h2>
+        </div>
+        <p class="lp-lead">{{t "lp3.i_lead"}}</p>
+      </div>
+      <ul class="lp-stats lp-istats" role="list">
+        <li><b class="lp-stat-big" data-count>{{t "lp3.i1_big"}}</b><p>{{t "lp3.i1"}}</p><p class="lp-cite">{{t "lp2.source"}} <a href="https://cwc.gov.in/sites/default/files/flood-management-india-statistical-report-2023.pdf" rel="noopener">CWC, Flood Management in India, 2023</a></p></li>
+        <li><b class="lp-stat-big" data-count>1,666</b><p>{{t "lp3.i2"}}</p><p class="lp-cite">{{t "lp2.source"}} <a href="https://cwc.gov.in/sites/default/files/flood-management-india-statistical-report-2023.pdf" rel="noopener">CWC, Flood Management in India, 2023</a></p></li>
+        <li><b class="lp-stat-big" data-count>{{t "lp3.i3_big"}}</b><p>{{t "lp3.i3"}}</p><p class="lp-cite">{{t "lp2.source"}} <a href="https://cwc.gov.in/sites/default/files/flood-management-india-statistical-report-2023.pdf" rel="noopener">CWC, Flood Management in India, 2023</a></p></li>
+        <li><b class="lp-stat-big" data-count>{{t "lp3.i4_big"}}</b><p>{{t "lp3.i4"}}</p><p class="lp-cite">{{t "lp2.source"}} <a href="https://www.worldbank.org/en/news/press-release/2025/07/22/india-has-a-critical-opportunity-to-drive-resilient-urban-development-says-new-world-bank-report" rel="noopener">World Bank, 22 Jul 2025</a></p></li>
+      </ul>
+      <div class="lp-eco">
+        <h3 class="lp-sub-h">{{t "lp3.e_title"}}</h3>
+        <ul class="lp-eco-list" role="list">
+          <li><b data-count>100</b><p>{{t "lp3.e1"}}</p><p class="lp-cite"><a href="https://www.pib.gov.in/PressReleasePage.aspx?PRID=2288501" rel="noopener">PIB, 23 Jul 2026</a></p></li>
+          <li><b data-count>{{t "lp2.w_riders_big"}}</b><p>{{t "lp2.w_riders_fig"}}</p><p class="lp-cite"><a href="https://www.pib.gov.in/PressReleasePage.aspx?PRID=1837277" rel="noopener">NITI Aayog, via PIB, 27 Jun 2022</a></p></li>
+          <li><b data-count>73%</b><p>{{t "lp2.w_dc_fig"}}</p><p class="lp-cite"><a href="https://www.tribuneindia.com/news/business/mumbai-leads-indias-data-centre-capacity-with-53-share-ytd-report" rel="noopener">CBRE, via ANI, 12 Nov 2025</a></p></li>
+          <li><b>{{t "lp3.e4_big"}}</b><p>{{t "lp3.e4"}}</p></li>
+        </ul>
       </div>
     </div>
   </section>
@@ -203,6 +232,73 @@
         </li>
       </ol>
       <p class="lp-note lp-how-note">{{template "icon-alert"}}<span>{{t "lp2.h_note"}} <a href="#numbers">{{t "lp2.h_note_link"}}</a></span></p>
+    </div>
+  </section>
+
+  <!-- 2b. Everything it does today, and how the parts connect -->
+  <section class="lp-sec lp-feat" id="features" aria-labelledby="h-feat">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <div>
+          <p class="lp-eyebrow">{{t "lp3.f_eyebrow"}}</p>
+          <h2 id="h-feat">{{t "lp3.f_title"}}</h2>
+        </div>
+        <p class="lp-lead">{{t "lp3.f_lead"}}</p>
+      </div>
+      <ul class="lp-feat-grid" role="list">
+        <li><a class="lp-feat-card" href="/report#try"><span class="lp-feat-ic">{{template "icon-camera"}}</span><span><b>{{t "lp3.f1"}}</b><span>{{t "lp3.f1_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="/report#try"><span class="lp-feat-ic">{{template "icon-mic"}}</span><span><b>{{t "lp3.f2"}}</b><span>{{t "lp3.f2_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="/map?city={{.City.ID}}"><span class="lp-feat-ic">{{template "icon-map"}}</span><span><b>{{t "lp3.f3"}}</b><span>{{t "lp3.f3_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="/route"><span class="lp-feat-ic">{{template "icon-route"}}</span><span><b>{{t "lp3.f4"}}</b><span>{{t "lp3.f4_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="/alerts"><span class="lp-feat-ic">{{template "icon-bell"}}</span><span><b>{{t "lp3.f5"}}</b><span>{{t "lp3.f5_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="{{$control}}"><span class="lp-feat-ic">{{template "icon-control"}}</span><span><b>{{t "lp3.f6"}}</b><span>{{t "lp3.f6_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card is-key" href="/sites"><span class="lp-feat-ic">{{template "icon-server"}}</span><span><b>{{t "lp3.f7"}}</b><span>{{t "lp3.f7_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="/developers"><span class="lp-feat-ic">{{template "icon-code"}}</span><span><b>{{t "lp3.f8"}}</b><span>{{t "lp3.f8_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="/verify/{{template "cert-id"}}"><span class="lp-feat-ic">{{template "icon-shield"}}</span><span><b>{{t "lp3.f9"}}</b><span>{{t "lp3.f9_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="/map?city=chennai&amp;replay=michaung"><span class="lp-feat-ic">{{template "icon-replay"}}</span><span><b>{{t "lp3.f10"}}</b><span>{{t "lp3.f10_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="/map?city={{.City.ID}}"><span class="lp-feat-ic">{{template "icon-eye"}}</span><span><b>{{t "lp3.f11"}}</b><span>{{t "lp3.f11_p"}}</span></span></a></li>
+        <li><a class="lp-feat-card" href="/?lang=ta"><span class="lp-feat-ic">{{template "icon-globe"}}</span><span><b>{{t "lp3.f12"}}</b><span>{{t "lp3.f12_p"}}</span></span></a></li>
+      </ul>
+      <p class="lp-note">{{t "lp3.f_note"}}</p>
+
+      <div class="lp-arch" aria-labelledby="h-arch">
+        <h3 class="lp-sub-h" id="h-arch">{{t "lp3.a_title"}}</h3>
+        <p class="lp-sub-lead">{{t "lp3.a_lead"}}</p>
+        <ol class="lp-arch-flow" role="list">
+          <li class="lp-arch-col">
+            <p class="lp-arch-k">{{t "lp3.a_in"}}</p>
+            <ul role="list"><li>{{template "icon-camera"}}{{t "lp3.a_in1"}}</li><li>{{template "icon-mic"}}{{t "lp3.a_in2"}}</li><li>{{template "icon-code"}}{{t "lp3.a_in3"}}</li></ul>
+          </li>
+          <li class="lp-arch-col">
+            <p class="lp-arch-k">Go</p>
+            <h4>{{t "lp3.a_gw"}}</h4>
+            <p>{{t "lp3.a_gw_p"}}</p>
+          </li>
+          <li class="lp-arch-col is-meta">
+            <p class="lp-arch-k">Python · Meta</p>
+            <h4>{{t "lp3.a_pc"}}</h4>
+            <ul role="list"><li>{{template "icon-spark"}}{{t "lp3.a_pc1"}}</li><li>{{template "icon-ruler"}}{{t "lp3.a_pc2"}}</li><li>{{template "icon-alert"}}{{t "lp3.a_pc3"}}</li><li>{{template "icon-shield"}}{{t "lp3.a_pc4"}}</li></ul>
+          </li>
+          <li class="lp-arch-col">
+            <p class="lp-arch-k">Rust</p>
+            <h4>{{t "lp3.a_en"}}</h4>
+            <ul role="list"><li>{{template "icon-map"}}{{t "lp3.a_en1"}}</li><li>{{template "icon-route"}}{{t "lp3.a_en2"}}</li><li>{{template "icon-save"}}{{t "lp3.a_en3"}}</li></ul>
+          </li>
+          <li class="lp-arch-col is-out">
+            <p class="lp-arch-k">{{t "lp3.a_out"}}</p>
+            <ul role="list" class="lp-arch-out">
+              <li><a href="/map?city={{.City.ID}}">{{t "lp2.sys_map"}}</a></li>
+              <li><a href="/route">{{t "lp2.sys_route"}}</a></li>
+              <li><a href="/alerts">{{t "lp2.sys_alerts"}}</a></li>
+              <li><a href="{{$control}}">{{t "lp2.sys_control"}}</a></li>
+              <li><a href="/sites">{{t "lp2.sys_sites"}}</a></li>
+              <li><a href="/verify/{{template "cert-id"}}">{{t "lp2.sys_verify"}}</a></li>
+              <li><a href="/developers">{{t "lp2.sys_api"}}</a></li>
+              <li class="is-next"><a href="https://github.com/vignesh2027/neermattam/tree/main/mcp" rel="noopener">{{t "lp3.a_mcp"}}</a><small>{{t "lp3.a_mcp_note"}}</small></li>
+            </ul>
+          </li>
+        </ol>
+      </div>
     </div>
   </section>
 
@@ -275,6 +371,7 @@
           <span class="lp-ic">{{template "vehicle-icon-bike"}}</span>
           <h3>{{t "lp.who_riders"}}</h3>
           <p>{{t "lp2.w_riders_p"}}</p>
+          <p class="lp-save">{{template "icon-check"}}<span>{{t "lp3.save_riders"}}</span></p>
           <div class="lp-fig"><b>{{t "lp2.w_riders_big"}}</b><span>{{t "lp2.w_riders_fig"}}</span><span class="lp-cite"><a href="https://www.pib.gov.in/PressReleasePage.aspx?PRID=1837277" rel="noopener">NITI Aayog, via PIB, 27 Jun 2022</a></span></div>
           <a class="lp-use-go" href="/route">{{t "lp.who_link_route"}}{{template "icon-chev-right"}}</a>
         </li>
@@ -282,18 +379,21 @@
           <span class="lp-ic">{{template "icon-ambulance"}}</span>
           <h3>{{t "lp.who_crews"}}</h3>
           <p>{{t "lp.who_crews_p"}}</p>
+          <p class="lp-save">{{template "icon-check"}}<span>{{t "lp3.save_crews"}}</span></p>
           <a class="lp-use-go" href="/route">{{t "lp.who_link_route"}}{{template "icon-chev-right"}}</a>
         </li>
         <li>
           <span class="lp-ic">{{template "icon-family"}}</span>
           <h3>{{t "lp.who_families"}}</h3>
           <p>{{t "lp.who_families_p"}}</p>
+          <p class="lp-save">{{template "icon-check"}}<span>{{t "lp3.save_families"}}</span></p>
           <a class="lp-use-go" href="/alerts">{{t "home.who_link_alerts"}}{{template "icon-chev-right"}}</a>
         </li>
         <li>
           <span class="lp-ic">{{template "icon-control"}}</span>
           <h3>{{t "lp2.w_control"}}</h3>
           <p>{{t "lp.who_control_p"}}</p>
+          <p class="lp-save">{{template "icon-check"}}<span>{{t "lp3.save_control"}}</span></p>
           <div class="lp-fig"><b>100</b><span>{{t "lp2.w_control_fig"}}</span><span class="lp-cite"><a href="https://www.pib.gov.in/PressReleaseIframePage.aspx?PRID=1907135" rel="noopener">PIB, 15 Mar 2023</a></span></div>
           <a class="lp-use-go" href="{{$control}}">{{t "lp2.w_link_control"}}{{template "icon-chev-right"}}</a>
         </li>
@@ -301,6 +401,7 @@
           <span class="lp-ic">{{template "icon-server"}}</span>
           <h3>{{t "lp2.w_dc"}}</h3>
           <p>{{t "lp2.w_dc_p"}}</p>
+          <p class="lp-save">{{template "icon-check"}}<span>{{t "lp3.save_dc"}}</span></p>
           <div class="lp-fig"><b>73%</b><span>{{t "lp2.w_dc_fig"}}</span><span class="lp-cite"><a href="https://www.tribuneindia.com/news/business/mumbai-leads-indias-data-centre-capacity-with-53-share-ytd-report" rel="noopener">CBRE, via ANI, 12 Nov 2025</a></span></div>
           <a class="lp-use-go" href="/sites">{{t "lp.who_link_sites"}}{{template "icon-chev-right"}}</a>
         </li>
@@ -308,6 +409,7 @@
           <span class="lp-ic">{{template "icon-hospital"}}</span>
           <h3>{{t "lp2.w_hosp"}}</h3>
           <p>{{t "lp2.w_hosp_p"}}</p>
+          <p class="lp-save">{{template "icon-check"}}<span>{{t "lp3.save_hosp"}}</span></p>
           <div class="lp-fig"><b>842</b><span>{{t "lp2.w_hosp_fig"}}</span><span class="lp-cite"><a href="https://github.com/vignesh2027/neermattam/blob/main/docs/SITES.md" rel="noopener">OpenStreetMap, docs/SITES.md</a></span></div>
           <a class="lp-use-go" href="/sites">{{t "lp.who_link_sites"}}{{template "icon-chev-right"}}</a>
         </li>
@@ -315,6 +417,7 @@
           <span class="lp-ic">{{template "icon-shield"}}</span>
           <h3>{{t "lp2.w_ins"}}</h3>
           <p>{{t "lp2.w_ins_p"}}</p>
+          <p class="lp-save">{{template "icon-check"}}<span>{{t "lp3.save_ins"}}</span></p>
           <div class="lp-fig"><b>{{t "lp2.w_ins_big"}}</b><span>{{t "lp2.w_ins_fig"}}</span><span class="lp-cite"><a href="https://www.swissre.com/dam/jcr:b4a158fc-2669-4b70-b817-96db6a8705e9/sigma1_2016_en.pdf" rel="noopener">Swiss Re, sigma 1/2016</a></span></div>
           <a class="lp-use-go" href="/verify/{{template "cert-id"}}">{{t "lp2.w_link_cert"}}{{template "icon-chev-right"}}</a>
         </li>
@@ -322,11 +425,59 @@
           <span class="lp-ic">{{template "icon-code"}}</span>
           <h3>{{t "lp2.w_dev"}}</h3>
           <p>{{t "lp2.w_dev_p"}}</p>
+          <p class="lp-save">{{template "icon-check"}}<span>{{t "lp3.save_dev"}}</span></p>
           <div class="lp-fig"><b>7</b><span>{{t "lp2.w_dev_fig"}}</span></div>
           <a class="lp-use-go" href="/developers">{{t "lp2.w_link_dev"}}{{template "icon-chev-right"}}</a>
         </li>
+        <li>
+          <span class="lp-ic">{{template "icon-globe"}}</span>
+          <h3>{{t "lp3.w_trav"}}</h3>
+          <p>{{t "lp3.w_trav_p"}}</p>
+          <p class="lp-save">{{template "icon-check"}}<span>{{t "lp3.save_trav"}}</span></p>
+          <a class="lp-use-go" href="/route">{{t "lp.who_link_route"}}{{template "icon-chev-right"}}</a>
+        </li>
       </ul>
       <p class="lp-note">{{t "lp.w_langs"}}</p>
+    </div>
+  </section>
+
+  <!-- 4b. For data centres, hospitals and telecom -->
+  <section class="lp-sec lp-sites" id="critical-sites" aria-labelledby="h-sites">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <div>
+          <p class="lp-eyebrow">{{t "lp3.s_eyebrow"}}</p>
+          <h2 id="h-sites">{{t "lp3.s_title"}}</h2>
+        </div>
+        <p class="lp-lead">{{t "lp3.s_lead"}}</p>
+      </div>
+      <div class="lp-sites-grid">
+        <div class="lp-sites-main">
+          <div class="lp-sites-fig"><b data-count>73%</b><span>{{t "lp2.w_dc_fig"}} <span class="lp-cite"><a href="https://www.tribuneindia.com/news/business/mumbai-leads-indias-data-centre-capacity-with-53-share-ytd-report" rel="noopener">CBRE, via ANI, 12 Nov 2025</a></span></span></div>
+          <ul class="lp-sfeat" role="list">
+            <li><span class="lp-sf-ic">{{template "icon-gauge"}}</span><h3>{{t "lp3.s1"}}</h3><p>{{t "lp3.s1_p"}}</p></li>
+            <li><span class="lp-sf-ic">{{template "icon-route"}}</span><h3>{{t "lp3.s2"}}</h3><p>{{t "lp3.s2_p"}}</p></li>
+            <li><span class="lp-sf-ic">{{template "icon-bell"}}</span><h3>{{t "lp3.s3"}}</h3><p>{{t "lp3.s3_p"}}</p></li>
+            <li><span class="lp-sf-ic">{{template "icon-pin"}}</span><h3>{{t "lp3.s4"}}</h3><p>{{t "lp3.s4_p"}}</p></li>
+            <li><span class="lp-sf-ic">{{template "icon-code"}}</span><h3>{{t "lp3.s5"}}</h3><p>{{t "lp3.s5_p"}}</p></li>
+            <li class="lp-sf-count"><span class="lp-sf-ic">{{template "icon-server"}}</span><h3>{{t "lp3.s6"}}</h3>
+              <p class="lp-sf-nums"><span><b data-count>15</b>{{t "lp3.s_dc"}}</span><span><b data-count>842</b>{{t "lp3.s_hosp"}}</span><span><b data-count>5</b>{{t "lp3.s_tel"}}</span></p>
+              <p>{{t "lp3.s_in"}}. {{t "lp3.s6_p"}}</p></li>
+          </ul>
+        </div>
+        <figure class="lp-sites-shot">
+          <div class="lp-shot-bar"><span class="lp-shot-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="lp-shot-url">/sites</span><span class="chip chip-ok">{{t "lp3.s_shot_k"}}</span></div>
+          <img src="{{asset "showcase/sites-nxtra.webp"}}" width="900" height="1269" alt="{{t "lp3.s_shot_alt"}}" loading="lazy" decoding="async">
+          <figcaption>{{t "lp3.s_shot_cap"}}</figcaption>
+        </figure>
+      </div>
+      <div class="lp-sites-foot">
+        <div class="lp-cta">
+          <a class="btn btn-primary btn-lg" href="/sites">{{template "icon-server"}}{{t "lp3.s_go_sites"}}</a>
+          <a class="btn btn-ghost btn-lg" href="/developers">{{template "icon-code"}}{{t "lp3.s_go_api"}}</a>
+        </div>
+        <p class="lp-sites-adv" role="note">{{template "icon-alert"}}<span>{{t "lp3.s_advisory"}}</span></p>
+      </div>
     </div>
   </section>
 
@@ -364,8 +515,10 @@
         </article>
       </div>
       <div class="lp-open">
-        <h3 class="lp-open-title">{{t "lp2.o_title"}}</h3>
-        <ul class="lp-open-list" role="list">
+        <h3 class="lp-open-title">{{t "lp3.g_title"}}</h3>
+        <ul class="lp-open-list lp-fit" role="list">
+          <li><span class="lp-open-ic">{{template "icon-ruler"}}</span><div><h4>{{t "lp3.g1"}}</h4><p>{{t "lp3.g1_p"}}</p></div></li>
+          <li><span class="lp-open-ic">{{template "icon-eye"}}</span><div><h4>{{t "lp3.g2"}}</h4><p>{{t "lp3.g2_p"}}</p></div></li>
           <li><span class="lp-open-ic">{{template "icon-server"}}</span><div><h4>{{t "lp2.o1"}}</h4><p>{{t "lp2.o1_p"}}</p></div></li>
           <li><span class="lp-open-ic">{{template "icon-coin"}}</span><div><h4>{{t "lp2.o2"}}</h4><p>{{t "lp2.o2_p"}}</p></div></li>
           <li><span class="lp-open-ic">{{template "icon-shield"}}</span><div><h4>{{t "lp2.o3"}}</h4><p>{{t "lp2.o3_p"}}</p></div></li>
@@ -418,19 +571,20 @@
         </div>
         <p class="lp-lead">{{t "lp2.m_lead"}}</p>
       </div>
-      <div class="lp-free">
-        <div>
-          <p class="lp-free-k">{{t "lp2.t0"}}</p>
-          <p class="lp-free-price">{{t "lp2.t0_price"}}</p>
-        </div>
-        <p>{{t "lp2.t0_p"}}</p>
+      <div class="lp-price">
+        <p class="lp-price-label"><span class="chip chip-violet">{{t "lp3.p_label"}}</span></p>
+        <div class="lp-price-wrap"><table class="lp-price-table">
+          <thead><tr><th scope="col">{{t "lp3.p_col_plan"}}</th><th scope="col">{{t "lp3.p_col_what"}}</th><th scope="col">{{t "lp3.p_col_price"}}</th></tr></thead>
+          <tbody>
+            <tr class="is-free"><th scope="row">{{t "lp2.t0"}}</th><td data-k="{{t "lp3.p_col_what"}}">{{t "lp2.t0_p"}}</td><td data-k="{{t "lp3.p_col_price"}}"><b>{{t "lp2.t0_price"}}</b></td></tr>
+            <tr class="is-free"><th scope="row">{{t "lp3.pd"}}</th><td data-k="{{t "lp3.p_col_what"}}"><b>{{t "lp3.pd_what"}}.</b> {{t "lp3.pd_p"}}</td><td data-k="{{t "lp3.p_col_price"}}"><b>{{t "lp3.pd_price"}}</b></td></tr>
+            <tr><th scope="row">{{t "lp2.t1"}}</th><td data-k="{{t "lp3.p_col_what"}}"><b>{{t "lp2.t1_what"}}.</b> {{t "lp2.t1_p"}}</td><td data-k="{{t "lp3.p_col_price"}}"><b>{{t "lp3.p1_price"}}</b></td></tr>
+            <tr><th scope="row">{{t "lp2.t2"}}</th><td data-k="{{t "lp3.p_col_what"}}"><b>{{t "lp2.t2_what"}}.</b> {{t "lp2.t2_p"}}</td><td data-k="{{t "lp3.p_col_price"}}"><b>{{t "lp3.p2_price"}}</b></td></tr>
+            <tr><th scope="row">{{t "lp2.t3"}}</th><td data-k="{{t "lp3.p_col_what"}}"><b>{{t "lp2.t3_what"}}.</b> {{t "lp2.t3_p"}}</td><td data-k="{{t "lp3.p_col_price"}}"><b>{{t "lp3.p3_price"}}</b></td></tr>
+            <tr><th scope="row">{{t "lp2.t4"}}</th><td data-k="{{t "lp3.p_col_what"}}"><b>{{t "lp2.t4_what"}}.</b> {{t "lp2.t4_p"}}</td><td data-k="{{t "lp3.p_col_price"}}"><b>{{t "lp3.p4_price"}}</b></td></tr>
+          </tbody>
+        </table></div>
       </div>
-      <ul class="lp-tiers" role="list">
-        <li><p class="lp-tier-who">{{t "lp2.t1"}}</p><h3>{{t "lp2.t1_what"}}</h3><p>{{t "lp2.t1_p"}}</p></li>
-        <li><p class="lp-tier-who">{{t "lp2.t2"}}</p><h3>{{t "lp2.t2_what"}}</h3><p>{{t "lp2.t2_p"}}</p></li>
-        <li><p class="lp-tier-who">{{t "lp2.t3"}}</p><h3>{{t "lp2.t3_what"}}</h3><p>{{t "lp2.t3_p"}}</p></li>
-        <li><p class="lp-tier-who">{{t "lp2.t4"}}</p><h3>{{t "lp2.t4_what"}}</h3><p>{{t "lp2.t4_p"}}</p></li>
-      </ul>
       <p class="lp-budget">{{template "icon-coin"}}<span>{{t "lp2.m_budget"}} <span class="lp-cite"><a href="https://www.pib.gov.in/PressReleaseIframePage.aspx?PRID=1983474" rel="noopener">PIB, 7 Dec 2023</a></span></span></p>
       <div class="lp-next">
         <h3 class="lp-sub-h">{{t "lp2.n_title"}}</h3>
@@ -440,6 +594,40 @@
           <li><span class="lp-n">3</span><div><h4>{{t "lp2.n3"}}</h4><p>{{t "lp2.n3_p"}}</p></div></li>
         </ol>
       </div>
+    </div>
+  </section>
+
+
+  <!-- 6b. The plan beyond floods and beyond India -->
+  <section class="lp-sec lp-beyond" id="beyond" aria-labelledby="h-beyond">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <div>
+          <p class="lp-eyebrow">{{t "lp3.b_eyebrow"}}</p>
+          <h2 id="h-beyond">{{t "lp3.b_title"}}</h2>
+        </div>
+        <p class="lp-lead">{{t "lp3.b_lead"}}</p>
+      </div>
+      <div class="lp-beyond-grid">
+        <div class="lp-beyond-card">
+          <p class="lp-beyond-k"><span class="chip chip-violet">{{t "lp3.b_plan"}}</span></p>
+          <h3>{{t "lp3.b_h1"}}</h3>
+          <ul class="lp-beyond-list" role="list">
+            <li>{{t "lp3.b_h1a"}}</li><li>{{t "lp3.b_h1b"}}</li><li>{{t "lp3.b_h1c"}}</li><li>{{t "lp3.b_h1d"}}</li>
+          </ul>
+        </div>
+        <div class="lp-beyond-card">
+          <p class="lp-beyond-k"><span class="chip chip-violet">{{t "lp3.b_plan"}}</span></p>
+          <h3>{{t "lp3.b_h2"}}</h3>
+          <p>{{t "lp3.b_h2_p"}}</p>
+          <p class="lp-beyond-cities"><span>Dhaka</span><span>Jakarta</span><span>Manila</span><span>Lagos</span><span>Bangkok</span><span>Houston</span></p>
+        </div>
+      </div>
+      <ul class="lp-stats lp-bstats" role="list">
+        <li><b class="lp-stat-big" data-count>{{t "lp3.b1_big"}}</b><p>{{t "lp3.b1"}}</p><p class="lp-cite">{{t "lp2.source"}} <a href="https://www.nature.com/articles/s41467-022-30727-4" rel="noopener">Rentschler et al., Nature Communications, 2022</a></p></li>
+        <li><b class="lp-stat-big" data-count>{{t "lp3.b2_big"}}</b><p>{{t "lp3.b2"}}</p><p class="lp-cite">{{t "lp2.source"}} <a href="https://www.nature.com/articles/s41467-022-30727-4" rel="noopener">Rentschler et al., Nature Communications, 2022</a></p></li>
+        <li><b class="lp-stat-big" data-count>{{t "lp3.b3_big"}}</b><p>{{t "lp3.b3"}}</p><p class="lp-cite">{{t "lp2.source"}} <a href="https://aon.mediaroom.com/news-releases?item=138582" rel="noopener">Aon, 21 Apr 2026</a></p></li>
+      </ul>
     </div>
   </section>
 
@@ -566,6 +754,51 @@
 {{define "vehicle-icon-bike"}}{{template "vehicle-icon" "two_wheeler"}}{{end}}
 
 {{define "scripts"}}<script nonce="{{.Nonce}}">
+/* Reveal sections and cards as they scroll in, and count the big numbers
+   up to their value. The server has already written every value, and the
+   count always ends on that exact text; nothing runs with reduced motion. */
+(function () {
+  "use strict";
+  if (!window.IntersectionObserver || !window.matchMedia || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  document.documentElement.classList.add("lp-motion");
+  var sel = ".lp-sec .lp-head, .lp-stats > li, .lp-eco, .lp-eco-list > li, .lp-gap, .lp-flow > li, .lp-feat-grid > li, .lp-arch-col, .lp-samples > li, .lp-cmp-wrap, .lp-uniq > li, .lp-use > li, .lp-sites-fig, .lp-sfeat > li, .lp-sites-shot, .lp-models > *, .lp-open, .lp-steps > li, .lp-price, .lp-next-list > li, .lp-beyond-card, .lp-city-grid > li, .lp-num-grid > li, .lp-built-card, .lp-end-inner";
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+  }, { rootMargin: "0px 0px -6% 0px", threshold: 0.06 });
+  Array.prototype.forEach.call(document.querySelectorAll(sel), function (el) {
+    var i = Array.prototype.indexOf.call(el.parentNode.children, el);
+    el.style.setProperty("--rv-d", (Math.min(i, 5) * 70) + "ms");
+    el.classList.add("rv");
+    io.observe(el);
+  });
+  function count(el) {
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), n, m;
+    while ((n = w.nextNode())) { m = /\d[\d,]*(\.\d+)?/.exec(n.nodeValue); if (m) break; }
+    if (!n || !m) return;
+    var node = n, orig = node.nodeValue, pre = orig.slice(0, m.index), post = orig.slice(m.index + m[0].length);
+    var dec = (m[0].split(".")[1] || "").length, comma = m[0].indexOf(",") >= 0;
+    var target = parseFloat(m[0].replace(/,/g, "")), t0 = 0, dur = 1200;
+    function fmt(v) {
+      var s = v.toFixed(dec);
+      if (comma) { var p = s.split("."); p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ","); s = p.join("."); }
+      return s;
+    }
+    function step(ts) {
+      if (!t0) t0 = ts;
+      var k = Math.min(1, (ts - t0) / dur);
+      node.nodeValue = k < 1 ? pre + fmt(target * (1 - Math.pow(1 - k, 3))) + post : orig;
+      if (k < 1) requestAnimationFrame(step);
+    }
+    node.nodeValue = pre + fmt(0) + post;
+    requestAnimationFrame(step);
+  }
+  var cio = new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (e.isIntersecting) { cio.unobserve(e.target); count(e.target); } });
+  }, { threshold: 0.5 });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-count], .lp-big.num"), function (el) { cio.observe(el); });
+})();
+</script>
+<script nonce="{{.Nonce}}">
 /* Refresh the city numbers from /api/india once a minute; on any error the
    numbers the server drew stay as they are. */
 (function () {

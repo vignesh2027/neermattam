@@ -550,3 +550,188 @@ body.lang-ta .lp h2, body.lang-ml .lp h2, body.lang-te .lp h2, body.lang-kn .lp 
   body:not(.lang-en) .lp h2 { font-size: 27px; }
   body.lang-ta .lp h2, body.lang-ml .lp h2 { font-size: 24px; }
 }
+
+/* 3 November 2026: why India needs this, everything it does, the
+   architecture, critical sites, pricing, the plan ahead, and motion. */
+
+/* Hero: soft water rings drifting out behind the headline. Absolute, so
+   no layout shift; static and invisible when motion is reduced. */
+.lp-hero { position: relative; isolation: isolate; }
+.lp-ripple { position: absolute; left: 0; right: 0; top: 0; height: 820px; z-index: -1; overflow: hidden; pointer-events: none; }
+.lp-ripple i { position: absolute; left: 50%; top: -120px; width: 1000px; height: 1000px; margin-left: -500px; border-radius: 50%; border: 1.5px solid rgba(37, 99, 235, .16); box-shadow: inset 0 0 80px rgba(56, 189, 248, .10); opacity: 0; }
+.lp-ripple::before {
+  content: ""; position: absolute; inset: -20% -10%;
+  background: radial-gradient(500px 300px at 30% 40%, rgba(56, 189, 248, .10), transparent 70%), radial-gradient(520px 320px at 72% 30%, rgba(76, 29, 149, .07), transparent 70%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lp-ripple i { animation: lp-ring 10s cubic-bezier(.2, .6, .3, 1) infinite; will-change: transform, opacity; }
+  .lp-ripple i:nth-child(2) { animation-delay: 3.3s; }
+  .lp-ripple i:nth-child(3) { animation-delay: 6.6s; }
+  .lp-ripple::before { animation: lp-drift 18s ease-in-out infinite alternate; }
+  .lp .btn-primary { position: relative; overflow: hidden; isolation: isolate; }
+  .lp .btn-primary::after {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 45%; z-index: -1; pointer-events: none;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .32), transparent);
+    transform: translateX(-120%) skewX(-18deg); animation: lp-shimmer 5.5s ease-in-out 1.2s infinite;
+  }
+}
+@keyframes lp-ring { 0% { transform: scale(.18); opacity: 0; } 18% { opacity: 1; } 100% { transform: scale(1.15); opacity: 0; } }
+@keyframes lp-drift { from { transform: translate3d(-3%, 0, 0); } to { transform: translate3d(3%, 2%, 0); } }
+@keyframes lp-shimmer { 0% { transform: translateX(-120%) skewX(-18deg); } 28%, 100% { transform: translateX(330%) skewX(-18deg); } }
+
+/* Cards lift on hover */
+.lp-stats li, .lp-flow li, .lp-uniq li, .lp-use li, .lp-num-grid li, .lp-steps li, .lp-model, .lp-sfeat li, .lp-eco-list li, .lp-feat-card, .lp-arch-col, .lp-beyond-card, .lp-next-list li {
+  transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
+}
+@media (hover: hover) {
+  .lp-stats li:hover, .lp-flow li:hover, .lp-uniq li:hover, .lp-use li:hover, .lp-num-grid li:hover, .lp-steps li:hover, .lp-model:hover, .lp-sfeat li:hover, .lp-feat-card:hover, .lp-arch-col:hover, .lp-beyond-card:hover, .lp-next-list li:hover {
+    transform: translateY(-4px); box-shadow: 0 2px 6px rgba(11, 27, 51, .05), 0 24px 48px -24px rgba(30, 64, 175, .35); border-color: #BFD3F6;
+  }
+}
+
+/* Reveal on scroll. Only when the script has added .lp-motion to <html>,
+   so without script or with reduced motion everything is simply there.
+   It uses the translate property, so the hover transform still works. */
+html.lp-motion .rv {
+  opacity: 0; translate: 0 22px;
+  transition: opacity .65s ease var(--rv-d, 0s), translate .75s cubic-bezier(.2, .8, .2, 1) var(--rv-d, 0s), transform .22s ease, box-shadow .22s ease, border-color .22s ease;
+}
+html.lp-motion .rv.in { opacity: 1; translate: none; }
+[data-count], .lp-big.num { font-variant-numeric: tabular-nums; }
+
+/* Why India needs this */
+.lp-istats li, .lp-bstats li { padding-top: 24px; }
+.lp-istats .lp-stat-big, .lp-bstats .lp-stat-big { margin-top: 0; }
+.lp-eco { margin-top: 24px; padding: 32px; border-radius: 24px; background: linear-gradient(135deg, #EEF4FF, #F3EEFC); border: 1px solid #D9E2F5; }
+.lp-eco-list { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.lp-eco-list li { display: flex; flex-direction: column; padding: 20px; border-radius: 18px; background: #fff; border: 1px solid var(--line); }
+.lp-eco-list b { font-family: var(--display); font-size: 30px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: var(--violet); }
+.lp-eco-list p { margin-top: 8px; font-size: 14.5px; line-height: 1.55; color: var(--ink-2); flex: 1; }
+.lp-eco-list .lp-cite { margin-top: 10px; flex: 0; font-size: 12px; }
+
+/* Everything it does today */
+.lp-feat-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.lp-feat-card { display: flex; gap: 14px; align-items: flex-start; height: 100%; padding: 20px; border-radius: 18px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow-sm); text-decoration: none; color: var(--text); }
+.lp-feat-card:hover { color: var(--text); }
+.lp-feat-ic { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; background: var(--soft-2); color: var(--primary); }
+.lp-feat-ic svg { width: 21px; height: 21px; }
+.lp-feat-card > span:last-child { display: grid; gap: 4px; min-width: 0; }
+.lp-feat-card b { font-family: var(--display); font-size: 16.5px; font-weight: 750; letter-spacing: -0.01em; line-height: 1.3; }
+.lp-feat-card b + span { font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.lp-feat-card.is-key { background: linear-gradient(160deg, #FFFFFF 40%, #F1ECFC); border-color: #DCD0F5; }
+.lp-feat-card.is-key .lp-feat-ic { background: linear-gradient(135deg, var(--primary), var(--violet)); color: #fff; }
+
+/* Architecture */
+.lp-arch { margin-top: 56px; padding: 32px; border-radius: 24px; background: radial-gradient(600px 300px at 0% 0%, rgba(56, 189, 248, .14), transparent 70%), linear-gradient(135deg, #EEF4FF, #F3EEFC); border: 1px solid #D9E2F5; }
+.lp-arch-flow { list-style: none; margin: 24px 0 0; padding: 0; display: grid; grid-template-columns: .8fr 1fr 1.25fr 1.1fr 1.15fr; gap: 20px; }
+.lp-arch-col { position: relative; padding: 18px; border-radius: 16px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+.lp-arch-col + .lp-arch-col::before { content: ""; position: absolute; left: -21px; top: 50%; width: 20px; height: 2px; background: linear-gradient(90deg, var(--primary), var(--violet)); }
+.lp-arch-col + .lp-arch-col::after { content: ""; position: absolute; left: -5px; top: calc(50% - 3px); width: 8px; height: 8px; border-radius: 50%; background: var(--violet); }
+.lp-arch-col.is-meta { border-color: #DCD0F5; background: linear-gradient(170deg, #FFFFFF 45%, #F1ECFC); }
+.lp-arch-k { font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--violet); }
+.lp .lp-arch-col h4 { margin-top: 4px; font-size: 16.5px; }
+.lp-arch-col > p:not(.lp-arch-k) { margin-top: 6px; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.lp-arch-col ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.lp-arch-col ul li { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; line-height: 1.45; color: var(--ink-2); }
+.lp-arch-col ul svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; color: var(--primary); }
+.lp-arch-out { display: flex !important; flex-wrap: wrap; gap: 6px !important; }
+.lp-arch-out li { display: block !important; }
+.lp-arch-out a { display: inline-flex; padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 650; text-decoration: none; color: var(--primary-deep); background: var(--soft-2); border: 1px solid var(--soft); }
+.lp-arch-out a:hover { background: var(--soft); }
+.lp-arch-out .is-next { flex-basis: 100%; }
+.lp-arch-out .is-next a { color: var(--violet); background: #fff; border: 1px dashed #B9A6E8; }
+.lp-arch-out .is-next small { display: block; margin-top: 4px; font-size: 12px; color: var(--small); }
+
+/* Critical sites */
+.lp-sites { position: relative; }
+.lp-sites-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 32px; align-items: start; }
+.lp-sites-fig { display: flex; gap: 20px; align-items: center; padding: 20px 24px; border-radius: 20px; color: #fff; background: radial-gradient(420px 220px at 100% 0%, rgba(109, 40, 217, .5), transparent 70%), radial-gradient(420px 240px at 0% 100%, rgba(37, 99, 235, .5), transparent 70%), #0B1B33; }
+.lp-sites-fig b { font-family: var(--display); font-size: 48px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; }
+.lp-sites-fig > span { font-size: 15px; line-height: 1.5; color: #D5DEEE; }
+.lp-sites-fig .lp-cite, .lp-sites-fig .lp-cite a { color: #9FB3D6; }
+.lp-sfeat { list-style: none; margin: 14px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.lp-sfeat li { padding: 22px; border-radius: 20px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+.lp-sf-ic { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; color: #fff; background: linear-gradient(135deg, var(--primary), var(--violet)); }
+.lp-sf-ic svg { width: 21px; height: 21px; }
+.lp .lp-sfeat h3 { margin-top: 14px; font-size: 17px; font-weight: 750; letter-spacing: -0.01em; line-height: 1.3; }
+.lp-sfeat p { margin-top: 6px; font-size: 14.5px; line-height: 1.55; color: var(--ink-2); }
+.lp-sf-count { background: linear-gradient(160deg, #FFFFFF 40%, #EAF2FE) !important; border-color: #C7D8F6 !important; }
+.lp-sfeat .lp-sf-nums { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; }
+.lp-sf-nums span { display: grid; font-size: 12.5px; font-weight: 650; color: var(--small); }
+.lp-sf-nums b { font-family: var(--display); font-size: 28px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: var(--primary-deep); }
+.lp-sites-shot { position: sticky; top: 96px; margin: 0; border-radius: 20px; overflow: hidden; background: #fff; border: 1px solid rgba(203, 218, 238, .9); box-shadow: 0 2px 6px rgba(11, 27, 51, .06), 0 40px 80px -40px rgba(30, 64, 175, .45); }
+.lp-shot-bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: #F8FBFF; }
+.lp-shot-dots { display: inline-flex; gap: 5px; }
+.lp-shot-dots i { width: 9px; height: 9px; border-radius: 50%; background: #D5DEEC; }
+.lp-shot-url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--small); }
+.lp-shot-bar .chip { margin-left: auto; }
+.lp-sites-shot img { display: block; width: 100%; height: auto; }
+.lp-sites-shot figcaption { padding: 12px 16px 14px; font-size: 13px; line-height: 1.5; color: var(--small); border-top: 1px solid var(--line); }
+.lp-sites-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px; margin-top: 32px; }
+.lp-sites-foot .lp-cta { margin-top: 0; justify-content: flex-start; }
+.lp-sites-adv { display: inline-flex; gap: 8px; align-items: center; padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 650; color: var(--danger); background: var(--danger-soft); }
+.lp-sites-adv svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+/* Who it serves: three across, and what each one saves */
+.lp-use { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.lp-save { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 10px 12px; border-radius: 12px; font-size: 14px !important; line-height: 1.5 !important; color: #064E47 !important; background: #EDF8F5; }
+.lp-save svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; color: var(--ok); }
+
+/* Planned pricing */
+.lp-price-label { margin-bottom: 12px; }
+.lp-price-label .chip { font-weight: 750; }
+.lp-price-wrap { overflow-x: auto; border-radius: 20px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+.lp-price-table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.55; }
+.lp-price-table th, .lp-price-table td { padding: 16px 20px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.lp-price-table thead th { font-size: 12.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--small); background: #F8FBFF; }
+.lp-price-table tbody th { width: 22%; font-family: var(--display); font-size: 16px; font-weight: 750; color: var(--text); }
+.lp-price-table td { color: var(--ink-2); }
+.lp-price-table td b { color: var(--text); }
+.lp-price-table td:last-child { width: 24%; }
+.lp-price-table td:last-child b { color: var(--primary-deep); }
+.lp-price-table tr.is-free th, .lp-price-table tr.is-free td { background: #F2FBF9; }
+.lp-price-table tr.is-free td:last-child b { color: var(--ok); }
+.lp-price-table tr:last-child th, .lp-price-table tr:last-child td { border-bottom: 0; }
+
+/* The plan ahead */
+.lp-beyond-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.lp-beyond-card { padding: 28px; border-radius: 22px; background: #fff; border: 1px dashed #C9B8EE; }
+.lp .lp-beyond-card h3 { margin-top: 12px; font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
+.lp-beyond-card > p:not(.lp-beyond-k):not(.lp-beyond-cities) { margin-top: 8px; font-size: 15px; line-height: 1.6; color: var(--ink-2); }
+.lp-beyond-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.lp-beyond-list li { position: relative; padding-left: 22px; font-size: 15px; line-height: 1.55; color: var(--ink-2); }
+.lp-beyond-list li::before { content: ""; position: absolute; left: 2px; top: .62em; width: 8px; height: 8px; border-radius: 2px; background: var(--violet); transform: rotate(45deg); }
+.lp-beyond-cities { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.lp-beyond-cities span { padding: 5px 12px; border-radius: 999px; font-size: 13.5px; font-weight: 700; color: var(--violet); background: var(--violet-soft); }
+.lp-bstats { margin-top: 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+@media (max-width: 1180px) {
+  .lp-eco-list, .lp-feat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lp-arch-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lp-arch-col + .lp-arch-col::before, .lp-arch-col + .lp-arch-col::after { display: none; }
+  .lp-arch-col.is-out { grid-column: 1 / -1; }
+  .lp-use { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lp-sites-grid { grid-template-columns: 1fr; }
+  .lp-sites-shot { position: static; max-width: 560px; }
+}
+@media (max-width: 699px) {
+  .lp-eco { padding: 24px 16px; border-radius: 20px; }
+  .lp-eco-list, .lp-feat-grid, .lp-arch-flow, .lp-sfeat, .lp-beyond-grid, .lp-bstats, .lp-use { grid-template-columns: 1fr; }
+  .lp-feat-card { padding: 16px; }
+  .lp-arch { padding: 24px 16px; border-radius: 20px; }
+  .lp-arch-col + .lp-arch-col { margin-top: 0; }
+  .lp-sites-fig { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .lp-sites-foot .lp-cta { width: 100%; }
+  .lp-sites-adv { border-radius: 14px; }
+  .lp-beyond-card { padding: 22px 20px; }
+  .lp-price-wrap { overflow: visible; background: transparent; border: 0; box-shadow: none; }
+  .lp-price-table, .lp-price-table tbody, .lp-price-table tr, .lp-price-table th, .lp-price-table td { display: block; width: 100% !important; }
+  .lp-price-table thead { display: none; }
+  .lp-price-table tbody { display: grid; gap: 12px; }
+  .lp-price-table tr { border-radius: 16px; background: #fff; border: 1px solid var(--line); overflow: hidden; }
+  .lp-price-table th, .lp-price-table td { border-bottom: 0; padding: 4px 16px; }
+  .lp-price-table tbody th { padding-top: 16px; }
+  .lp-price-table td:last-child { padding-bottom: 16px; }
+  .lp-price-table td::before { content: attr(data-k); display: block; font-size: 11.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--small); margin-bottom: 2px; }
+}
+body:not(.lang-en) .lp-arch-k, body:not(.lang-en) .lp-price-table thead th, body:not(.lang-en) .lp-price-table td::before { letter-spacing: .02em; text-transform: none; }
