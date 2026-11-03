@@ -2,6 +2,7 @@
 {{with .Home.Showcase}}{{with .Stage}}<link rel="preload" as="image" href="{{asset .Photo}}" imagesrcset="{{asset .PhotoSmall}} 960w, {{asset .Photo}} 1632w" imagesizes="(max-width: 699px) 200vw, (max-width: 1119px) 160vw, 1240px" fetchpriority="high">{{end}}{{end}}{{end}}
 
 {{define "content"}}
+{{$control := "/control"}}{{if .Demo}}{{$control = "/control/demo"}}{{end}}
 <div class="lp">
   <section class="lp-hero" aria-labelledby="h-title">
     <div class="lp-wrap lp-hero-text">
@@ -12,6 +13,19 @@
         <a class="btn btn-primary btn-lg" href="/report#try">{{template "icon-camera"}}{{t "lp.cta_try"}}</a>
         <a class="btn btn-ghost btn-lg" href="/map?city={{.City.ID}}">{{template "icon-map"}}{{t "lp.cta_map"}}</a>
       </div>
+      <nav class="lp-sys" aria-labelledby="sys-label">
+        <p class="lp-sys-label" id="sys-label">{{t "lp2.sys_label"}}</p>
+        <ul class="lp-sys-list" role="list">
+          <li><a href="/report#try">{{template "icon-camera"}}<span>{{t "lp2.sys_measure"}}</span></a></li>
+          <li><a href="/map?city={{.City.ID}}">{{template "icon-map"}}<span>{{t "lp2.sys_map"}}</span></a></li>
+          <li><a href="/route">{{template "icon-route"}}<span>{{t "lp2.sys_route"}}</span></a></li>
+          <li><a href="/alerts">{{template "icon-bell"}}<span>{{t "lp2.sys_alerts"}}</span></a></li>
+          <li><a href="{{$control}}">{{template "icon-control"}}<span>{{t "lp2.sys_control"}}</span></a></li>
+          <li><a href="/sites">{{template "icon-server"}}<span>{{t "lp2.sys_sites"}}</span></a></li>
+          <li><a href="/verify/{{template "cert-id"}}">{{template "icon-shield"}}<span>{{t "lp2.sys_verify"}}</span></a></li>
+          <li><a href="/developers">{{template "icon-code"}}<span>{{t "lp2.sys_api"}}</span></a></li>
+        </ul>
+      </nav>
     </div>
 
     {{with .Home.Showcase}}{{if .Stage}}
@@ -105,46 +119,92 @@
     </div>
   </section>
 
-  {{with .Home.Showcase}}
-  <section class="lp-sec lp-agent" aria-labelledby="h-agent">
+  <!-- 1. The problem, with sourced numbers -->
+  <section class="lp-sec lp-problem" id="problem" aria-labelledby="h-problem">
     <div class="lp-wrap">
       <div class="lp-head">
         <div>
-          <p class="lp-eyebrow">{{t "lp.m_eyebrow"}}</p>
-          <h2 id="h-agent">{{t "lp.m_title"}}</h2>
+          <p class="lp-eyebrow">{{t "lp2.p_eyebrow"}}</p>
+          <h2 id="h-problem">{{t "lp2.p_title"}}</h2>
         </div>
-        <p class="lp-lead">{{t "lp.m_lead"}}</p>
+        <p class="lp-lead">{{t "lp2.p_lead"}}</p>
       </div>
-      <ol class="lp-steps" role="list">
-        <li><span class="lp-n">01</span><h3>{{t "lp.m1"}}</h3><p>{{t "lp.m1_p"}}</p></li>
-        <li><span class="lp-n">02</span><h3>{{t "lp.m2"}}</h3><p>{{t "lp.m2_p"}}</p></li>
-        <li><span class="lp-n">03</span><h3>{{t "lp.m3"}}</h3><p>{{t "lp.m3_p"}}</p></li>
-        <li class="is-guard"><span class="lp-n">04</span><h3>{{t "lp.m4"}}</h3><p>{{t "lp.m4_p"}}</p></li>
-      </ol>
-      {{with .Shots}}
-      <div class="lp-shots">
-        <p class="lp-shots-title">{{t "lp.m_seen"}}</p>
-        <ul class="lp-shots-list" role="list">
-          {{range .}}<li class="t-{{.Tone}}"><img src="{{asset .Thumb}}" alt="{{.Alt}}" width="720" height="357" loading="lazy" decoding="async"><p><span>{{t "lp.m_shot" .Target .Try}}</span><b class="lp-v">{{.Verdict}}</b></p></li>
-          {{end}}
-        </ul>
+      <ul class="lp-stats" role="list">
+        <li>
+          <p class="lp-stat-where">{{t "lp2.p1_where"}}</p>
+          <b class="lp-stat-big">289</b>
+          <p>{{t "lp2.p1"}}</p>
+          <p class="lp-cite">{{t "lp2.source"}} <a href="https://www.swissre.com/dam/jcr:b4a158fc-2669-4b70-b817-96db6a8705e9/sigma1_2016_en.pdf" rel="noopener">Swiss Re, sigma 1/2016</a></p>
+        </li>
+        <li>
+          <p class="lp-stat-where">{{t "lp2.p2_where"}}</p>
+          <b class="lp-stat-big">944<small> mm</small></b>
+          <p>{{t "lp2.p2"}}</p>
+          <p class="lp-cite">{{t "lp2.source"}} <a href="https://sdma.goa.gov.in/sites/default/files/2022-05/management_urban_flooding.pdf" rel="noopener">NDMA, Management of Urban Flooding, 2010</a></p>
+        </li>
+        <li>
+          <p class="lp-stat-where">{{t "lp2.p3_where"}}</p>
+          <b class="lp-stat-big">{{t "lp2.p3_big"}}</b>
+          <p>{{t "lp2.p3"}}</p>
+          <p class="lp-cite">{{t "lp2.source"}} <a href="https://www.business-standard.com/article/current-affairs/aug-30-flood-in-bengaluru-led-to-a-loss-of-rs-225-cr-it-firms-to-cm-bommai-122090301023_1.html" rel="noopener">Business Standard (PTI), 3 Sep 2022</a></p>
+        </li>
+        <li>
+          <p class="lp-stat-where">{{t "lp2.p4_where"}}</p>
+          <b class="lp-stat-big">{{t "lp2.p4_big"}}</b>
+          <p>{{t "lp2.p4"}}</p>
+          <p class="lp-cite">{{t "lp2.source"}} <a href="https://www.dtnext.in/amp/story/news/tamilnadu/stalin-writes-to-modi-seeking-rs-5060-crore-for-interim-flood-relief-752682" rel="noopener">DT Next, 6 Dec 2023</a></p>
+        </li>
+      </ul>
+      <div class="lp-gap">
+        <h3 class="lp-gap-title">{{t "lp2.g_title"}}</h3>
+        <ol class="lp-gap-list" role="list">
+          <li><span class="lp-gap-ic">{{template "icon-gauge"}}</span><h4>{{t "lp2.g1"}}</h4><p>{{t "lp2.g1_p"}}</p><p class="lp-cite">{{t "lp2.source"}} <a href="https://sdma.goa.gov.in/sites/default/files/2022-05/management_urban_flooding.pdf" rel="noopener">NDMA, 2010, section 3.6</a></p></li>
+          <li><span class="lp-gap-ic">{{template "icon-map"}}</span><h4>{{t "lp2.g2"}}</h4><p>{{t "lp2.g2_p"}}</p></li>
+          <li><span class="lp-gap-ic">{{template "vehicle-icon-bike"}}</span><h4>{{t "lp2.g3"}}</h4><p>{{t "lp2.g3_p"}}</p></li>
+        </ol>
       </div>
-      {{end}}
-      <div class="lp-status">
-        <p><span class="chip chip-ok">{{t "lp.status_running"}}</span><span>{{t "lp.status_running_p"}}</span></p>
-        <p><span class="chip chip-grey">{{t "lp.status_off"}}</span><span>{{t "lp.status_off_p"}}</span></p>
-      </div>
-      <details class="lp-all">
-        <summary>{{t "lp.all_steps" .Total}}</summary>
-        <div class="table-wrap"><table>
-          <thead><tr><th scope="col">#</th><th scope="col">{{t "lp.col_step"}}</th><th scope="col">{{t "lp.col_target"}}</th><th scope="col">{{t "lp.col_model"}}</th><th scope="col">{{t "trace.input"}}</th><th scope="col">{{t "lp.raw_output"}}</th><th scope="col">{{t "lp.raw_decision"}}</th><th scope="col">ms</th></tr></thead>
-          <tbody>{{range .Steps}}<tr><td class="num">{{.Index}}</td><td>{{.Label}}</td><td>{{.Target}}</td><td class="mono">{{.Model}}</td><td class="mono small">{{.RawInput}}</td><td class="small">{{.RawOutput}}</td><td class="small">{{.RawDecision}}</td><td class="num">{{.Latency}}</td></tr>{{end}}</tbody>
-        </table></div>
-        <p class="small muted lp-all-src">{{t "lp.trace_credit" .Title .Author .Licence .RunDate}} <a href="{{.DocURL}}" rel="noopener">{{.Doc}}</a></p>
-      </details>
     </div>
   </section>
-  {{end}}
+
+  <!-- 2. How it works -->
+  <section class="lp-sec lp-how" id="how" aria-labelledby="h-how">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <div>
+          <p class="lp-eyebrow">{{t "lp2.h_eyebrow"}}</p>
+          <h2 id="h-how">{{t "lp2.h_title"}}</h2>
+        </div>
+        <p class="lp-lead">{{t "lp2.h_lead"}}</p>
+      </div>
+      <ol class="lp-flow" role="list">
+        <li>
+          <div class="lp-flow-top"><span class="lp-n">1</span><span class="lp-flow-ic">{{template "icon-camera"}}</span></div>
+          <h3>{{t "lp2.h1"}}</h3>
+          <p>{{t "lp2.h1_p"}}</p>
+          <p class="lp-tags"><span class="lp-tag">{{t "lp2.h1_tag"}}</span></p>
+        </li>
+        <li class="is-meta">
+          <div class="lp-flow-top"><span class="lp-n">2</span><span class="lp-flow-ic">{{template "icon-spark"}}</span></div>
+          <h3>{{t "lp2.h2"}}</h3>
+          <p>{{t "lp2.h2_p"}}</p>
+          <p class="lp-tags"><span class="lp-tag is-meta">Muse Spark Open</span><span class="lp-tag is-meta">SAM 2.1</span></p>
+        </li>
+        <li>
+          <div class="lp-flow-top"><span class="lp-n">3</span><span class="lp-flow-ic">{{template "icon-ruler"}}</span></div>
+          <h3>{{t "lp2.h3"}}</h3>
+          <p>{{t "lp2.h3_p"}}</p>
+          <p class="lp-tags"><span class="lp-tag">{{t "lp2.h3_tag"}}</span></p>
+        </li>
+        <li>
+          <div class="lp-flow-top"><span class="lp-n">4</span><span class="lp-flow-ic">{{template "icon-route"}}</span></div>
+          <h3>{{t "lp2.h4"}}</h3>
+          <p>{{t "lp2.h4_p"}}</p>
+          <p class="lp-tags"><span class="lp-tag">{{t "lp2.h4_tag"}}</span></p>
+        </li>
+      </ol>
+      <p class="lp-note lp-how-note">{{template "icon-alert"}}<span>{{t "lp2.h_note"}} <a href="#numbers">{{t "lp2.h_note_link"}}</a></span></p>
+    </div>
+  </section>
 
   {{with .Home.Samples}}
   <section class="lp-sec lp-try" id="try-samples" aria-labelledby="h-try">
@@ -168,6 +228,220 @@
     </div>
   </section>
   {{end}}
+
+  <!-- 3. Why it is different -->
+  <section class="lp-sec lp-diff" id="different" aria-labelledby="h-diff">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <div>
+          <p class="lp-eyebrow">{{t "lp2.d_eyebrow"}}</p>
+          <h2 id="h-diff">{{t "lp2.d_title"}}</h2>
+        </div>
+        <p class="lp-lead">{{t "lp2.d_lead"}}</p>
+      </div>
+      <div class="lp-cmp-wrap">
+        <table class="lp-cmp">
+          <thead><tr><th scope="col">{{t "lp2.d_col_src"}}</th><th scope="col">{{t "lp2.d_col_gives"}}</th><th scope="col">{{t "lp2.d_col_misses"}}</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">{{t "lp2.d_r1"}}</th><td data-k="{{t "lp2.d_col_gives"}}">{{t "lp2.d_r1_g"}}</td><td data-k="{{t "lp2.d_col_misses"}}">{{t "lp2.d_r1_m"}}</td></tr>
+            <tr><th scope="row">{{t "lp2.d_r2"}}</th><td data-k="{{t "lp2.d_col_gives"}}">{{t "lp2.d_r2_g"}}</td><td data-k="{{t "lp2.d_col_misses"}}">{{t "lp2.d_r2_m"}}</td></tr>
+            <tr><th scope="row">{{t "lp2.d_r3"}}</th><td data-k="{{t "lp2.d_col_gives"}}">{{t "lp2.d_r3_g"}}</td><td data-k="{{t "lp2.d_col_misses"}}">{{t "lp2.d_r3_m"}}</td></tr>
+            <tr><th scope="row">{{t "lp2.d_r4"}}</th><td data-k="{{t "lp2.d_col_gives"}}">{{t "lp2.d_r4_g"}}</td><td data-k="{{t "lp2.d_col_misses"}}">{{t "lp2.d_r4_m"}}</td></tr>
+            <tr class="is-us"><th scope="row">Neermattam</th><td data-k="{{t "lp2.d_col_gives"}}">{{t "lp2.d_r5_g"}}</td><td data-k="{{t "lp2.d_col_misses"}}">{{t "lp2.d_r5_m"}}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="lp-uniq" role="list">
+        <li><span class="lp-ic">{{template "icon-ruler"}}</span><h3>{{t "lp2.u1"}}</h3><p>{{t "lp2.u1_p"}}</p></li>
+        <li><span class="lp-ic is-violet">{{template "icon-spark"}}</span><h3>{{t "lp2.u2"}}</h3><p>{{t "lp2.u2_p"}}</p></li>
+        <li><span class="lp-ic is-red">{{template "icon-alert"}}</span><h3>{{t "lp2.u3"}}</h3><p>{{t "lp2.u3_p"}}</p></li>
+        <li><span class="lp-ic">{{template "icon-shield"}}</span><h3>{{t "lp2.u4"}}</h3><p>{{t "lp2.u4_p"}}</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 4. Who it serves -->
+  <section class="lp-sec lp-who" id="who" aria-labelledby="h-who">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <div>
+          <p class="lp-eyebrow">{{t "lp.w_eyebrow"}}</p>
+          <h2 id="h-who">{{t "lp2.w_title"}}</h2>
+        </div>
+        <p class="lp-lead">{{t "lp2.w_lead"}}</p>
+      </div>
+      <ul class="lp-use" role="list">
+        <li>
+          <span class="lp-ic">{{template "vehicle-icon-bike"}}</span>
+          <h3>{{t "lp.who_riders"}}</h3>
+          <p>{{t "lp2.w_riders_p"}}</p>
+          <div class="lp-fig"><b>{{t "lp2.w_riders_big"}}</b><span>{{t "lp2.w_riders_fig"}}</span><span class="lp-cite"><a href="https://www.pib.gov.in/PressReleasePage.aspx?PRID=1837277" rel="noopener">NITI Aayog, via PIB, 27 Jun 2022</a></span></div>
+          <a class="lp-use-go" href="/route">{{t "lp.who_link_route"}}{{template "icon-chev-right"}}</a>
+        </li>
+        <li>
+          <span class="lp-ic">{{template "icon-ambulance"}}</span>
+          <h3>{{t "lp.who_crews"}}</h3>
+          <p>{{t "lp.who_crews_p"}}</p>
+          <a class="lp-use-go" href="/route">{{t "lp.who_link_route"}}{{template "icon-chev-right"}}</a>
+        </li>
+        <li>
+          <span class="lp-ic">{{template "icon-family"}}</span>
+          <h3>{{t "lp.who_families"}}</h3>
+          <p>{{t "lp.who_families_p"}}</p>
+          <a class="lp-use-go" href="/alerts">{{t "home.who_link_alerts"}}{{template "icon-chev-right"}}</a>
+        </li>
+        <li>
+          <span class="lp-ic">{{template "icon-control"}}</span>
+          <h3>{{t "lp2.w_control"}}</h3>
+          <p>{{t "lp.who_control_p"}}</p>
+          <div class="lp-fig"><b>100</b><span>{{t "lp2.w_control_fig"}}</span><span class="lp-cite"><a href="https://www.pib.gov.in/PressReleaseIframePage.aspx?PRID=1907135" rel="noopener">PIB, 15 Mar 2023</a></span></div>
+          <a class="lp-use-go" href="{{$control}}">{{t "lp2.w_link_control"}}{{template "icon-chev-right"}}</a>
+        </li>
+        <li>
+          <span class="lp-ic">{{template "icon-server"}}</span>
+          <h3>{{t "lp2.w_dc"}}</h3>
+          <p>{{t "lp2.w_dc_p"}}</p>
+          <div class="lp-fig"><b>73%</b><span>{{t "lp2.w_dc_fig"}}</span><span class="lp-cite"><a href="https://www.tribuneindia.com/news/business/mumbai-leads-indias-data-centre-capacity-with-53-share-ytd-report" rel="noopener">CBRE, via ANI, 12 Nov 2025</a></span></div>
+          <a class="lp-use-go" href="/sites">{{t "lp.who_link_sites"}}{{template "icon-chev-right"}}</a>
+        </li>
+        <li>
+          <span class="lp-ic">{{template "icon-hospital"}}</span>
+          <h3>{{t "lp2.w_hosp"}}</h3>
+          <p>{{t "lp2.w_hosp_p"}}</p>
+          <div class="lp-fig"><b>842</b><span>{{t "lp2.w_hosp_fig"}}</span><span class="lp-cite"><a href="https://github.com/vignesh2027/neermattam/blob/main/docs/SITES.md" rel="noopener">OpenStreetMap, docs/SITES.md</a></span></div>
+          <a class="lp-use-go" href="/sites">{{t "lp.who_link_sites"}}{{template "icon-chev-right"}}</a>
+        </li>
+        <li>
+          <span class="lp-ic">{{template "icon-shield"}}</span>
+          <h3>{{t "lp2.w_ins"}}</h3>
+          <p>{{t "lp2.w_ins_p"}}</p>
+          <div class="lp-fig"><b>{{t "lp2.w_ins_big"}}</b><span>{{t "lp2.w_ins_fig"}}</span><span class="lp-cite"><a href="https://www.swissre.com/dam/jcr:b4a158fc-2669-4b70-b817-96db6a8705e9/sigma1_2016_en.pdf" rel="noopener">Swiss Re, sigma 1/2016</a></span></div>
+          <a class="lp-use-go" href="/verify/{{template "cert-id"}}">{{t "lp2.w_link_cert"}}{{template "icon-chev-right"}}</a>
+        </li>
+        <li>
+          <span class="lp-ic">{{template "icon-code"}}</span>
+          <h3>{{t "lp2.w_dev"}}</h3>
+          <p>{{t "lp2.w_dev_p"}}</p>
+          <div class="lp-fig"><b>7</b><span>{{t "lp2.w_dev_fig"}}</span></div>
+          <a class="lp-use-go" href="/developers">{{t "lp2.w_link_dev"}}{{template "icon-chev-right"}}</a>
+        </li>
+      </ul>
+      <p class="lp-note">{{t "lp.w_langs"}}</p>
+    </div>
+  </section>
+
+  <!-- 5. Why Meta's models -->
+  <section class="lp-sec lp-meta" id="meta" aria-labelledby="h-meta">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <div>
+          <p class="lp-eyebrow">{{t "lp2.x_eyebrow"}}</p>
+          <h2 id="h-meta">{{t "lp2.x_title"}}</h2>
+        </div>
+        <p class="lp-lead">{{t "lp2.x_lead"}}</p>
+      </div>
+      <div class="lp-models">
+        <article class="lp-model">
+          <p class="lp-model-k">{{t "lp2.x_muse_role"}}</p>
+          <h3>Muse Spark Open</h3>
+          <ul role="list">
+            <li>{{t "lp2.x_muse1"}}</li>
+            <li>{{t "lp2.x_muse2"}}</li>
+            <li>{{t "lp2.x_muse3"}}</li>
+            <li>{{t "lp2.x_muse4"}}</li>
+          </ul>
+          <p class="lp-model-where"><span class="chip chip-ok">{{t "lp.status_running"}}</span>{{t "lp2.x_muse_where"}}</p>
+        </article>
+        <article class="lp-model">
+          <p class="lp-model-k">{{t "lp2.x_sam_role"}}</p>
+          <h3>SAM 2.1</h3>
+          <ul role="list">
+            <li>{{t "lp2.x_sam1"}}</li>
+            <li>{{t "lp2.x_sam2"}}</li>
+            <li>{{t "lp2.x_sam3"}}</li>
+          </ul>
+          <p class="lp-model-where"><span class="chip chip-ok">{{t "lp.status_running"}}</span>{{t "lp2.x_sam_where"}}</p>
+        </article>
+      </div>
+      <div class="lp-open">
+        <h3 class="lp-open-title">{{t "lp2.o_title"}}</h3>
+        <ul class="lp-open-list" role="list">
+          <li><span class="lp-open-ic">{{template "icon-server"}}</span><div><h4>{{t "lp2.o1"}}</h4><p>{{t "lp2.o1_p"}}</p></div></li>
+          <li><span class="lp-open-ic">{{template "icon-coin"}}</span><div><h4>{{t "lp2.o2"}}</h4><p>{{t "lp2.o2_p"}}</p></div></li>
+          <li><span class="lp-open-ic">{{template "icon-shield"}}</span><div><h4>{{t "lp2.o3"}}</h4><p>{{t "lp2.o3_p"}}</p></div></li>
+        </ul>
+      </div>
+
+      {{with .Home.Showcase}}
+      <div class="lp-agent">
+        <h3 class="lp-sub-h" id="h-agent">{{t "lp.m_title"}}</h3>
+        <p class="lp-sub-lead">{{t "lp.m_lead"}}</p>
+        <ol class="lp-steps" role="list">
+          <li><span class="lp-n">01</span><h3>{{t "lp.m1"}}</h3><p>{{t "lp.m1_p"}}</p></li>
+          <li><span class="lp-n">02</span><h3>{{t "lp.m2"}}</h3><p>{{t "lp.m2_p"}}</p></li>
+          <li><span class="lp-n">03</span><h3>{{t "lp.m3"}}</h3><p>{{t "lp.m3_p"}}</p></li>
+          <li class="is-guard"><span class="lp-n">04</span><h3>{{t "lp.m4"}}</h3><p>{{t "lp.m4_p"}}</p></li>
+        </ol>
+        {{with .Shots}}
+        <div class="lp-shots">
+          <p class="lp-shots-title">{{t "lp.m_seen"}}</p>
+          <ul class="lp-shots-list" role="list">
+            {{range .}}<li class="t-{{.Tone}}"><img src="{{asset .Thumb}}" alt="{{.Alt}}" width="720" height="357" loading="lazy" decoding="async"><p><span>{{t "lp.m_shot" .Target .Try}}</span><b class="lp-v">{{.Verdict}}</b></p></li>
+            {{end}}
+          </ul>
+        </div>
+        {{end}}
+        <div class="lp-status">
+          <p><span class="chip chip-ok">{{t "lp.status_running"}}</span><span>{{t "lp.status_running_p"}}</span></p>
+          <p><span class="chip chip-grey">{{t "lp.status_off"}}</span><span>{{t "lp.status_off_p"}}</span></p>
+        </div>
+        <details class="lp-all">
+          <summary>{{t "lp.all_steps" .Total}}</summary>
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">#</th><th scope="col">{{t "lp.col_step"}}</th><th scope="col">{{t "lp.col_target"}}</th><th scope="col">{{t "lp.col_model"}}</th><th scope="col">{{t "trace.input"}}</th><th scope="col">{{t "lp.raw_output"}}</th><th scope="col">{{t "lp.raw_decision"}}</th><th scope="col">ms</th></tr></thead>
+            <tbody>{{range .Steps}}<tr><td class="num">{{.Index}}</td><td>{{.Label}}</td><td>{{.Target}}</td><td class="mono">{{.Model}}</td><td class="mono small">{{.RawInput}}</td><td class="small">{{.RawOutput}}</td><td class="small">{{.RawDecision}}</td><td class="num">{{.Latency}}</td></tr>{{end}}</tbody>
+          </table></div>
+          <p class="small muted lp-all-src">{{t "lp.trace_credit" .Title .Author .Licence .RunDate}} <a href="{{.DocURL}}" rel="noopener">{{.Doc}}</a></p>
+        </details>
+      </div>
+      {{end}}
+    </div>
+  </section>
+
+  <!-- 6. How it sustains itself -->
+  <section class="lp-sec lp-biz" id="business" aria-labelledby="h-biz">
+    <div class="lp-wrap">
+      <div class="lp-head">
+        <div>
+          <p class="lp-eyebrow">{{t "lp2.m_eyebrow"}}</p>
+          <h2 id="h-biz">{{t "lp2.m_title"}}</h2>
+        </div>
+        <p class="lp-lead">{{t "lp2.m_lead"}}</p>
+      </div>
+      <div class="lp-free">
+        <div>
+          <p class="lp-free-k">{{t "lp2.t0"}}</p>
+          <p class="lp-free-price">{{t "lp2.t0_price"}}</p>
+        </div>
+        <p>{{t "lp2.t0_p"}}</p>
+      </div>
+      <ul class="lp-tiers" role="list">
+        <li><p class="lp-tier-who">{{t "lp2.t1"}}</p><h3>{{t "lp2.t1_what"}}</h3><p>{{t "lp2.t1_p"}}</p></li>
+        <li><p class="lp-tier-who">{{t "lp2.t2"}}</p><h3>{{t "lp2.t2_what"}}</h3><p>{{t "lp2.t2_p"}}</p></li>
+        <li><p class="lp-tier-who">{{t "lp2.t3"}}</p><h3>{{t "lp2.t3_what"}}</h3><p>{{t "lp2.t3_p"}}</p></li>
+        <li><p class="lp-tier-who">{{t "lp2.t4"}}</p><h3>{{t "lp2.t4_what"}}</h3><p>{{t "lp2.t4_p"}}</p></li>
+      </ul>
+      <p class="lp-budget">{{template "icon-coin"}}<span>{{t "lp2.m_budget"}} <span class="lp-cite"><a href="https://www.pib.gov.in/PressReleaseIframePage.aspx?PRID=1983474" rel="noopener">PIB, 7 Dec 2023</a></span></span></p>
+      <div class="lp-next">
+        <h3 class="lp-sub-h">{{t "lp2.n_title"}}</h3>
+        <ol class="lp-next-list" role="list">
+          <li><span class="lp-n">1</span><div><h4>{{t "lp2.n1"}}</h4><p>{{t "lp2.n1_p"}}</p></div></li>
+          <li><span class="lp-n">2</span><div><h4>{{t "lp2.n2"}}</h4><p>{{t "lp2.n2_p"}}</p></div></li>
+          <li><span class="lp-n">3</span><div><h4>{{t "lp2.n3"}}</h4><p>{{t "lp2.n3_p"}}</p></div></li>
+        </ol>
+      </div>
+    </div>
+  </section>
 
   {{with .Home.India}}
   <section class="lp-sec lp-cities" aria-labelledby="h-india">
@@ -216,26 +490,8 @@
   </section>
   {{end}}
 
-  <section class="lp-sec lp-who" aria-labelledby="h-who">
-    <div class="lp-wrap">
-      <div class="lp-head">
-        <div>
-          <p class="lp-eyebrow">{{t "lp.w_eyebrow"}}</p>
-          <h2 id="h-who">{{t "lp.who_title"}}</h2>
-        </div>
-        <p class="lp-lead">{{t "lp.w_langs"}}</p>
-      </div>
-      <ul class="lp-who-grid" role="list">
-        <li><span class="lp-ic">{{template "vehicle-icon-bike"}}</span><h3>{{t "lp.who_riders"}}</h3><p>{{t "lp.who_riders_p"}}</p><a href="/route">{{t "lp.who_link_route"}}</a></li>
-        <li><span class="lp-ic">{{template "icon-ambulance"}}</span><h3>{{t "lp.who_crews"}}</h3><p>{{t "lp.who_crews_p"}}</p><a href="/route">{{t "lp.who_link_route"}}</a></li>
-        <li><span class="lp-ic">{{template "icon-family"}}</span><h3>{{t "lp.who_families"}}</h3><p>{{t "lp.who_families_p"}}</p><a href="/alerts">{{t "home.who_link_alerts"}}</a></li>
-        <li><span class="lp-ic">{{template "icon-control"}}</span><h3>{{t "home.who_control"}}</h3><p>{{t "lp.who_control_p"}}</p><a href="{{if .Demo}}/control/demo{{else}}/control{{end}}">{{t "home.who_link_control"}}</a></li>
-      </ul>
-    </div>
-  </section>
-
   {{with .Home.Facts}}
-  <section class="lp-sec lp-numbers" aria-labelledby="h-numbers">
+  <section class="lp-sec lp-numbers" id="numbers" aria-labelledby="h-numbers">
     <div class="lp-wrap">
       <div class="lp-head">
         <div>
@@ -276,8 +532,24 @@
       </div>
     </div>
   </section>
+
+  <section class="lp-sec lp-end" aria-labelledby="h-end">
+    <div class="lp-wrap lp-end-inner">
+      <h2 id="h-end">{{t "lp2.end_title"}}</h2>
+      <p class="lp-lead">{{t "lp2.end_p"}}</p>
+      <div class="lp-cta">
+        <a class="btn btn-primary btn-lg" href="/report#try">{{template "icon-camera"}}{{t "lp.cta_try"}}</a>
+        <a class="btn btn-ghost btn-lg" href="{{$control}}">{{template "icon-control"}}{{t "lp2.w_link_control"}}</a>
+        <a class="btn btn-ghost btn-lg" href="/sites">{{template "icon-server"}}{{t "lp.who_link_sites"}}</a>
+      </div>
+    </div>
+  </section>
 </div>
 {{end}}
+
+{{/* A signed certificate that every deployment holds: the archival
+     Chennai photo chn1, embedded in internal/photos/records. */}}
+{{define "cert-id"}}m_01M6C1F008FE8Z6NVCPE0RTNB7{{end}}
 
 {{define "icon-map"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg>{{end}}
 {{define "icon-chev-right"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>{{end}}
@@ -287,6 +559,10 @@
 {{define "icon-family"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="5" r="2"/><circle cx="17" cy="5" r="2"/><circle cx="12" cy="11" r="1.6"/><path d="M5 21v-6l-1-4 3-2 3 2-1 4v6"/><path d="M15 21v-6l-1-4 3-2 3 2-1 4v6"/><path d="M11 21v-4l-1-2h4l-1 2v4"/></svg>{{end}}
 {{define "icon-control"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="m6 12 3-3 3 2 5-4"/></svg>{{end}}
 {{define "icon-ambulance"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 16V7a1 1 0 0 1 1-1h11v10"/><path d="M14 9h4l3 4v3h-2"/><path d="M2 16h2m5 0h6"/><circle cx="6.5" cy="16.5" r="2"/><circle cx="17" cy="16.5" r="2"/><path d="M8 8.5v4M6 10.5h4"/></svg>{{end}}
+{{define "icon-server"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6"/></svg>{{end}}
+{{define "icon-hospital"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V7l8-4 8 4v14"/><path d="M2 21h20"/><path d="M12 8v6M9 11h6"/><path d="M10 21v-4h4v4"/></svg>{{end}}
+{{define "icon-gauge"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5c0 1-1 1.6-1 2.5a1 1 0 0 0 2 0c0-.9-1-1.5-1-2.5zM16 3.5c0 1-1 1.6-1 2.5a1 1 0 0 0 2 0c0-.9-1-1.5-1-2.5z"/><path d="M6 10h12l-1 10a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 10z"/><path d="M7.5 14h3M7.8 17.5h3"/></svg>{{end}}
+{{define "icon-coin"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>{{end}}
 {{define "vehicle-icon-bike"}}{{template "vehicle-icon" "two_wheeler"}}{{end}}
 
 {{define "scripts"}}<script nonce="{{.Nonce}}">
