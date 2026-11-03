@@ -16,7 +16,7 @@ Neermattam (Tamil: water level) measures how deep and how fast floodwater is on 
 5. **Secrets** live only in `.env`, which is gitignored. Never print or commit keys.
 6. **Writing:** human, plain, professional English. No em dashes and no arrows in prose or UI text.
 7. **Authorship:** do not commit. The maintainer reviews and commits. No co-author lines.
-8. **Tests:** every module ships with tests, and the build stays green: `cargo test`, `go test ./...`, `pytest`.
+8. **Tests:** every module ships with tests, and the build stays green: `cargo test`, `go test ./...`, `pytest` (perception and mcp).
 
 ## Layout
 ```
@@ -24,6 +24,7 @@ engine/       Rust: hex-grid fusion with time decay, hazard rating, OSM road gra
 perception/   Python: geometry (wheel ellipse, waterline, depth with uncertainty), velocity from tracks, model adapters (Meta Model API, open weights), HTTP service
 gateway/      Go: web pages, upload, WhatsApp webhook, job orchestration, SSE live map, rate limits
 eval/         Python: ground-truth harness, published results
+mcp/          Python: MCP server over the gateway's API, for AI agents
 docs/         Architecture, results, decisions
 data/         Gitignored local data (OSM extract, uploads)
 ```

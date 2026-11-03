@@ -1,6 +1,6 @@
 # Neermattam
 
-**A live flood depth map and safe vehicle routing for Indian cities. Two Meta open models check each other to turn citizens' phone photos into measured depths, a Rust engine fuses them street by street, and every vehicle is routed around water it cannot cross.**
+**Street-level flood depth from one phone photo, measured with a wheel or a person as the ruler, fused into a live map that routes each kind of vehicle around water it cannot cross.**
 
 ![Neermattam landing page: the headline "How deep is the water on your street?", links to every part of the system, and a recorded run of a flooded Chennai street measured at 46 cm plus or minus 13 against a person in the water, with Muse Spark Open's verdicts on each outline](docs/img/gateway-home.png)
 
@@ -119,9 +119,18 @@ The map opens on real data only: live reports, Open-Meteo rainfall for every cit
 cd engine && cargo test
 cd gateway && go test ./...
 cd perception && uv run pytest && uv run python ../eval/gate.py
+cd mcp && uv run pytest
 ```
 
 The public deployment is one command, `modal deploy deploy/modal-web/app.py`; [docs/DEPLOY.md](docs/DEPLOY.md) covers secrets, the daily cap of 150 measurements and the running cost.
+
+## MCP server
+
+[`mcp/`](mcp/README.md) is a Model Context Protocol server, so any AI agent or assistant (Claude Desktop, Cursor, Claude Code or any MCP client) can ask the live site how deep the water is near a point, which route is open for a vehicle, what state a data centre's rings and access routes are in, measure a photo and check a measurement's certificate. It calls the public API (and the developer API when given a key), keeps the same rules (advisory, unknown is never safe, every depth with its sigma) and ships with mocked tests and a live smoke script whose real output is in its README.
+
+```sh
+cd mcp && uv sync && uv run neermattam-mcp
+```
 
 ## Built during the hackathon
 
@@ -143,7 +152,7 @@ Third-party pieces I did not write:
 | Evaluation photos | Downloaded by `eval/real_photos.py`, not in git | CC0, CC BY 2.0, CC BY 3.0, CC BY-SA 4.0 and Unsplash License, credited per photo |
 | Sample and showcase photos on the site | Four evaluation photos, faces and plates blurred, in `gateway/internal/samples` and `static/showcase` | CC0 1.0, CC BY 2.0, CC BY 3.0 and Unsplash License, credited on the page and in `samples.json` |
 
-Library dependencies are pinned in `engine/Cargo.lock` and `perception/uv.lock`. The gateway uses only Go's standard library.
+Library dependencies are pinned in `engine/Cargo.lock`, `perception/uv.lock` and `mcp/uv.lock`. The gateway uses only Go's standard library.
 
 ## Languages and cities
 
