@@ -2,7 +2,7 @@
 
 **Street-level flood depth from one phone photo, measured with a wheel or a person as the ruler, fused into a live map that routes each kind of vehicle around water it cannot cross.**
 
-![Neermattam landing page: the headline "Forecasts say where India will flood. Neermattam measures how deep, street by street." beside one recorded measurement of a flooded Chennai street, 46 cm plus or minus 13, with Muse Spark Open's verdicts on each outline](docs/img/gateway-home.png)
+![Neermattam landing page: the headline "How deep is the water on your street?", links to every part of the system, and a recorded run of a flooded Chennai street measured at 46 cm plus or minus 13 against a person in the water, with Muse Spark Open's verdicts on each outline](docs/img/gateway-home.png)
 
 **Live site:** https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run
 
