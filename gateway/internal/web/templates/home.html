@@ -258,6 +258,7 @@
         <li><a class="lp-feat-card" href="/map?city=chennai&amp;replay=michaung"><span class="lp-feat-ic">{{template "icon-replay"}}</span><span><b>{{t "lp3.f10"}}</b><span>{{t "lp3.f10_p"}}</span></span></a></li>
         <li><a class="lp-feat-card" href="/map?city={{.City.ID}}"><span class="lp-feat-ic">{{template "icon-eye"}}</span><span><b>{{t "lp3.f11"}}</b><span>{{t "lp3.f11_p"}}</span></span></a></li>
         <li><a class="lp-feat-card" href="/?lang=ta"><span class="lp-feat-ic">{{template "icon-globe"}}</span><span><b>{{t "lp3.f12"}}</b><span>{{t "lp3.f12_p"}}</span></span></a></li>
+        <li class="is-wide"><a class="lp-feat-card is-key" href="https://github.com/vignesh2027/neermattam/tree/main/mcp" rel="noopener"><span class="lp-feat-ic">{{template "icon-spark"}}</span><span><b>{{t "lp3.a_mcp"}}</b><span>{{t "lp3.f13_p"}}</span></span></a></li>
       </ul>
       <p class="lp-note">{{t "lp3.f_note"}}</p>
 
@@ -294,7 +295,7 @@
               <li><a href="/sites">{{t "lp2.sys_sites"}}</a></li>
               <li><a href="/verify/{{template "cert-id"}}">{{t "lp2.sys_verify"}}</a></li>
               <li><a href="/developers">{{t "lp2.sys_api"}}</a></li>
-              <li class="is-next"><a href="https://github.com/vignesh2027/neermattam/tree/main/mcp" rel="noopener">{{t "lp3.a_mcp"}}</a><small>{{t "lp3.a_mcp_note"}}</small></li>
+              <li class="is-next"><a href="https://github.com/vignesh2027/neermattam/tree/main/mcp" rel="noopener">{{t "lp3.a_mcp"}}</a><small>{{t "lp3.f13_p"}}</small></li>
             </ul>
           </li>
         </ol>
@@ -783,13 +784,17 @@
       if (comma) { var p = s.split("."); p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ","); s = p.join("."); }
       return s;
     }
+    var done = false;
     function step(ts) {
+      if (done) return;
       if (!t0) t0 = ts;
       var k = Math.min(1, (ts - t0) / dur);
       node.nodeValue = k < 1 ? pre + fmt(target * (1 - Math.pow(1 - k, 3))) + post : orig;
-      if (k < 1) requestAnimationFrame(step);
+      if (k < 1) requestAnimationFrame(step); else done = true;
     }
-    node.nodeValue = pre + fmt(0) + post;
+    /* The true text comes back on time even if frames stop, as in a
+       hidden tab: the count is decoration, the value is not. */
+    setTimeout(function () { done = true; node.nodeValue = orig; }, dur + 300);
     requestAnimationFrame(step);
   }
   var cio = new IntersectionObserver(function (es) {

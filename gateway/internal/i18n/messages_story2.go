@@ -39,7 +39,7 @@ var story2En = map[string]string{
 
 	// Everything it does today
 	"lp3.f_eyebrow": "Everything it does today",
-	"lp3.f_title":   "One photo starts it. Twelve working parts carry it to the people who need it.",
+	"lp3.f_title":   "One photo starts it. Every part below works today.",
 	"lp3.f_lead":    "Each card opens a page that works now. Water appears on the maps only where people have reported it.",
 	"lp3.f1":        "Measure a photo",
 	"lp3.f1_p":      "Depth in centimetres with its plus or minus, and every step the agent took shown beside it.",

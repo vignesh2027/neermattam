@@ -735,3 +735,4 @@ html.lp-motion .rv.in { opacity: 1; translate: none; }
   .lp-price-table td::before { content: attr(data-k); display: block; font-size: 11.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--small); margin-bottom: 2px; }
 }
 body:not(.lang-en) .lp-arch-k, body:not(.lang-en) .lp-price-table thead th, body:not(.lang-en) .lp-price-table td::before { letter-spacing: .02em; text-transform: none; }
+.lp-feat-grid > li.is-wide { grid-column: 1 / -1; }
