@@ -1,16 +1,78 @@
+<div align="center">
+
+<img src="gateway/internal/web/static/brand/mark-128.png" width="88" alt="Neermattam logo">
+
 # Neermattam
 
-**Street-level flood depth from one phone photo, measured with a wheel or a person as the ruler, fused into a live map that routes each kind of vehicle around water it cannot cross.**
+### How deep is the water on your street? Meta's open models measure it from one phone photo, and a whole city acts on the answer.
+
+**Street-level flood depth for Indian cities.** Two Meta open models check each other to turn an ordinary phone photo into a measured depth with an honest error. A Rust engine fuses every measurement into a live street map, routes each vehicle around water it cannot cross, and keeps data centres, hospitals and telephone exchanges reachable.
+
+[![Live site](https://img.shields.io/badge/Live_site-open-2563EB?style=for-the-badge)](https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run)
+[![Demo video](https://img.shields.io/badge/Demo_video-2:54-9F1239?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/cDX91WGaFUQ)
+[![MCP server](https://img.shields.io/badge/MCP_server-for_AI_assistants-4C1D95?style=for-the-badge)](mcp/README.md)
+
+![Muse Spark Open](https://img.shields.io/badge/Meta-Muse_Spark_Open-4C1D95)
+![SAM 2.1](https://img.shields.io/badge/Meta-SAM_2.1-4C1D95)
+![Rust](https://img.shields.io/badge/engine-Rust-B7410E?logo=rust)
+![Go](https://img.shields.io/badge/gateway-Go_stdlib_only-00ADD8?logo=go&logoColor=white)
+![Python](https://img.shields.io/badge/perception-Python-3776AB?logo=python&logoColor=white)
+![Languages](https://img.shields.io/badge/UI-8_Indian_languages-2563EB)
+![Cities](https://img.shields.io/badge/cities-7_live-2563EB)
+![License](https://img.shields.io/badge/license-MIT-0B1B33)
+
+Built solo for the **Meta Global AI Developer Hackathon 2026**, Indie track. Every line written during the event.
+
+</div>
 
 ![Neermattam landing page: the headline "How deep is the water on your street?", links to every part of the system, and a recorded run of a flooded Chennai street measured at 46 cm plus or minus 13 against a person in the water, with Muse Spark Open's verdicts on each outline](docs/img/gateway-home.png)
 
-**Live site:** https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run
+## Why this matters
 
-**Demo video (2:54):** https://youtu.be/cDX91WGaFUQ
+Every northeast monsoon, a rider in Chennai stops at the edge of a flooded street and has to guess. Ankle deep, the scooter gets through. Knee deep, the engine drowns and the rider is stuck in moving water. The same guess is made by an ambulance driver, a delivery fleet, a parent walking a child home, and a data centre deciding whether a diesel tanker can still reach its generators.
 
-Every northeast monsoon, a rider in Chennai stops at the edge of a flooded street and has to guess. Ankle deep, the scooter gets through. Knee deep, the engine drowns and the rider is stuck in moving water. Forecasts tell the city where it will flood; nothing tells that rider how deep the water is on this street, right now. Neermattam (Tamil for "water level") answers with a measurement. A photo of a wheel or a person already standing in the water becomes a depth in centimetres with an honest uncertainty, and many such reports become a live map and a route for a two-wheeler, an auto, a car, a bus or someone on foot.
+* The Chennai floods of December 2015 killed 289 people and caused at least USD 2 billion in losses ([Swiss Re sigma 1/2016](https://www.swissre.com/dam/jcr:b4a158fc-2669-4b70-b817-96db6a8705e9/sigma1_2016_en.pdf)).
+* India's own urban flood guidelines call the lack of real-time data over cities "a very critical gap" ([NDMA, 2010](https://sdma.goa.gov.in/sites/default/files/2022-05/management_urban_flooding.pdf)).
+* Mumbai and Chennai hold about 73% of India's data centre capacity, and both flood ([CBRE via ANI, 2025](https://www.tribuneindia.com/news/business/mumbai-leads-indias-data-centre-capacity-with-53-share-ytd-report)).
+* Worldwide, 1.81 billion people live with serious flood risk, 390 million of them in India ([Rentschler et al., Nature Communications, 2022](https://www.nature.com/articles/s41467-022-30727-4)).
 
-I built it alone for the Meta Global AI Developer Hackathon, Indie track.
+Forecasts say where a city will flood. Gauges measure rain at fixed points. Nothing tells you how deep the water is on this street, right now. Neermattam (Tamil for "water level") answers with a measurement, and turns each measurement into decisions for everyone who has to cross the water.
+
+## One photo, a whole city's flood response
+
+![The idea: one photo serves riders, families, control rooms and critical sites, and can run in any flood-prone city](docs/img/landing-idea.jpg)
+
+| | What it does today | Where |
+|---|---|---|
+| **Measure** | Depth in centimetres with its error from one photo; every agent step and the model's own words shown; a labelled estimate when nothing can be measured | [/report](https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run/report) |
+| **Voice** | Depth words such as "knee deep" parsed in 12 languages (tested on 36 written phrases) | /report |
+| **Live map** | Seven cities with live Open-Meteo rainfall; a street nobody reported on is unknown, never safe | [/map](https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run/map) |
+| **Routes by vehicle** | Walking, two-wheeler, auto, car and bus, each kept out of water it should not cross | [/route](https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run/route) |
+| **Street alerts** | Watch a street or the way home and hear when the water crosses your limit | [/alerts](https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run/alerts) |
+| **Control room** | Hotspots, freshness of every reading, streets that need a new report, CSV and GeoJSON export | [/control/demo](https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run/control/demo) |
+| **Critical sites** | Data centres, hospitals, telephone exchanges: water at 300 m and 1 km, tanker and staff access routes, site alerts, flood record for siting | [/sites](https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run/sites) |
+| **Signed results** | Ed25519 certificate over the photo hash, models, prompts, every step and number; replayable offline | /verify |
+| **Developer API and MCP** | Keyed API for fleets and apps; an MCP server so any AI assistant can ask for depth, routes and site status | [/developers](https://applemacbook6sep2004--neermattam-web-web-serve.us-east.modal.run/developers), [mcp/](mcp/README.md) |
+| **Eight languages** | English, Tamil, Hindi, Telugu, Kannada, Malayalam, Bengali, Marathi on every page | everywhere |
+
+<table>
+<tr>
+<td width="50%"><img src="docs/img/route-replay.jpg" alt="A two-wheeler routed around flooded hexagons in a labelled replay of Cyclone Michaung"><br><sub>Routes by vehicle, shown on the labelled replay of Cyclone Michaung (simulated).</sub></td>
+<td width="50%"><img src="docs/img/landing-critical-sites.jpg" alt="Critical sites: water watch and access routes for a data centre"><br><sub>Critical sites: water watch and tanker access for a Chennai data centre.</sub></td>
+</tr>
+</table>
+
+## Architecture
+
+![Architecture: photo, voice or API into the Go gateway, the Python perception agent with Muse Spark Open and SAM 2.1, the Rust fusion and routing engine, and six outputs](docs/img/architecture.png)
+
+**Why three languages, each for one job:**
+
+* **Rust, the engine** (about 15,000 lines, 139 tests). Fusion and routing sit on the hot path of every map tile and route, so they are written for speed and memory safety. H3 hexagons about 66 m across, a per-cell Kalman filter that never assumes water drains away, hazard rating with uncertainty, and vehicle-aware routing on seven OpenStreetMap city graphs (9.5 million directed edges, loaded in parallel). Fusing one reading takes about 1 µs; a 3.5 km car route takes 0.28 ms on a dry map.
+* **Go, the gateway** (standard library only, 189 test functions). One small static binary serves every page server-side in eight languages, checks uploads, scores trust, streams the live map, runs alerts and the control room, signs and verifies certificates, and serves the developer API. No frontend framework, no Node toolchain.
+* **Python, the perception agent** (336 test functions across perception and MCP). This is where the models live: Muse Spark Open and SAM 2.1 in a verify-and-refine loop, the wheel and person geometry, the safety guards and the Ed25519 certificates, plus the MCP server.
+
+One Modal container runs all three behind a Go launcher with a model budget guard and a daily measurement cap. Contracts between services are written first in [docs/CONTRACTS.md](docs/CONTRACTS.md).
 
 ## What happens to one photo
 
