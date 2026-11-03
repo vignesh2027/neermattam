@@ -463,12 +463,13 @@
             <li><span class="lp-sf-ic">{{template "icon-code"}}</span><h3>{{t "lp3.s5"}}</h3><p>{{t "lp3.s5_p"}}</p></li>
             <li class="lp-sf-count"><span class="lp-sf-ic">{{template "icon-server"}}</span><h3>{{t "lp3.s6"}}</h3>
               <p class="lp-sf-nums"><span><b data-count>15</b>{{t "lp3.s_dc"}}</span><span><b data-count>842</b>{{t "lp3.s_hosp"}}</span><span><b data-count>5</b>{{t "lp3.s_tel"}}</span></p>
-              <p>{{t "lp3.s_in"}}. {{t "lp3.s6_p"}}</p></li>
+              <p class="lp-sf-in">{{t "lp3.s_in"}}</p>
+              <p>{{t "lp3.s6_p"}}</p></li>
           </ul>
         </div>
         <figure class="lp-sites-shot">
           <div class="lp-shot-bar"><span class="lp-shot-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="lp-shot-url">/sites</span><span class="chip chip-ok">{{t "lp3.s_shot_k"}}</span></div>
-          <img src="{{asset "showcase/sites-nxtra.webp"}}" width="900" height="1269" alt="{{t "lp3.s_shot_alt"}}" loading="lazy" decoding="async">
+          <img src="{{asset "showcase/sites-nxtra.webp"}}" width="900" height="1269" alt="{{t "lp3.s_shot_alt"}}" fetchpriority="low" decoding="async">
           <figcaption>{{t "lp3.s_shot_cap"}}</figcaption>
         </figure>
       </div>
@@ -763,9 +764,14 @@
   if (!window.IntersectionObserver || !window.matchMedia || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   document.documentElement.classList.add("lp-motion");
   var sel = ".lp-sec .lp-head, .lp-stats > li, .lp-eco, .lp-eco-list > li, .lp-gap, .lp-flow > li, .lp-feat-grid > li, .lp-arch-col, .lp-samples > li, .lp-cmp-wrap, .lp-uniq > li, .lp-use > li, .lp-sites-fig, .lp-sfeat > li, .lp-sites-shot, .lp-models > *, .lp-open, .lp-steps > li, .lp-price, .lp-next-list > li, .lp-beyond-card, .lp-city-grid > li, .lp-num-grid > li, .lp-built-card, .lp-end-inner";
+  var seen = false;
   var io = new IntersectionObserver(function (es) {
+    seen = true;
     es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
   }, { rootMargin: "0px 0px -6% 0px", threshold: 0.06 });
+  /* Where the observer never reports (no rendering frames, as in some
+     headless tools  , show everything rather than leave it hidden. */
+  setTimeout(function () { if (!seen) document.documentElement.classList.remove("lp-motion"); }, 1500);
   Array.prototype.forEach.call(document.querySelectorAll(sel), function (el) {
     var i = Array.prototype.indexOf.call(el.parentNode.children, el);
     el.style.setProperty("--rv-d", (Math.min(i, 5) * 70) + "ms");

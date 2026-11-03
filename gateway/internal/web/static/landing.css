@@ -736,3 +736,4 @@ html.lp-motion .rv.in { opacity: 1; translate: none; }
 }
 body:not(.lang-en) .lp-arch-k, body:not(.lang-en) .lp-price-table thead th, body:not(.lang-en) .lp-price-table td::before { letter-spacing: .02em; text-transform: none; }
 .lp-feat-grid > li.is-wide { grid-column: 1 / -1; }
+.lp-sfeat .lp-sf-in { margin-top: 4px; font-size: 12.5px; font-weight: 700; color: var(--primary-deep); }
