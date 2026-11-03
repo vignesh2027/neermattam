@@ -1,0 +1,25 @@
+[project]
+name = "neermattam-mcp"
+version = "0.1.0"
+description = "MCP server for Neermattam: street flood depth, water-aware routes and critical sites"
+readme = "README.md"
+authors = [
+    { name = "vigneshwar", email = "applemacbook6sep2004@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28.1",
+    "mcp>=2.3,<3",
+]
+
+[project.scripts]
+neermattam-mcp = "neermattam_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

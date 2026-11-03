@@ -219,6 +219,10 @@ Checked against the running gateway: no key 401, a made-up key 401, a 6-a-minute
 |---|---|
 | ![Developer API page](img/gateway-developers.png) | ![Developer API page on a phone](img/gateway-developers-mobile.png) |
 
+## MCP server
+
+The folder `mcp/` holds a Model Context Protocol server over this API, for AI agents and assistants. Its tools map onto the endpoints above: `list_cities` reads `/api/india`; `water_depth_near` reads `/api/cells` (or `/api/v1/cells`) for a box around a point and keeps the cells within the radius; `safe_route` reads `/api/route` (or `/api/v1/route`); `site_status` reads `/api/sites/{id}` (or `/api/v1/sites/{id}`); `list_sites` reads `/api/v1/sites` and needs a key; `measure_photo` posts to `/api/report`; `verify_certificate` reads `/api/certificates/{id}` and its `X-Neermattam-Verified` header. The API key, when set, is sent only to `/api/v1/*`. Install, client configuration, real output and limits: [mcp/README.md](../mcp/README.md).
+
 ## Measurement certificates
 
 Perception signs a certificate of every photo measurement (CONTRACTS.md 1.2): the photo's SHA-256, the models and prompt versions, each step and decision, the geometry numbers and the result, as canonical JSON signed with Ed25519. Package `internal/certs` keeps and checks them with the standard library (`crypto/ed25519`); the design, the replay tool and the eval gate are in docs/VERIFY.md.
