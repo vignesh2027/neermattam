@@ -1,6 +1,6 @@
 # Neermattam
 
-**A live flood depth map and safe vehicle routing for Indian cities. Two Meta open models check each other to turn citizens' phone photos into measured depths, a Rust engine fuses them street by street, and every vehicle is routed around water it cannot cross.**
+**Street-level flood depth from one phone photo, measured with a wheel or a person as the ruler, fused into a live map that routes each kind of vehicle around water it cannot cross.**
 
 ![Neermattam landing page: the headline "How deep is the water on your street?", links to every part of the system, and a recorded run of a flooded Chennai street measured at 46 cm plus or minus 13 against a person in the water, with Muse Spark Open's verdicts on each outline](docs/img/gateway-home.png)
 
