@@ -24,7 +24,10 @@ water-aware routes per vehicle. Rules for anything you tell a person from these 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
 
 
-def build_server(gw: Gateway | None = None) -> MCPServer:
+def build_server(gw: Gateway | None = None, allow_local_files: bool = True) -> MCPServer:
+    """allow_local_files lets measure_photo read a path on this machine. It is
+    on for stdio, where the client is the local user, and off for HTTP, where
+    any caller could otherwise upload this machine's files."""
     gateway = gw
     mcp = MCPServer(name="neermattam", title="Neermattam flood depth", instructions=INSTRUCTIONS, version="0.1.0")
 
@@ -98,7 +101,7 @@ def build_server(gw: Gateway | None = None) -> MCPServer:
         depth with sigma, how it was obtained (measured or a labelled model estimate) and a link to its
         signed certificate. A usable real report is added to the live public map, so send only genuine
         photos of that place. The live demo has a daily cap; when it is reached nothing is measured."""
-        return await tools.measure_photo(g(), source, lat, lon, city, hint_reference)
+        return await tools.measure_photo(g(), source, lat, lon, city, hint_reference, allow_local_files)
 
     @mcp.tool(annotations=READ_ONLY)
     async def verify_certificate(

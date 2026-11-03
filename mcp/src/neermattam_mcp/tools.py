@@ -458,7 +458,7 @@ async def site_status(gw: Gateway, site_id: str, include_route_points: bool = Fa
 # --------------------------------------------------------------- measure_photo
 
 
-async def _load_media(source: str) -> tuple[str, bytes, str]:
+async def _load_media(source: str, allow_local_files: bool = True) -> tuple[str, bytes, str]:
     if source.startswith(("http://", "https://")):
         try:
             async with httpx.AsyncClient(timeout=60, follow_redirects=True) as c:
@@ -474,6 +474,8 @@ async def _load_media(source: str) -> tuple[str, bytes, str]:
             raise ToolError(f"Could not download the photo: {e.__class__.__name__}.") from e
         name = os.path.basename(httpx.URL(source).path) or "photo.jpg"
         return name, bytes(data), ctype or (mimetypes.guess_type(name)[0] or "application/octet-stream")
+    if not allow_local_files:
+        raise ToolError("This server runs over HTTP, so it reads photos only from http(s) URLs, never from its own disk.")
     path = os.path.expanduser(source)
     if not os.path.isfile(path):
         raise ToolError(f"No file at {source}.")
@@ -500,9 +502,10 @@ async def measure_photo(
     lon: float,
     city: str | None = None,
     hint_reference: str | None = None,
+    allow_local_files: bool = True,
 ) -> dict[str, Any]:
     _check_lat_lon(lat, lon)
-    name, data, ctype = await _load_media(source)
+    name, data, ctype = await _load_media(source, allow_local_files)
     field = _field_for(name, ctype)
     form = {"lat": f"{lat:.6f}", "lon": f"{lon:.6f}"}
     if city:

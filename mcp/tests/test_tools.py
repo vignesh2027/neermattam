@@ -323,6 +323,11 @@ async def test_measure_photo_bad_inputs(tmp_path):
         await tools.measure_photo(gateway({}), str(tmp_path / "missing.jpg"), 13.04, 80.23)
 
 
+async def test_measure_photo_http_mode_never_reads_local_files(photo):
+    with pytest.raises(ToolError, match="never from its own disk"):
+        await tools.measure_photo(gateway({}), photo, 13.04, 80.23, allow_local_files=False)
+
+
 # ---------------------------------------------------------- verify_certificate
 
 def cert(verified: str) -> tuple:

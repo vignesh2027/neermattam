@@ -18,7 +18,7 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
-    server = build_server()
+    server = build_server(allow_local_files=args.transport == "stdio")
     if args.transport == "stdio":
         server.run("stdio")
     else:

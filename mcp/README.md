@@ -177,7 +177,7 @@ At the time of the run no city had a real report in the last 24 hours, so every 
 ## Tests
 
 ```sh
-uv run pytest                        # 28 tests, mocked gateway, no network
+uv run pytest                        # 29 tests, mocked gateway, no network
 uv run python scripts/live_smoke.py  # live, not run in CI
 ```
 
@@ -190,4 +190,4 @@ The tests mock the gateway with `httpx.MockTransport` and cover every tool and i
 * `list_sites` and operator sites need a developer key; the gateway does not serve site lists publicly.
 * No truck routes between arbitrary points; the public route API does not take `truck`.
 * `verify_certificate` reports the gateway's signature check. It does not check the Ed25519 signature itself; `python -m neermattam_perception.replay` does that offline (docs/VERIFY.md).
-* The streamable HTTP transport has no authentication of its own; run it on localhost or behind your own proxy.
+* The streamable HTTP transport has no authentication of its own; run it on localhost or behind your own proxy. Over HTTP, `measure_photo` takes only URLs and never reads the server's own disk.
